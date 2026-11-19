@@ -231,9 +231,9 @@ async function handleTelegram(env, update) {
     if (data === "menu:utama") { await tampilkanMenuUtama(env, cb.from.id, cb.from, cb.message?.message_id); return; }
     if (data === "menu:beli") { await tampilkanDaftarServer(env, cb.from.id, "beli", 0, cb.message?.message_id); return; }
     if (data === "menu:trial") { await tampilkanDaftarServer(env, cb.from.id, "trial", 0, cb.message?.message_id); return; }
-    if (data === "menu:status") { await tampilkanStatus(env, cb.from.id); return; }
-    if (data === "menu:akun") { await tampilkanAkun(env, cb.from.id); return; }
-    if (data === "menu:semua") { await tampilkanSemuaAkun(env, cb.from.id); return; }
+    if (data === "menu:status") { await tampilkanStatus(env, cb.from.id, cb.message?.message_id); return; }
+    if (data === "menu:akun") { await tampilkanAkun(env, cb.from.id, cb.message?.message_id); return; }
+    if (data === "menu:semua") { await tampilkanSemuaAkun(env, cb.from.id, cb.message?.message_id); return; }
     if (data.startsWith("srvpage:")) { await tampilkanDaftarServer(env, cb.from.id, "beli", parseInt(data.slice(8), 10) || 0, cb.message?.message_id); return; }
     if (data.startsWith("trypage:")) { await tampilkanDaftarServer(env, cb.from.id, "trial", parseInt(data.slice(8), 10) || 0, cb.message?.message_id); return; }
     if (data.startsWith("server:")) {
@@ -667,15 +667,19 @@ async function tampilkanProtokol(env, chatId) {
   await sendTelegram(env, chatId, "Pilih protokolnya:", tombol);
 }
 
-async function tampilkanStatus(env, chatId) {
+async function tampilkanStatus(env, chatId, messageId) {
   const order = await orderTerakhir(env, chatId);
-  await sendTelegram(env, chatId, order
+  const teks = order
     ? "Order " + order.id + ": " + order.status +
       (order.status === "menunggu bayar"
         ? "\nBayar Rp" + order.nominalUnik.toLocaleString("id-ID") +
           " ke QRIS DANA Bisnis (gambar QR sudah dikirim bersama order)."
         : "")
-    : "Belum ada order dari kamu.");
+    : "Belum ada order dari kamu.";
+  // Dari tombol menu: ubah pesan menu jadi status (ada tombol kembali).
+  // Dari perintah teks (/status): kirim pesan baru seperti biasa.
+  if (messageId) await editHtml(env, chatId, messageId, escapeHtml(teks), [[{ text: "🔙 Kembali ke Menu", callback_data: "menu:utama" }]]);
+  else await sendTelegram(env, chatId, teks);
 }
 
 // ---- Kelola akun (tombol di bawah config / di /akun) ----
@@ -786,7 +790,7 @@ async function tampilkanTrialServer(env, chatId, halaman, messageId) {
 // Hanya order yang dibuat lewat bot; akun trial TIDAK tercatat di sini
 // (trial langsung dibuat tanpa order), dan akun yang dibuat manual di
 // dashboard penyedia juga tidak ada di sini — cek Layanan Aktif.
-async function tampilkanSemuaAkun(env, chatId) {
+async function tampilkanSemuaAkun(env, chatId, messageId) {
   if (String(chatId) !== String(env.ADMIN_CHAT_ID)) return;
   const list = await env.ORDERS.list({ prefix: "ORD-" });
   const orders = [];
@@ -794,7 +798,12 @@ async function tampilkanSemuaAkun(env, chatId) {
     const o = await env.ORDERS.get(key.name, "json").catch(() => null);
     if (o) orders.push(o);
   }
-  if (!orders.length) { await sendTelegram(env, chatId, "Belum ada order lewat bot."); return; }
+  const tombolKembali = [[{ text: "🔙 Kembali ke Menu", callback_data: "menu:utama" }]];
+  if (!orders.length) {
+    if (messageId) await editHtml(env, chatId, messageId, escapeHtml("Belum ada order lewat bot."), tombolKembali);
+    else await sendTelegram(env, chatId, "Belum ada order lewat bot.");
+    return;
+  }
   orders.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   const total = orders.length;
   const tampil = orders.slice(0, 30);
@@ -813,8 +822,13 @@ async function tampilkanSemuaAkun(env, chatId) {
   let teks = "📋 Semua order lewat bot (" + total + "):\n\n" + baris.join("\n\n");
   if (total > 30) teks += "\n\nMenampilkan 30 terbaru dari " + total + " order.";
   // Kirim per potongan supaya tidak kepotong limit Telegram.
+  // Potongan pertama menggantikan pesan menu (kalau dari tombol),
+  // tombol kembali ada di potongan terakhir.
   for (let i = 0; i < teks.length; i += 3500) {
-    await sendTelegram(env, chatId, teks.slice(i, i + 3500));
+    const potong = teks.slice(i, i + 3500);
+    const terakhir = i + 3500 >= teks.length;
+    if (messageId && i === 0) await editHtml(env, chatId, messageId, escapeHtml(potong), terakhir ? tombolKembali : []);
+    else await sendTelegram(env, chatId, potong, terakhir ? tombolKembali : undefined);
   }
 }
 
@@ -848,16 +862,25 @@ async function kirimBroadcast(env, chatId, teks) {
   await sendTelegram(env, chatId, "📣 Broadcast selesai: terkirim ke " + ok + " pembeli" + (gagal ? ", gagal ke " + gagal + " (kemungkinan blokir bot)." : "."));
 }
 
-async function tampilkanAkun(env, chatId) {
+async function tampilkanAkun(env, chatId, messageId) {
   const daftar = await daftarAkunUser(env, chatId);
-  if (!daftar.length) { await sendTelegram(env, chatId, "Kamu belum punya akun aktif di bot ini. Ketik /beli untuk pesan, atau /trial untuk coba gratis."); return; }
-  for (const o of daftar) {
-    await sendTelegram(env, chatId,
+  if (!daftar.length) {
+    const teks = "Kamu belum punya akun aktif di bot ini. Ketik /beli untuk pesan, atau /trial untuk coba gratis.";
+    if (messageId) await editHtml(env, chatId, messageId, escapeHtml(teks), [[{ text: "🔙 Kembali ke Menu", callback_data: "menu:utama" }]]);
+    else await sendTelegram(env, chatId, teks);
+    return;
+  }
+  for (let i = 0; i < daftar.length; i++) {
+    const o = daftar[i];
+    const teks =
       "Akun: " + (o.username || "?") + "\n" +
       "Paket: " + (o.namaPaket || "?") + " — " + (o.protocol || "?").toUpperCase() + "\n" +
       "Server: " + (o.serverNama || o.server || "?") + "\n" +
-      "Order: " + o.id,
-      tombolKelola(o.id));
+      "Order: " + o.id;
+    const tombol = tombolKelola(o.id);
+    if (i === daftar.length - 1) tombol.push([{ text: "🔙 Kembali ke Menu", callback_data: "menu:utama" }]);
+    if (messageId && i === 0) await editHtml(env, chatId, messageId, escapeHtml(teks), tombol);
+    else await sendTelegram(env, chatId, teks, tombol);
   }
 }
 
