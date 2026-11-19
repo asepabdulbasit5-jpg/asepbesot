@@ -879,6 +879,8 @@ async function buatRenewOrder(env, chatId, target, kodePaket) {
     accountId: target.accountId, username: target.username,
     paket: paket.kode, namaPaket: paket.nama,
     protocol: target.protocol,
+    serverNama: target.serverNama || target.server || null,
+    server: target.server || null,
     harga: paket.harga, nominalUnik, status: "menunggu bayar",
     createdAt: Date.now(),
   };
@@ -943,6 +945,17 @@ async function tampilkanSemuaAkun(env, chatId, messageId) {
   orders.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   const total = orders.length;
   const tampil = orders.slice(0, 30);
+  // Order perpanjang tidak menyimpan nama server sendiri — ambil dari
+  // order asalnya supaya tidak tampil "?".
+  const perId = new Map(orders.map((o) => [o.id, o]));
+  const serverOrder = (o) => {
+    if (o.serverNama || o.server) return o.serverNama || o.server;
+    if (o.kind === "renew" && o.targetOrderId) {
+      const asal = perId.get(o.targetOrderId);
+      if (asal) return asal.serverNama || asal.server || null;
+    }
+    return null;
+  };
   // Tombol konfirmasi untuk order yang masih menunggu bayar / gagal
   // (maks 10, terbaru dulu) — admin tinggal ketuk, tanpa ketik ID.
   const butuhKonfirmasi = tampil.filter((o) => o.status === "menunggu bayar" || o.status === "gagal").slice(0, 10);
@@ -955,7 +968,7 @@ async function tampilkanSemuaAkun(env, chatId, messageId) {
       (o.kind === "renew" ? " (perpanjang)" : "") +
       " — " + (o.pembeli || ("ID " + (o.chatId || "?"))) +
       "\n  " + (o.namaPaket || o.paket || "?") + " — " + (o.protocol || "?").toUpperCase() +
-      " — " + (o.serverNama || o.server || "?") +
+      " — " + (serverOrder(o) || "?") +
       "\n  " + status + " — Rp" + (o.nominalUnik || o.harga || 0).toLocaleString("id-ID") +
       " — " + tgl + " — " + o.id;
   });
