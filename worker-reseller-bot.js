@@ -110,8 +110,8 @@
 //   7 hari:  modal Rp1.869 -> jual Rp5.000  (untung Rp3.131)
 //   30 hari: modal Rp6.000 -> jual Rp10.000 (untung Rp4.000)
 // (Belum dikurangi fee order Nadia Rp200/order, kecuali harian di atas.)
-// Nominal unik 100-999 ditambahkan otomatis supaya nominal tiap
-// order beda (mis. 10.000 jadi 10.137).
+// Nominal unik 10-99 ditambahkan otomatis supaya nominal tiap
+// order beda (mis. 10.000 jadi 10.042).
 // Pemetaan ke Nadia: 1 hari = type "day", duration 1.
 //                    7 hari = type "week", duration 1.
 //                    30 hari = type "month", duration 1.
@@ -847,7 +847,7 @@ async function handleKelola(env, cb, data) {
 async function buatRenewOrder(env, chatId, target, kodePaket) {
   const paket = PAKET.find((p) => p.kode === kodePaket);
   if (!paket) return;
-  const kodeUnik = 100 + Math.floor(Math.random() * 900);
+  const kodeUnik = 10 + Math.floor(Math.random() * 90);
   const nominalUnik = paket.harga + kodeUnik;
   const orderId = "ORD-" + Date.now().toString(36).toUpperCase();
   const order = {
@@ -1024,8 +1024,10 @@ async function buatOrder(env, chatId, kodePaket, protocol, customUsername, serve
   // Username: pakai ketikan pembeli, kalau "-" / kosong diacak otomatis.
   const username = customUsername ||
     ("sdk" + Date.now().toString(36).toLowerCase() + Math.floor(Math.random() * 90 + 10)).slice(0, 20);
-  // Nominal unik: harga + kode 100-999 supaya tidak ketukar antar pembeli.
-  const kodeUnik = 100 + Math.floor(Math.random() * 900);
+  // Nominal unik: harga + kode 10-99 (maks +Rp99) supaya tidak
+  // ketukar antar pembeli — sengaja kecil biar tidak memberatkan
+  // pembeli, terutama paket 1 hari (19 Nov 2026).
+  const kodeUnik = 10 + Math.floor(Math.random() * 90);
   const nominalUnik = paket.harga + kodeUnik;
   const orderId = "ORD-" + Date.now().toString(36).toUpperCase();
   const order = {
