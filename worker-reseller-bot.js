@@ -734,7 +734,7 @@ function teksDaftarServer(daftar, live, judul, halaman, totalHalaman) {
       "\n" + GARIS_PANEL;
   });
   return judul + "\n" + GARIS_PANEL + "\n" + bagian.join("\n") +
-    "\nPage " + (halaman + 1) + "/" + totalHalaman + " displayed\n" + GARIS_PANEL + "\n-SANDEKALA-\n" + GARIS_PANEL;
+    "\nHalaman " + (halaman + 1) + "/" + totalHalaman + "\n" + GARIS_PANEL + "\n-SANDEKALA-\n" + GARIS_PANEL;
 }
 
 function tombolDaftarServer(daftar, live, mode, halaman, totalHalaman) {
@@ -779,14 +779,6 @@ async function tampilkanDaftarServer(env, chatId, mode, halaman, messageId) {
 
 async function tampilkanServer(env, chatId, halaman, messageId) {
   await tampilkanDaftarServer(env, chatId, "beli", halaman || 0, messageId || null);
-}
-
-// Langkah 2 beli: pilih protokol dulu.
-async function tampilkanProtokol(env, chatId) {
-  const tombol = PROTOKOL.map((p) => [
-    { text: p.nama, callback_data: "proto:" + p.kode },
-  ]);
-  await sendTelegram(env, chatId, "Pilih protokolnya:", tombol);
 }
 
 async function tampilkanStatus(env, chatId, messageId) {
