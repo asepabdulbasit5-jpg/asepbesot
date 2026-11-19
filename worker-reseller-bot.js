@@ -1164,7 +1164,10 @@ async function selesaikanOrder(env, orderId, order) {
 // untuk menu/daftar server (di sana <pre> dihapus atas permintaan
 // Asep 19 Nov 2026 karena tombol SALIN KODE mengganggu).
 async function kirimConfig(env, chatId, pembuka, config, penutup, keyboard, messageId) {
-  const html = escapeHtml(pembuka) + "\n\n<pre>" + escapeHtml(String(config || "")) + "</pre>" + (penutup ? "\n\n" + escapeHtml(penutup) : "");
+  // Pengaman terakhir: kalau config masih berupa object (parser luput),
+  // ubah dulu jadi teks — jangan sampai "[object Object]" kekirim lagi.
+  const teksConfig = typeof config === "string" ? config : ubahConfigJadiTeks(config);
+  const html = escapeHtml(pembuka) + "\n\n<pre>" + escapeHtml(teksConfig || "") + "</pre>" + (penutup ? "\n\n" + escapeHtml(penutup) : "");
   if (messageId) await editHtml(env, chatId, messageId, html, keyboard);
   else await sendHtml(env, chatId, html, keyboard);
 }
@@ -1251,13 +1254,13 @@ async function createResellerAccount(env, order) {
     const d = j.data || j;
     // account_id Nadia (UUID akun) — simpan untuk renew/migrate/
     // change-protocol/details. Letaknya bisa beda-beda, cari di
-    // beberapa tempat umum.
-    const accountId = d.account_id || d.accountId || d.id || d.uuid ||
-      d.account?.id || d.account?.account_id || null;
-    const config = d.config || d.link || d.vless || d.vmess || d.trojan || d.url ||
-      (d.username ? ("Username: " + d.username + (d.password ? "\nPassword: " + d.password : "") + (d.server ? "\nServer: " + d.server : "") + (d.port ? "\nPort: " + d.port : "")) : null) ||
-      JSON.stringify(d).slice(0, 1500);
-    return { ok: true, config: "Username: " + username + "\n" + config, accountId };
+    // beberapa tempat umum (termasuk di dalam `account` / `data`).
+    const accountId = cariAccountId(d);
+    const hasil = ambilConfigDariData(d);
+    // Tambah baris Username kalau hasil parse belum menyebutnya
+    // (mis. kalau config berupa link vless:// saja).
+    const config = hasil.includes("Username:") ? hasil : "Username: " + username + "\n" + hasil;
+    return { ok: true, config, accountId };
   } catch (e) {
     return { ok: false, error: "Tidak bisa hubungi API penyedia." };
   }
@@ -1286,10 +1289,79 @@ async function nadiaPost(env, path, body) {
   }
 }
 
+// Ubah nilai config apa pun (string / object) jadi teks yang bisa
+// dikirim ke pembeli. Nadia ternyata mengembalikan `config` sebagai
+// OBJECT (bukan string/link) — kalau object itu langsung ditempel ke
+// string, hasilnya "[object Object]" (kejadian 19 Nov 2026, order
+// ORD-MWNS0YGB: akun sudah jadi di web Nadia tapi config yang sampai
+// ke pembeli cuma "Username: testlagi\n[object Object]").
+function ubahConfigJadiTeks(x) {
+  if (typeof x === "string") return x;
+  if (x && typeof x === "object") {
+    // 1) Cari link config (vless://, vmess://, trojan://, ss://)
+    // atau isi field config/link — rekursif sampai 2 level ke dalam.
+    const cariLink = (o, dalam) => {
+      if (typeof o === "string") return /^(vless|vmess|trojan|ss):\/\//i.test(o) ? o : null;
+      if (!o || typeof o !== "object" || dalam > 2) return null;
+      for (const k of ["config", "link", "vless", "vmess", "trojan", "url", "ss"]) {
+        if (typeof o[k] === "string" && o[k]) return o[k];
+      }
+      for (const k of Object.keys(o)) {
+        const v = cariLink(o[k], dalam + 1);
+        if (v) return v;
+      }
+      return null;
+    };
+    const link = cariLink(x, 0);
+    if (link) return link;
+    // 2) Tidak ada link: susun baris-baris dari field yang dikenal.
+    const susunBaris = (o) => {
+      if (!o || typeof o !== "object") return [];
+      const ambil = (kunci) => {
+        for (const k of kunci) {
+          const v = o[k];
+          if (v !== undefined && v !== null && v !== "") return v;
+        }
+        return null;
+      };
+      const baris = [];
+      const cetak = (label, v) => { if (v !== null && v !== undefined && v !== "") baris.push(label + ": " + v); };
+      cetak("Username", ambil(["username", "user", "name"]));
+      cetak("Password", ambil(["password", "pass"]));
+      cetak("UUID", ambil(["uuid", "account_id", "accountId"]));
+      cetak("Server", ambil(["server", "host", "address", "ip"]));
+      cetak("Port", ambil(["port"]));
+      cetak("SNI", ambil(["sni", "server_name"]));
+      cetak("Path", ambil(["path"]));
+      cetak("Berlaku sampai", ambil(["expired_at", "expires_at", "expired", "expiry"]));
+      return baris;
+    };
+    let baris = susunBaris(x);
+    if (!baris.length && x.account && typeof x.account === "object") baris = susunBaris(x.account);
+    if (baris.length) return baris.join("\n");
+    // 3) Terakhir: JSON mentah supaya info tidak hilang.
+    return JSON.stringify(x).slice(0, 1500);
+  }
+  return String(x ?? "");
+}
+
 function ambilConfigDariData(d) {
-  return d.config || d.link || d.vless || d.vmess || d.trojan || d.url ||
-    (d.username ? ("Username: " + d.username + (d.password ? "\nPassword: " + d.password : "") + (d.server ? "\nServer: " + d.server : "") + (d.port ? "\nPort: " + d.port : "")) : null) ||
-    JSON.stringify(d).slice(0, 1500);
+  if (!d || typeof d !== "object") return String(d ?? "");
+  return ubahConfigJadiTeks(d.config || d.link || d.vless || d.vmess || d.trojan || d.url || d);
+}
+
+// Cari account_id Nadia — letaknya bisa di root, di dalam `account`,
+// atau di dalam `data` (respons tiap endpoint beda-beda).
+function cariAccountId(d) {
+  if (!d || typeof d !== "object") return null;
+  const langsung = d.account_id ?? d.accountId ?? d.id ?? d.uuid ?? null;
+  if (typeof langsung === "string" && langsung) return langsung;
+  if (typeof langsung === "number") return String(langsung);
+  for (const k of ["account", "data"]) {
+    const v = cariAccountId(d[k]);
+    if (v) return v;
+  }
+  return null;
 }
 
 // Perpanjang akun: POST /vpn/renew {account_id, type, duration}
@@ -1307,7 +1379,7 @@ async function trialNadiaAccount(env, serverId, protocol) {
   const r = await nadiaPost(env, "/vpn/trial", { server_id: serverId, protocol });
   if (!r.ok) return r;
   const d = r.data;
-  const accountId = d.account_id || d.accountId || d.id || d.uuid || null;
+  const accountId = cariAccountId(d);
   return { ok: true, config: ambilConfigDariData(d), accountId };
 }
 
