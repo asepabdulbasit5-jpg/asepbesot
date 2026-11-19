@@ -1223,13 +1223,13 @@ async function kirimConfig(env, chatId, pembuka, config, penutup, keyboard, mess
   // ubah dulu jadi teks — jangan sampai "[object Object]" kekirim lagi.
   const teksConfig = typeof config === "string" ? config : ubahConfigJadiTeks(config);
   let isi;
-  if (/^(vless|vmess|trojan|ss):\/\//im.test(teksConfig)) {
-    // Beberapa link: tiap link dapat blok <pre> sendiri supaya tombol
-    // SALIN KODE-nya per link; label, info akun & tanggal exp jadi
-    // teks biasa di antara blok-blok itu.
+  if (/^(vless|vmess|trojan|ss):\/\//im.test(teksConfig) || /^GET\s/m.test(teksConfig)) {
+    // Beberapa link/payload: tiap link & tiap baris payload dapat blok
+    // <pre> sendiri supaya tombol SALIN KODE-nya per item; label, info
+    // akun & tanggal exp jadi teks biasa di antara blok-blok itu.
     isi = teksConfig.split("\n").map((b) => {
       const t = b.trim();
-      if (/^(vless|vmess|trojan|ss):\/\//i.test(t)) return "<pre>" + escapeHtml(t) + "</pre>";
+      if (/^(vless|vmess|trojan|ss):\/\//i.test(t) || /^GET\s/i.test(t)) return "<pre>" + escapeHtml(t) + "</pre>";
       return t === "" ? "" : escapeHtml(b);
     }).join("\n").trim();
   } else {
@@ -1413,10 +1413,25 @@ function ubahConfigJadiTeks(x) {
       cetak("Username", ambil(["username", "user", "name"]));
       cetak("Password", ambil(["password", "pass"]));
       cetak("UUID", ambil(["uuid"]));
-      cetak("Server", ambil(["server", "host", "address", "ip"]));
+      const serverVal = ambil(["server", "host", "address", "ip"]);
+      cetak("Server", serverVal);
+      const domainVal = ambil(["domain", "hostname", "host_domain", "host"]);
+      if (domainVal && String(domainVal) !== String(serverVal)) cetak("Host / Domain", domainVal);
       cetak("Port", ambil(["port"]));
+      cetak("Squid Proxy", ambil(["squid", "proxy", "http_proxy", "squid_proxy"]));
+      cetak("HTTP Custom", ambil(["http_custom", "httpcustom"]));
+      cetak("OpenVPN", ambil(["ovpn", "openvpn", "ovpn_url", "openvpn_url", "config_url", "ovpn_config"]));
       cetak("Name Server", ambil(["nameserver", "name_server", "ns", "dns_server", "dns", "nameservers", "slowdns", "ns_server"]));
       cetak("Public Key", ambil(["public_key", "pubkey", "publickey"]));
+      const limitIp = ambil(["limit_ip", "ip_limit", "max_ip", "max_devices", "device_limit", "max_device", "devices", "limit"]);
+      const kuota = ambil(["quota", "kuota", "data_quota", "quota_limit", "limit_quota"]);
+      if (limitIp !== null && kuota !== null) {
+        baris.push("Limit IP & Kuota: " + limitIp + " Dev / " + (/unlimit/i.test(String(kuota)) ? "Unli" : String(kuota)));
+      } else if (limitIp !== null) {
+        baris.push("Limit Device: " + limitIp + " IP");
+      } else if (kuota !== null) {
+        baris.push("Kuota: " + (/unlimit/i.test(String(kuota)) ? "Unli" : String(kuota)));
+      }
       cetak("SNI", ambil(["sni", "server_name"]));
       cetak("Path", ambil(["path"]));
       const expRaw = ambil(["expired_at", "expires_at", "expired", "expiry"]);
@@ -1519,7 +1534,14 @@ function parseTanggal(v) {
   if (v instanceof Date) return v;
   if (typeof v === "number") return new Date(v < 1e12 ? v * 1000 : v);
   if (typeof v === "string") {
-    const d = new Date(v.trim().replace(" ", "T"));
+    const t = v.trim();
+    // Tanpa info zona waktu (mis. "2026-11-21 23:42:00") — API Nadia
+    // mengembalikan jam WIB; anggap WIB (UTC+7), bukan UTC.
+    const m = t.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/);
+    if (m) {
+      return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4] - 7, +m[5], +(m[6] || 0)));
+    }
+    const d = new Date(t.replace(" ", "T"));
     if (!isNaN(d)) return d;
   }
   return null;
@@ -1575,9 +1597,13 @@ function susunInfoAkun(d, links) {
   cetak("Lokasi", cariField(d, ["location", "lokasi", "city", "kota"]));
   const limitIp = cariField(d, ["limit_ip", "ip_limit", "max_ip", "max_devices", "device_limit", "max_device", "devices", "limit"]);
   const kuota = cariField(d, ["quota", "kuota", "data_quota", "quota_limit", "limit_quota"]);
-  if (limitIp !== null || kuota !== null) {
-    const k = kuota === null ? "?" : (/unlimit/i.test(String(kuota)) ? "Unli" : String(kuota));
-    baris.push("Limit IP & Kuota: " + (limitIp !== null ? limitIp + " Dev" : "?") + " / " + k);
+  if (limitIp !== null && kuota !== null) {
+    const k = /unlimit/i.test(String(kuota)) ? "Unli" : String(kuota);
+    baris.push("Limit IP & Kuota: " + limitIp + " Dev / " + k);
+  } else if (limitIp !== null) {
+    baris.push("Limit Device: " + limitIp + " IP");
+  } else if (kuota !== null) {
+    baris.push("Kuota: " + (/unlimit/i.test(String(kuota)) ? "Unli" : String(kuota)));
   }
   const exp = cariExpired(d);
   if (exp) {
@@ -1633,6 +1659,13 @@ function ambilConfigDariData(d) {
     teks = info ? info + "\n\n" + daftar : daftar;
   } else {
     teks = ubahConfigJadiTeks(d.config || d.link || d.vless || d.vmess || d.trojan || d.url || d);
+    // SSH: template payload WebSocket (HTTP Custom) ala web Nadia —
+    // host diisi dari domain akun ini; kalau domain tidak diketahui,
+    // payload tidak ditampilkan (jangan ditebak).
+    const domainPayload = cariField(d, ["domain", "hostname", "host_domain", "host"]);
+    if (d.password && typeof d.password === "string" && domainPayload && !teks.includes("Payload")) {
+      teks += "\n\nPayload WebSocket (HTTP Custom):\n— TLS —\nGET /worryfree/ssh HTTP/1.1[crlf]Host: " + domainPayload + "[crlf]Upgrade: websocket[crlf][crlf]\n— NON-TLS —\nGET /worryfree/ssh HTTP/1.1[crlf]Host: " + domainPayload + "[crlf]Upgrade: websocket[crlf][crlf]\n— CDN —\nGET / HTTP/1.1[crlf]Host: [host_port][crlf]User-Agent: [ua][crlf]Upgrade: websocket[crlf][crlf]\n— WITH PATH —\nGET /worryfree/ssh HTTP/1.1[crlf]Host: BUG[crlf]User-Agent: [ua][crlf]Upgrade: websocket[crlf][crlf]";
+    }
   }
   const exp = cariExpired(d);
   if (exp && !teks.includes("Berlaku sampai")) {
