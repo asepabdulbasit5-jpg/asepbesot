@@ -289,6 +289,7 @@ async function handleTelegram(env, update) {
     if (data === "menu:status") { await tampilkanStatus(env, cb.from.id, cb.message?.message_id); return; }
     if (data === "menu:akun") { await tampilkanAkun(env, cb.from.id, cb.message?.message_id); return; }
     if (data === "menu:semua") { await tampilkanSemuaAkun(env, cb.from.id, cb.message?.message_id); return; }
+    if (data === "menu:ceknadia") { await tampilkanCekNadia(env, cb.from.id, cb.message?.message_id); return; }
     if (data === "menu:toko") {
       if (!adalahAdmin(env, cb.from.id)) return;
       const buka = await tokoBuka(env);
@@ -528,6 +529,11 @@ async function handleTelegram(env, update) {
     return;
   }
 
+  if (text === "/ceknadia") {
+    await tampilkanCekNadia(env, chatId);
+    return;
+  }
+
   if (text.startsWith("/broadcast")) {
     await kirimBroadcast(env, chatId, text.slice("/broadcast".length));
     return;
@@ -576,10 +582,11 @@ async function handleTelegram(env, update) {
 // Live: GET {RESELLER_API_URL}/servers (Bearer sama) — cocokkan per
 // server_id, baca used/limit/is_full. Kalau gagal (API mati dsb.),
 // pakai used/limit snapshot 19 Nov 2026 di daftar SERVERS di atas.
-async function ambilStatusServerLive(env) {
-  // Return: { map, debug } — map: serverId -> {used, limit, penuh}.
-  // debug: string pendek soal kenapa gagal (untuk admin saja).
-  const fail = (debug) => ({ map: null, debug });
+// Ambil daftar server mentah dari API penyedia (GET /servers).
+// Return: { list, debug } — list: array objek server apa adanya
+// (null kalau gagal), debug: alasan gagal (untuk admin saja).
+async function ambilDaftarServerLive(env) {
+  const fail = (debug) => ({ list: null, debug });
   try {
     const base = (env.RESELLER_API_URL || "https://www.nadiavpn.web.id/api/v1").replace(/\/$/, "");
     if (!env.RESELLER_API_KEY) return fail("RESELLER_API_KEY kosong");
@@ -604,24 +611,33 @@ async function ambilStatusServerLive(env) {
     };
     cari(j, 0);
     if (!arr) return fail("tidak ada array server di balasan: " + teks.slice(0, 120));
-    const map = {};
-    for (const x of arr) {
-      const id = x.server_id || x.id || x.uuid;
-      if (!id) continue;
-      const ambilAngka = (...kunci) => {
-        for (const k of kunci) if (typeof x[k] === "number") return x[k];
-        return null;
-      };
-      const used = ambilAngka("used", "used_count", "user_count", "users", "active_users", "total_users", "count", "occupied", "terpakai");
-      const limit = ambilAngka("limit", "max", "max_users", "max_user", "capacity", "total", "slots", "quota", "limit_user");
-      map[id] = {
-        used, limit,
-        penuh: !!(x.is_full || x.full || x.penuh || x.isFull),
-      };
-    }
-    return { map, debug: "" };
+    return { list: arr, debug: "" };
   } catch (e) { return fail("fetch error: " + String(e && e.message || e).slice(0, 120)); }
 }
+
+// Status slot live per server — dipakai daftar server & menu.
+// Return: { map, debug } — map: serverId -> {used, limit, penuh}.
+async function ambilStatusServerLive(env) {
+  const { list, debug } = await ambilDaftarServerLive(env);
+  if (!list) return { map: null, debug };
+  const map = {};
+  for (const x of list) {
+    const id = x.server_id || x.id || x.uuid;
+    if (!id) continue;
+    const ambilAngka = (...kunci) => {
+      for (const k of kunci) if (typeof x[k] === "number") return x[k];
+      return null;
+    };
+    const used = ambilAngka("used", "used_count", "user_count", "users", "active_users", "total_users", "count", "occupied", "terpakai");
+    const limit = ambilAngka("limit", "max", "max_users", "max_user", "capacity", "total", "slots", "quota", "limit_user");
+    map[id] = {
+      used, limit,
+      penuh: !!(x.is_full || x.full || x.penuh || x.isFull),
+    };
+  }
+  return { map, debug: "" };
+}
+
 function statusServer(s, live) {
   const l = live && live.map ? live.map[s.serverId] : null;
   const used = l?.used ?? s.used ?? null;
@@ -691,7 +707,7 @@ async function tampilkanMenuUtama(env, chatId, from, messageId) {
     "TOTAL VPN: " + daftar.length + " AKUN"];
   if (saldo !== null) baris.push("SALDO VPN: Rp" + saldo.toLocaleString("id-ID"));
   baris.push(GARIS_PANEL, "SERVER TERSEDIA: " + tersedia + " / " + SERVERS.length + " SERVERS", "TOKO: " + (buka ? "🟢 BUKA" : "🔴 TUTUP"), GARIS_PANEL, "OWNER: @Asepbesot", GARIS_PANEL);
-  if (isAdmin) baris.push("ADMIN: /semuaakun • /broadcast PESAN • /konfirmasi ORDER_ID • /buka • /tutup", GARIS_PANEL);
+  if (isAdmin) baris.push("ADMIN: /semuaakun • /broadcast PESAN • /konfirmasi ORDER_ID • /buka • /tutup • /ceknadia", GARIS_PANEL);
   const html = baris.map((x) => (x === "MENU UTAMA" || x === "INFORMASI PELANGGAN") ? "<b>" + escapeHtml(x) + "</b>" : (x === "OWNER: @Asepbesot" ? 'OWNER: <a href="https://t.me/Asepbesot">@Asepbesot</a>' : escapeHtml(x))).join("\n");
   const tombol = [
     [{ text: "🛒 Beli VPN", callback_data: "menu:beli" }],
@@ -699,6 +715,7 @@ async function tampilkanMenuUtama(env, chatId, from, messageId) {
     [{ text: "👤 Akun Saya", callback_data: "menu:akun" }],
   ];
   if (isAdmin) tombol.push([{ text: "📋 Semua Akun", callback_data: "menu:semua" }]);
+  if (isAdmin) tombol.push([{ text: "🔍 Cek Nadia", callback_data: "menu:ceknadia" }]);
   if (isAdmin) tombol.push([{ text: buka ? "🔴 Tutup Toko" : "🟢 Buka Toko", callback_data: "menu:toko" }]);
   if (messageId) { await editHtml(env, chatId, messageId, html, tombol); return; }
   // Kirim menu + hapus keyboard bawah lama supaya tampilannya seperti
@@ -941,6 +958,68 @@ async function bersihkanOrderKedaluarsa(env) {
     }
   }
   return dihapus;
+}
+
+// /ceknadia (admin saja): bandingkan daftar server live dari
+// penyedia dengan daftar di bot. Lapor server baru, server hilang,
+// nama berubah, protokol berubah. Harga modal TIDAK bisa dicek lewat
+// API — harus manual di dashboard penyedia.
+async function tampilkanCekNadia(env, chatId, messageId) {
+  if (!adalahAdmin(env, chatId)) return;
+  const kirim = async (teks) => {
+    if (messageId) await editHtml(env, chatId, messageId, escapeHtml(teks), [[{ text: "🔙 Kembali ke Menu", callback_data: "menu:utama" }]]);
+    else await sendTelegram(env, chatId, teks);
+  };
+  const { list, debug } = await ambilDaftarServerLive(env);
+  if (!list) { await kirim("❌ Gagal ambil daftar server dari penyedia: " + debug); return; }
+  const liveById = new Map();
+  for (const x of list) {
+    const id = x.server_id || x.id || x.uuid;
+    if (id) liveById.set(String(id), x);
+  }
+  const namaLive = (x) => String(x.name || x.nama || x.server_name || x.domain || "?").trim();
+  const protoLive = (x) => {
+    const p = x.protocols || x.protocol || x.supported_protocols || [];
+    if (typeof p === "string") return p.split(",").map((v) => v.trim().toLowerCase()).filter(Boolean);
+    if (Array.isArray(p)) return p.map((v) => String(v).toLowerCase());
+    return [];
+  };
+  const baru = [], hilang = [], gantiNama = [], gantiProto = [];
+  for (const [id, x] of liveById) {
+    const b = SERVERS.find((s) => String(s.serverId) === id);
+    if (!b) { baru.push(x); continue; }
+    const namaBot = b.nama.replace(" — PENUH", "").trim();
+    if (namaLive(x) !== "?" && namaLive(x) !== namaBot) gantiNama.push({ bot: b, live: namaLive(x) });
+    const pl = protoLive(x).slice().sort().join(",");
+    const pb = (b.protocols || []).slice().sort().join(",");
+    if (pl && pl !== pb) gantiProto.push({ bot: b, live: protoLive(x) });
+  }
+  for (const s of SERVERS) {
+    if (!liveById.has(String(s.serverId))) hilang.push(s);
+  }
+  const baris = ["🔍 Cek Nadia — daftar server live vs bot", "Live: " + liveById.size + " server • Bot: " + SERVERS.length + " server", ""];
+  if (!baru.length && !hilang.length && !gantiNama.length && !gantiProto.length) {
+    baris.push("✅ Semua sama — tidak ada perubahan.");
+  } else {
+    if (baru.length) {
+      baris.push("🆕 BARU di Nadia (belum ada di bot):");
+      for (const x of baru) baris.push("• " + namaLive(x) + " — protokol: " + (protoLive(x).join(", ") || "?") + " — ID: " + (x.server_id || x.id || "?"));
+    }
+    if (hilang.length) {
+      baris.push("🗑️ HILANG dari Nadia (masih ada di bot):");
+      for (const s of hilang) baris.push("• " + s.nama);
+    }
+    if (gantiNama.length) {
+      baris.push("✏️ NAMA BERUBAH:");
+      for (const g of gantiNama) baris.push("• Bot: " + g.bot.nama + " → Nadia: " + g.live);
+    }
+    if (gantiProto.length) {
+      baris.push("🔀 PROTOKOL BERUBAH:");
+      for (const g of gantiProto) baris.push("• " + g.bot.nama + ": bot [" + (g.bot.protocols || []).join(", ") + "] → Nadia [" + g.live.join(", ") + "]");
+    }
+  }
+  baris.push("", "Catatan: harga modal tidak bisa dicek lewat API — cek manual di dashboard Nadia.");
+  await kirim(baris.join("\n"));
 }
 
 async function tampilkanSemuaAkun(env, chatId, messageId) {
