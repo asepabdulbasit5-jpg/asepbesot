@@ -416,6 +416,8 @@ async function handleTelegram(env, update) {
       const r = await nadiaPost(env, "/vpn/migrate", { account_id: target.accountId, new_server_id: server.serverId });
       if (!r.ok) { await kabariGagal(env, cb.from.id, "Pindah server gagal", r.error); return; }
       target.server = server.kode; target.serverNama = server.nama; target.serverId = server.serverId;
+      const idBaru = cariAccountIdKetat(r.data);
+      if (idBaru && String(idBaru) !== String(target.accountId)) target.accountId = idBaru;
       await env.ORDERS.put(orderId, JSON.stringify(target));
       if (r.data?.config) await kirimConfig(env, cb.from.id, "✅ Akun berhasil dipindah ke " + server.nama + ". Sisa masa aktif tetap. Config tidak berubah kecuali IP.\n\nConfig terbaru:", ambilConfigDariData(r.data));
       else await sendTelegram(env, cb.from.id, "✅ Akun berhasil dipindah ke " + server.nama + ". Sisa masa aktif tetap. Config tidak berubah kecuali IP.");
@@ -836,7 +838,18 @@ async function handleKelola(env, cb, data) {
   if (aksi === "perbaiki") {
     if (!target.accountId) { await sendTelegram(env, chatId, "Akun ini tidak punya ID akun tersimpan — perbaiki manual, hubungi admin."); return; }
     await sendTelegram(env, chatId, "Mengambil data terbaru akun " + (target.username || "") + " dari penyedia...");
-    const r = await nadiaPost(env, "/vpn/account/details", { account_id: target.accountId });
+    let r = await nadiaPost(env, "/vpn/account/details", { account_id: target.accountId });
+    if (!r.ok) {
+      // ID tersimpan bisa jadi sudah basi (mis. Ganti Protokol membuat
+      // akun baru dengan ID baru di sisi penyedia). Cari ID terbaru dari
+      // daftar akun, simpan, lalu coba details sekali lagi.
+      const idBaru = await pulihkanAccountId(env, target);
+      if (idBaru && String(idBaru) !== String(target.accountId)) {
+        target.accountId = idBaru;
+        await env.ORDERS.put(orderId, JSON.stringify(target));
+        r = await nadiaPost(env, "/vpn/account/details", { account_id: idBaru });
+      }
+    }
     if (!r.ok) { await kabariGagal(env, chatId, "Perbaiki akun gagal", r.error); return; }
     const cfg = ambilConfigDariData(r.data);
     target.config = cfg;
@@ -896,6 +909,8 @@ async function eksekusiGantiProtokol(env, chatId, target, proto, sshPassword) {
   const r = await nadiaPost(env, "/vpn/change-protocol", body);
   if (!r.ok) { await kabariGagal(env, chatId, "Ganti protokol gagal", r.error); return; }
   target.protocol = proto;
+  const idBaru = cariAccountIdKetat(r.data);
+  if (idBaru && String(idBaru) !== String(target.accountId)) target.accountId = idBaru;
   if (r.data?.config) target.config = ambilConfigDariData(r.data);
   await env.ORDERS.put(target.id, JSON.stringify(target));
   if (target.config) await kirimConfig(env, chatId, "✅ Protokol akun " + (target.username || "") + " sekarang " + proto.toUpperCase() + ". Masa aktif tetap.\n\nConfig terbaru:", target.config);
@@ -1178,6 +1193,7 @@ async function selesaikanOrder(env, orderId, order) {
     let configKirim = hasil.config;
     if (target) {
       target.namaPaket = order.namaPaket;
+      if (hasil.accountId && String(hasil.accountId) !== String(target.accountId)) target.accountId = String(hasil.accountId);
       if (hasil.config) {
         const adaLink = /^(vless|vmess|trojan|ss):\/\//im.test(hasil.config);
         target.config = adaLink || !target.config ? hasil.config : perbaruiExpDiConfig(target.config, hasil.config);
@@ -1355,6 +1371,65 @@ async function nadiaPost(env, path, body) {
   } catch (e) {
     return { ok: false, error: "Tidak bisa hubungi API penyedia." };
   }
+}
+
+// ---- Panggilan generik ke API Nadia (GET JSON + Bearer) ----
+async function nadiaGet(env, path) {
+  const base = (env.RESELLER_API_URL || "https://www.nadiavpn.web.id/api/v1").replace(/\/$/, "");
+  if (!env.RESELLER_API_KEY) return { ok: false, error: "RESELLER_API_KEY belum diisi." };
+  try {
+    const r = await fetch(base + path, {
+      method: "GET",
+      headers: {
+        "Authorization": "Bearer " + env.RESELLER_API_KEY,
+        "Accept": "application/json",
+      },
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return { ok: false, error: "Penyedia: " + (j.message || j.error || ("HTTP " + r.status)) };
+    if (j.success === false) return { ok: false, error: "Penyedia: " + (j.message || j.error || "ditolak") };
+    return { ok: true, data: j.data || j };
+  } catch (e) {
+    return { ok: false, error: "Tidak bisa hubungi API penyedia." };
+  }
+}
+
+// Cari account_id Nadia secara KETAT — hanya kunci `account_id` /
+// `accountId` (rekursif ke dalam `account`/`data`/`config`). Sengaja
+// TIDAK memakai `id` / `uuid`: `uuid` itu UUID akun VPN-nya (bukan ID
+// akun Nadia) dan `id` bisa jadi ID order — kalau salah satu dari itu
+// tersimpan sebagai accountId, semua panggilan details/renew/migrate
+// akan ditolak penyedia dengan "account id is invalid".
+function cariAccountIdKetat(d) {
+  if (!d || typeof d !== "object") return null;
+  const langsung = d.account_id ?? d.accountId ?? null;
+  if (typeof langsung === "string" && langsung) return langsung;
+  if (typeof langsung === "number") return String(langsung);
+  for (const k of ["account", "data", "config"]) {
+    const v = cariAccountIdKetat(d[k]);
+    if (v) return v;
+  }
+  return null;
+}
+
+// Pulihkan account_id yang sudah basi: ambil daftar akun dari penyedia
+// (GET /vpn/accounts), cocokkan username, kembalikan ID terbarunya.
+// Dipakai Perbaiki Akun kalau details ditolak "account id is invalid"
+// — mis. karena Ganti Protokol membuat akun baru dengan ID baru di
+// sisi penyedia, sementara bot masih menyimpan ID lama.
+async function pulihkanAccountId(env, target) {
+  const r = await nadiaGet(env, "/vpn/accounts");
+  if (!r.ok) return null;
+  const daftar = Array.isArray(r.data) ? r.data : (r.data?.accounts || r.data?.data || r.data?.list || []);
+  if (!Array.isArray(daftar)) return null;
+  const uname = String(target.username || "").toLowerCase();
+  if (!uname) return null;
+  const ketemu = daftar.find((a) => a && String(a.username || a.user || "").toLowerCase() === uname);
+  if (!ketemu) return null;
+  // Di daftar akun, `id` itu ID akun itu sendiri (bukan order) — aman.
+  // `uuid` tetap tidak dipakai (itu UUID VPN, bukan ID akun Nadia).
+  const id = ketemu.account_id ?? ketemu.accountId ?? ketemu.id ?? null;
+  return id ? String(id) : null;
 }
 
 // Ubah nilai config apa pun (string / object) jadi teks yang bisa
@@ -1696,7 +1771,7 @@ async function renewNadiaAccount(env, order) {
   if (!order.accountId) return { ok: false, error: "Akun ini tidak punya ID akun tersimpan (dibuat sebelum fitur kelola akun) — perpanjang manual, hubungi admin." };
   const r = await nadiaPost(env, "/vpn/renew", { account_id: order.accountId, type: paket.nadiaType, duration: paket.nadiaDuration });
   if (!r.ok) return r;
-  return { ok: true, config: ambilConfigDariData(r.data) };
+  return { ok: true, config: ambilConfigDariData(r.data), accountId: cariAccountIdKetat(r.data) };
 }
 
 // Trial gratis: POST /vpn/trial {server_id, protocol} — 30 menit,
