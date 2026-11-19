@@ -1438,6 +1438,53 @@ async function pulihkanAccountId(env, target) {
   return id ? String(id) : null;
 }
 
+// Format object Port jadi grid yang rapih & tanpa duplikat.
+// Respons ganti-protokol SSH (20 Nov 2026) mengembalikan ~20 kunci port
+// dengan nilai yang sama berulang (ws_tls == tls, ws_http == none,
+// openvpn_tcp == ovpntcp, badvpn == udpgw, ...) — kalau dirender mentah
+// jadi satu baris raksasa yang tidak enak dibaca. Di sini nilai yang
+// sama digabung (label pertama yang dipakai), hasilnya grid seperti di
+// web Nadia (WS TLS, WS NON-TLS, ANY, OPENSSH, DROPBEAR, ...).
+function formatPort(v) {
+  if (v === undefined || v === null || v === "") return null;
+  if (typeof v !== "object") return String(v);
+  if (Array.isArray(v)) return v.join(", ");
+  const LABEL = {
+    ws_tls: "WS TLS", tls: "WS TLS", ws_http: "WS NON-TLS", none: "WS NON-TLS",
+    any: "ANY", openssh: "OPENSSH", ssh: "SSH", dropbear: "DROPBEAR",
+    squid: "SQUID", proxy: "SQUID", badvpn: "UDPGW", udpgw: "UDPGW",
+    openvpn_tcp: "OVPN TCP", ovpntcp: "OVPN TCP", openvpn_udp: "OVPN UDP", ovpnudp: "OVPN UDP",
+    slowdns: "SLOWDNS", udpcustom: "UDP CUSTOM", sshohp: "SSH OHP", ovpnohp: "OVPN OHP",
+  };
+  const perNilai = new Map();
+  for (const [k, val] of Object.entries(v)) {
+    const nilai = Array.isArray(val) ? val.join(", ") : (typeof val === "object" ? JSON.stringify(val) : String(val)).trim();
+    if (!nilai) continue;
+    if (perNilai.has(nilai)) continue; // duplikat nilai — tampil sekali saja
+    const label = LABEL[String(k).toLowerCase()] || String(k).toUpperCase();
+    perNilai.set(nilai, label + ": " + nilai);
+  }
+  if (!perNilai.size) return null;
+  return [...perNilai.values()].join("\n");
+}
+
+// Cari domain/host akun — bisa di root, di dalam `config`/`data`/
+// `account`, atau di dalam object `server` (respons details memakai
+// server: {server_id, name, domain}). Dipakai untuk template payload
+// WebSocket SSH.
+function cariDomain(d) {
+  if (!d || typeof d !== "object") return null;
+  const langsung = cariField(d, ["domain", "hostname", "host_domain", "host"]);
+  if (langsung) return langsung;
+  const srv = (d.server && typeof d.server === "object") ? d.server : ((d.host && typeof d.host === "object") ? d.host : null);
+  if (srv && (srv.domain || srv.host)) return srv.domain || srv.host;
+  for (const k of ["config", "data", "account"]) {
+    const v = cariDomain(d[k]);
+    if (v) return v;
+  }
+  return null;
+}
+
 // Ubah nilai config apa pun (string / object) jadi teks yang bisa
 // dikirim ke pembeli. Nadia ternyata mengembalikan `config` sebagai
 // OBJECT (bukan string/link) — kalau object itu langsung ditempel ke
@@ -1503,9 +1550,20 @@ function ubahConfigJadiTeks(x) {
       cetak("Server", serverVal);
       const domainVal = (srvObj && (srvObj.domain || srvObj.host)) || ambil(["domain", "hostname", "host_domain", "host"]);
       if (domainVal && String(domainVal) !== String(serverVal)) cetak("Host / Domain", domainVal);
-      cetak("Port", ambil(["port"]));
+      const portTeks = formatPort(o.port ?? o.ports ?? null);
+      if (portTeks !== null) {
+        if (portTeks.includes("\n")) baris.push("Port:\n" + portTeks);
+        else baris.push("Port: " + portTeks);
+      }
       cetak("Squid Proxy", ambil(["squid", "proxy", "http_proxy", "squid_proxy"]));
-      cetak("HTTP Custom", ambil(["http_custom", "httpcustom"]));
+      // HTTP Custom dari API bentuknya "host:1-65535@user:pass" — bagian
+      // @user:pass sudah ada di baris Username/Password di atas, jadi
+      // tampilkan host:port-nya saja supaya rapih.
+      const hcRaw = ambil(["http_custom", "httpcustom"]);
+      if (hcRaw !== null) {
+        const hcBersih = String(hcRaw).includes("@") ? String(hcRaw).split("@")[0] : hcRaw;
+        cetak("HTTP Custom", hcBersih);
+      }
       cetak("OpenVPN", ambil(["ovpn", "openvpn", "ovpn_url", "openvpn_url", "config_url", "ovpn_config"]));
       cetak("Name Server", ambil(["nameserver", "name_server", "ns", "dns_server", "dns", "nameservers", "slowdns", "ns_server"]));
       cetak("Public Key", ambil(["public_key", "pubkey", "publickey"]));
@@ -1683,6 +1741,12 @@ function susunInfoAkun(d, links) {
   cetak("Lokasi", cariField(d, ["location", "lokasi", "city", "kota"]));
   const limitIp = cariField(d, ["limit_ip", "ip_limit", "max_ip", "max_devices", "device_limit", "max_device", "devices", "limit"]);
   const kuota = cariField(d, ["quota", "kuota", "data_quota", "quota_limit", "limit_quota"]);
+  const portRawInfo = d.port ?? d.ports ?? d.config?.port ?? d.data?.port ?? d.account?.port ?? null;
+  const portTeksInfo = formatPort(portRawInfo);
+  if (portTeksInfo !== null) {
+    if (portTeksInfo.includes("\n")) baris.push("Port:\n" + portTeksInfo);
+    else baris.push("Port: " + portTeksInfo);
+  }
   if (limitIp !== null && kuota !== null) {
     const k = /unlimit/i.test(String(kuota)) ? "Unli" : String(kuota);
     baris.push("Limit IP & Kuota: " + limitIp + " Dev / " + k);
@@ -1748,9 +1812,13 @@ function ambilConfigDariData(d) {
     // SSH: template payload WebSocket (HTTP Custom) ala web Nadia —
     // host diisi dari domain akun ini; kalau domain tidak diketahui,
     // payload tidak ditampilkan (jangan ditebak).
-    const srvObjPayload = (d.server && typeof d.server === "object") ? d.server : ((d.host && typeof d.host === "object") ? d.host : null);
-    const domainPayload = cariField(d, ["domain", "hostname", "host_domain", "host"]) || (srvObjPayload ? (srvObjPayload.domain || srvObjPayload.host || null) : null);
-    if (d.password && typeof d.password === "string" && domainPayload && !teks.includes("Payload")) {
+    // Respons bisa bersarang (field-field akun di dalam `config`) —
+    // cari domain & password sampai ke dalam, supaya payload tidak
+    // hilang hanya karena field-nya tidak di root (kejadian 20 Nov
+    // 2026: config SSH hasil ganti protokol tidak menampilkan payload).
+    const domainPayload = cariDomain(d);
+    const adaPassword = !!cariField(d, ["password", "pass"]);
+    if (adaPassword && domainPayload && !teks.includes("Payload")) {
       teks += "\n\nPayload WebSocket (HTTP Custom):\n— TLS —\nGET /worryfree/ssh HTTP/1.1[crlf]Host: " + domainPayload + "[crlf]Upgrade: websocket[crlf][crlf]\n— NON-TLS —\nGET /worryfree/ssh HTTP/1.1[crlf]Host: " + domainPayload + "[crlf]Upgrade: websocket[crlf][crlf]\n— CDN —\nGET / HTTP/1.1[crlf]Host: [host_port][crlf]User-Agent: [ua][crlf]Upgrade: websocket[crlf][crlf]\n— WITH PATH —\nGET /worryfree/ssh HTTP/1.1[crlf]Host: BUG[crlf]User-Agent: [ua][crlf]Upgrade: websocket[crlf][crlf]";
     }
   }
