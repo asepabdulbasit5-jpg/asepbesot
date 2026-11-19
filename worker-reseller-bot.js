@@ -180,6 +180,10 @@ const PROTOKOL = [
 
 // Order pending kedaluwarsa setelah 30 menit kalau belum dibayar.
 const ORDER_TTL_MS = 30 * 60 * 1000;
+// Order yang tidak dibayar dihapus otomatis setelah 24 jam (tenggang
+// untuk bayar telat). Yang "gagal" (sudah bayar tapi akun gagal dibuat)
+// TIDAK ikut dihapus — itu butuh konfirmasi ulang admin.
+const ORDER_HAPUS_MS = 24 * 60 * 60 * 1000;
 
 export default {
   async fetch(req, env) {
@@ -786,6 +790,7 @@ async function tampilkanProtokol(env, chatId) {
 }
 
 async function tampilkanStatus(env, chatId, messageId) {
+  await bersihkanOrderKedaluarsa(env);
   const order = await orderTerakhir(env, chatId);
   const teks = order
     ? "Order " + order.id + ": " + order.status +
@@ -928,8 +933,27 @@ async function tampilkanTrialServer(env, chatId, halaman, messageId) {
 // Hanya order yang dibuat lewat bot; akun trial TIDAK tercatat di sini
 // (trial langsung dibuat tanpa order), dan akun yang dibuat manual di
 // dashboard penyedia juga tidak ada di sini — cek Layanan Aktif.
+// Hapus order yang tidak dibayar dan sudah lewat 24 jam dari KV.
+// Dipanggil malas (lazy) tiap kali daftar order dibuka — Worker tidak
+// punya jadwal sendiri, jadi pembersihan jalan saat ada yang melihat
+// daftar. Mengembalikan jumlah yang dihapus.
+async function bersihkanOrderKedaluarsa(env) {
+  const list = await env.ORDERS.list({ prefix: "ORD-" });
+  let dihapus = 0;
+  const batas = Date.now() - ORDER_HAPUS_MS;
+  for (const key of list.keys) {
+    const o = await env.ORDERS.get(key.name, "json").catch(() => null);
+    if (o && o.status === "menunggu bayar" && o.createdAt && o.createdAt < batas) {
+      await env.ORDERS.delete(key.name);
+      dihapus++;
+    }
+  }
+  return dihapus;
+}
+
 async function tampilkanSemuaAkun(env, chatId, messageId) {
   if (String(chatId) !== String(env.ADMIN_CHAT_ID)) return;
+  const dihapus = await bersihkanOrderKedaluarsa(env);
   const list = await env.ORDERS.list({ prefix: "ORD-" });
   const orders = [];
   for (const key of list.keys) {
@@ -974,6 +998,7 @@ async function tampilkanSemuaAkun(env, chatId, messageId) {
   });
   let teks = "📋 Semua order lewat bot (" + total + "):\n\n" + baris.join("\n\n");
   if (total > 30) teks += "\n\nMenampilkan 30 terbaru dari " + total + " order.";
+  if (dihapus > 0) teks += "\n\n🧹 " + dihapus + " order kedaluwarsa (>24 jam) dihapus otomatis.";
   // Kirim per potongan supaya tidak kepotong limit Telegram.
   // Potongan pertama menggantikan pesan menu (kalau dari tombol),
   // tombol kembali ada di potongan terakhir.
