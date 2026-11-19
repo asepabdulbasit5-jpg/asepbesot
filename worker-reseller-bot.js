@@ -254,6 +254,7 @@ async function handleTelegram(env, update) {
       const tombol = daftar.map((p) => [
         { text: p.nama, callback_data: "proto:" + serverKode + ":" + p.kode },
       ]);
+      tombol.push([{ text: "🔙 Kembali ke Server", callback_data: "menu:beli" }]);
       await editHtml(env, cb.from.id, cb.message?.message_id, escapeHtml("Server: " + (server?.nama || serverKode) + (server?.penuh ? "\n⚠️ Server ini penuh — order bisa ditolak penyedia, sebaiknya pilih server lain." : "") + "\nPilih protokolnya:"), tombol);
       return;
     }
@@ -263,6 +264,7 @@ async function handleTelegram(env, update) {
       const tombol = PAKET.map((p) => [
         { text: p.nama + " — Rp" + p.harga.toLocaleString("id-ID"), callback_data: "paket:" + serverKode + ":" + proto + ":" + p.kode },
       ]);
+      tombol.push([{ text: "🔙 Kembali", callback_data: "server:" + serverKode }]);
       await editHtml(env, cb.from.id, cb.message?.message_id, escapeHtml("Protokol: " + proto.toUpperCase() + "\nPilih durasi paketnya:"), tombol);
       return;
     }
@@ -276,7 +278,7 @@ async function handleTelegram(env, update) {
         " — " + (PAKET.find((x) => x.kode === kodePaket)?.nama || kodePaket) + ".\n\n" +
         "Ketik username yang kamu mau (huruf/angka saja, 3-15 karakter).\n" +
         "Atau ketik - kalau mau username diacak otomatis.\n" +
-        "Ketik /batal untuk membatalkan."), []);
+        "Ketik /batal untuk membatalkan."), [[{ text: "🔙 Kembali", callback_data: "proto:" + serverKode + ":" + proto }]]);
       return;
     }
     // ---- Trial gratis: pilih server -> protokol -> langsung dibuat ----
@@ -288,6 +290,7 @@ async function handleTelegram(env, update) {
       const tombol = daftar.map((p) => [
         { text: p.nama, callback_data: "tproto:" + serverKode + ":" + p.kode },
       ]);
+      tombol.push([{ text: "🔙 Kembali ke Server", callback_data: "menu:trial" }]);
       await editHtml(env, cb.from.id, cb.message?.message_id, escapeHtml("Trial gratis 30 menit (kuota 1 GB, 1 IP).\nServer: " + (server?.nama || serverKode) + "\nPilih protokolnya:"), tombol);
       return;
     }
@@ -707,6 +710,7 @@ async function handleKelola(env, cb, data) {
     const tombol = PAKET.map((p) => [
       { text: p.nama + " — Rp" + p.harga.toLocaleString("id-ID"), callback_data: "renew:" + orderId + ":" + p.kode },
     ]);
+    tombol.push([{ text: "🔙 Kembali ke Akun", callback_data: "menu:akun" }]);
     await sendTelegram(env, chatId, "Perpanjang akun " + (target.username || "") + " (" + (target.namaPaket || "") + "). Pilih durasi tambahan:", tombol);
     return;
   }
@@ -715,6 +719,7 @@ async function handleKelola(env, cb, data) {
     const tombol = SERVERS.filter((s) => !statusServer(s, liveMig).penuh && s.kode !== target.server).map((s) => [
       { text: labelServer(s, liveMig), callback_data: "mig:" + orderId + ":" + s.kode },
     ]);
+    tombol.push([{ text: "🔙 Kembali ke Akun", callback_data: "menu:akun" }]);
     await sendTelegram(env, chatId, "Pindah server akun " + (target.username || "") + ". Sisa masa aktif ikut pindah. Pilih server tujuan:", tombol);
     return;
   }
@@ -723,6 +728,7 @@ async function handleKelola(env, cb, data) {
     const tombol = daftar.map((p) => [
       { text: p.nama, callback_data: "gproto:" + orderId + ":" + p.kode },
     ]);
+    tombol.push([{ text: "🔙 Kembali ke Akun", callback_data: "menu:akun" }]);
     await sendTelegram(env, chatId, "Ganti protokol akun " + (target.username || "") + " (sekarang: " + (target.protocol || "?").toUpperCase() + "). Gratis. Pilih protokol baru:", tombol);
     return;
   }
