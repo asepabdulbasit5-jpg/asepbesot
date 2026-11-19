@@ -200,6 +200,14 @@ export default {
       const mKet = bersih.match(/(masuk|diterima|terima|pembayaran|berhasil)[^\d]{0,20}Rp\s?([\d]+)/i);
       const m = mKet || bersih.match(/Rp\s?([\d]+)/i);
       const amount = m ? parseInt(m[m.length - 1], 10) : 0;
+      // DEBUG SEMENTARA (hapus setelah tes bayar berhasil): laporkan
+      // SEMUA callback ke admin supaya kelihatan teks apa yang sampai
+      // ke worker dan nominal berapa yang kebaca.
+      if (env.ADMIN_CHAT_ID) {
+        await sendTelegram(env, env.ADMIN_CHAT_ID,
+          "🔍 DEBUG callback\nTeks: " + String(text).slice(0, 200) +
+          "\nNominal kebaca: Rp" + amount.toLocaleString("id-ID"));
+      }
       if (!amount) return new Response("ok"); // bukan notif pembayaran
       const order = await findPendingOrderByAmount(env, amount);
       if (!order) {
