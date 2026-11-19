@@ -423,6 +423,11 @@ async function handleTelegram(env, update) {
     return;
   }
 
+  if (text.startsWith("/broadcast")) {
+    await kirimBroadcast(env, chatId, text.slice("/broadcast".length));
+    return;
+  }
+
   if (text === "/status") {
     await tampilkanStatus(env, chatId);
     return;
@@ -565,6 +570,7 @@ async function tampilkanMenuUtama(env, chatId, from, messageId) {
     "TOTAL VPN : " + daftar.length + " AKUN"];
   if (saldo !== null) baris.push("SALDO VPN : Rp" + saldo.toLocaleString("id-ID"));
   baris.push(GARIS_PANEL, "SERVER TERSEDIA: " + tersedia + " / " + SERVERS.length + " SERVERS", GARIS_PANEL, "OWNER: SANDEKALA VPN", GARIS_PANEL);
+  if (isAdmin) baris.push("ADMIN: /semuaakun • /broadcast PESAN • /konfirmasi ORDER_ID", GARIS_PANEL);
   const html = "<pre>" + escapeHtml(baris.join("\n")) + "</pre>";
   const tombol = [
     [{ text: "🛒 Beli VPN", callback_data: "menu:beli" }],
@@ -793,6 +799,36 @@ async function tampilkanSemuaAkun(env, chatId) {
   for (let i = 0; i < teks.length; i += 3500) {
     await sendTelegram(env, chatId, teks.slice(i, i + 3500));
   }
+}
+
+// ---- /broadcast PESAN (ADMIN saja) ----
+// Kirim pesan ke semua pembeli yang pernah order lewat bot (chatId
+// diambil dari order ORD-* di KV, unik, tanpa admin sendiri).
+// Batas: hanya pembeli yang tercatat di order bot; pengguna trial
+// saja (tanpa order) tidak ikut karena chatId-nya tidak disimpan.
+// Gagal kirim (mis. pembeli blokir bot) dihitung, tidak menggagalkan
+// yang lain.
+async function kirimBroadcast(env, chatId, teks) {
+  if (String(chatId) !== String(env.ADMIN_CHAT_ID)) return;
+  teks = String(teks || "").trim();
+  if (!teks) {
+    await sendTelegram(env, chatId, "Cara pakai: /broadcast ISI PESAN\nContoh: /broadcast Promo minggu ini: VPN 30 hari cuma Rp10.000!");
+    return;
+  }
+  const list = await env.ORDERS.list({ prefix: "ORD-" });
+  const tujuan = new Set();
+  for (const key of list.keys) {
+    const o = await env.ORDERS.get(key.name, "json").catch(() => null);
+    if (o?.chatId && String(o.chatId) !== String(env.ADMIN_CHAT_ID)) tujuan.add(String(o.chatId));
+  }
+  if (!tujuan.size) { await sendTelegram(env, chatId, "Belum ada pembeli yang tercatat di bot, broadcast batal."); return; }
+  await sendTelegram(env, chatId, "📣 Mengirim broadcast ke " + tujuan.size + " pembeli...");
+  let ok = 0, gagal = 0;
+  for (const id of tujuan) {
+    const j = await telegramApi(env, "sendMessage", { chat_id: Number(id), text: teks.slice(0, 4000) });
+    if (j?.ok) ok++; else gagal++;
+  }
+  await sendTelegram(env, chatId, "📣 Broadcast selesai: terkirim ke " + ok + " pembeli" + (gagal ? ", gagal ke " + gagal + " (kemungkinan blokir bot)." : "."));
 }
 
 async function tampilkanAkun(env, chatId) {
