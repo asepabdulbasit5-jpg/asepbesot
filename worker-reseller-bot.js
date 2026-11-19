@@ -246,7 +246,7 @@ async function handleTelegram(env, update) {
       const tombol = daftar.map((p) => [
         { text: p.nama, callback_data: "proto:" + serverKode + ":" + p.kode },
       ]);
-      await sendTelegram(env, cb.from.id, "Server: " + (server?.nama || serverKode) + (server?.penuh ? "\n⚠️ Server ini penuh — order bisa ditolak penyedia, sebaiknya pilih server lain." : "") + "\nPilih protokolnya:", tombol);
+      await editHtml(env, cb.from.id, cb.message?.message_id, escapeHtml("Server: " + (server?.nama || serverKode) + (server?.penuh ? "\n⚠️ Server ini penuh — order bisa ditolak penyedia, sebaiknya pilih server lain." : "") + "\nPilih protokolnya:"), tombol);
       return;
     }
     if (data.startsWith("proto:")) {
@@ -255,20 +255,20 @@ async function handleTelegram(env, update) {
       const tombol = PAKET.map((p) => [
         { text: p.nama + " — Rp" + p.harga.toLocaleString("id-ID"), callback_data: "paket:" + serverKode + ":" + proto + ":" + p.kode },
       ]);
-      await sendTelegram(env, cb.from.id, "Protokol: " + proto.toUpperCase() + "\nPilih durasi paketnya:", tombol);
+      await editHtml(env, cb.from.id, cb.message?.message_id, escapeHtml("Protokol: " + proto.toUpperCase() + "\nPilih durasi paketnya:"), tombol);
       return;
     }
     if (data.startsWith("paket:")) {
       // Langkah 4: simpan pilihan, minta username.
       const [, serverKode, proto, kodePaket] = data.split(":");
       await env.ORDERS.put("pending:" + cb.from.id, JSON.stringify({ server: serverKode, protocol: proto, paket: kodePaket }));
-      await sendTelegram(env, cb.from.id,
+      await editHtml(env, cb.from.id, cb.message?.message_id, escapeHtml(
         "Kamu pilih " + (SERVERS.find((x) => x.kode === serverKode)?.nama || serverKode) +
         " — " + (PROTOKOL.find((x) => x.kode === proto)?.nama || proto.toUpperCase()) +
         " — " + (PAKET.find((x) => x.kode === kodePaket)?.nama || kodePaket) + ".\n\n" +
         "Ketik username yang kamu mau (huruf/angka saja, 3-15 karakter).\n" +
         "Atau ketik - kalau mau username diacak otomatis.\n" +
-        "Ketik /batal untuk membatalkan.");
+        "Ketik /batal untuk membatalkan."), []);
       return;
     }
     // ---- Trial gratis: pilih server -> protokol -> langsung dibuat ----
@@ -280,21 +280,22 @@ async function handleTelegram(env, update) {
       const tombol = daftar.map((p) => [
         { text: p.nama, callback_data: "tproto:" + serverKode + ":" + p.kode },
       ]);
-      await sendTelegram(env, cb.from.id, "Trial gratis 30 menit (kuota 1 GB, 1 IP).\nServer: " + (server?.nama || serverKode) + "\nPilih protokolnya:", tombol);
+      await editHtml(env, cb.from.id, cb.message?.message_id, escapeHtml("Trial gratis 30 menit (kuota 1 GB, 1 IP).\nServer: " + (server?.nama || serverKode) + "\nPilih protokolnya:"), tombol);
       return;
     }
     if (data.startsWith("tproto:")) {
       const [, serverKode, proto] = data.split(":");
       const server = SERVERS.find((x) => x.kode === serverKode);
-      await sendTelegram(env, cb.from.id, "Membuat akun trial " + proto.toUpperCase() + " di " + (server?.nama || serverKode) + "...");
+      const midTrial = cb.message?.message_id;
+      await editHtml(env, cb.from.id, midTrial, escapeHtml("Membuat akun trial " + proto.toUpperCase() + " di " + (server?.nama || serverKode) + "..."), []);
       const hasil = await trialNadiaAccount(env, server?.serverId, proto);
       if (!hasil.ok) {
-        await sendTelegram(env, cb.from.id, "Trial gagal: " + hasil.error + "\n(Syarat trial: saldo reseller minimal Rp15.000. Saldo Asep terakhir Rp14.691 — kemungkinan harus topup dulu.)");
+        await editHtml(env, cb.from.id, midTrial, escapeHtml("Trial gagal: " + hasil.error + "\n(Syarat trial: saldo reseller minimal Rp15.000. Saldo Asep terakhir Rp14.691 — kemungkinan harus topup dulu.)"), []);
         return;
       }
       await kirimConfig(env, cb.from.id,
         "🎁 Ini config trial kamu (30 menit, kuota 1 GB):", hasil.config,
-        "Kalau cocok, lanjut beli paket lewat /beli.");
+        "Kalau cocok, lanjut beli paket lewat /beli.", null, midTrial);
       return;
     }
     // ---- Kelola akun: Perpanjang / Pindah / Ganti / Perbaiki / Hapus ----
@@ -1020,9 +1021,10 @@ async function selesaikanOrder(env, orderId, order) {
 // link/config ke v2rayNG. Hanya dipakai untuk config akun, bukan
 // untuk menu/daftar server (di sana <pre> dihapus atas permintaan
 // Asep 19 Nov 2026 karena tombol SALIN KODE mengganggu).
-async function kirimConfig(env, chatId, pembuka, config, penutup, keyboard) {
+async function kirimConfig(env, chatId, pembuka, config, penutup, keyboard, messageId) {
   const html = escapeHtml(pembuka) + "\n\n<pre>" + escapeHtml(String(config || "")) + "</pre>" + (penutup ? "\n\n" + escapeHtml(penutup) : "");
-  await sendHtml(env, chatId, html, keyboard);
+  if (messageId) await editHtml(env, chatId, messageId, html, keyboard);
+  else await sendHtml(env, chatId, html, keyboard);
 }
 
 // Tombol kelola akun (pembeli & admin): Perpanjang, Pindah Server,
