@@ -225,6 +225,14 @@ async function handleTelegram(env, update) {
       return;
     }
     await jawabCallback(env, cb.id);
+    if (data === "menu:utama") { await tampilkanMenuUtama(env, cb.from.id, cb.from, cb.message?.message_id); return; }
+    if (data === "menu:beli") { await tampilkanDaftarServer(env, cb.from.id, "beli", 0, cb.message?.message_id); return; }
+    if (data === "menu:trial") { await tampilkanDaftarServer(env, cb.from.id, "trial", 0, cb.message?.message_id); return; }
+    if (data === "menu:status") { await tampilkanStatus(env, cb.from.id); return; }
+    if (data === "menu:akun") { await tampilkanAkun(env, cb.from.id); return; }
+    if (data === "menu:semua") { await tampilkanSemuaAkun(env, cb.from.id); return; }
+    if (data.startsWith("srvpage:")) { await tampilkanDaftarServer(env, cb.from.id, "beli", parseInt(data.slice(8), 10) || 0, cb.message?.message_id); return; }
+    if (data.startsWith("trypage:")) { await tampilkanDaftarServer(env, cb.from.id, "trial", parseInt(data.slice(8), 10) || 0, cb.message?.message_id); return; }
     if (data.startsWith("server:")) {
       // Langkah 2: pilih protokol untuk server yang dipilih.
       // Protokol disaring per server: server SSH SELOW cuma tampil
@@ -387,14 +395,8 @@ async function handleTelegram(env, update) {
     return;
   }
 
-  if (text === "/start") {
-    const isAdmin = String(chatId) === String(env.ADMIN_CHAT_ID);
-    await sendMenu(env, chatId,
-      "Halo! Ini bot jualan VPN SANDEKALA.\n\n" +
-      "Pilih server, protokol, paket, bayar via QRIS DANA, " +
-      "config langsung dikirim ke sini.\n\n" +
-      "Perintah:\n/beli — lihat paket & pesan\n/trial — coba gratis 30 menit\n/akun — lihat & kelola akun kamu\n/status — cek order terakhir" +
-      (isAdmin ? "\n\nPerintah admin:\n/semuaakun — lihat semua order pembeli\n/konfirmasi ORDER_ID — konfirmasi bayar manual" : ""));
+  if (text === "/start" || text === "/menu") {
+    await tampilkanMenuUtama(env, chatId, msg.from, null);
     return;
   }
 
@@ -515,16 +517,121 @@ function labelServer(s, live) {
 // Server penuh tampil tapi TIDAK bisa diklik untuk lanjut —
 // tombolnya pakai callback "penuh:" yang cuma menampilkan
 // peringatan pop-up "server penuh, pilih server lain".
-async function tampilkanServer(env, chatId) {
+// ================= TAMPILAN ALA PANEL (gaya bot panel, isi tetap SANDEKALA) ====
+// /start & /menu -> kotak MENU UTAMA (monospace) + tombol inline hijau.
+// Daftar server -> kotak per server + pagination Page 1/2, footer -SANDEKALA-.
+// Yang ditampilkan HANYA data asli bot ini: ID/username Telegram, jumlah
+// akun pembeli di bot, status slot live, harga jual SANDEKALA, saldo
+// reseller (khusus admin, live dari GET /user/balance). Tidak ada angka
+// karangan (tanpa saldo PPOB / bonus topup / progres penjualan toko lain).
+const GARIS_PANEL = "——————————————————";
+const SERVER_PER_HALAMAN = 12;
+
+async function ambilSaldoReseller(env) {
+  try {
+    const base = (env.RESELLER_API_URL || "https://www.nadiavpn.web.id/api/v1").replace(/\/$/, "");
+    if (!env.RESELLER_API_KEY) return null;
+    const r = await fetch(base + "/user/balance", {
+      headers: { "Authorization": "Bearer " + env.RESELLER_API_KEY, "Accept": "application/json" },
+    });
+    const j = await r.json().catch(() => null);
+    if (!r.ok || !j) return null;
+    const d = j.data || j;
+    const cari = (o) => {
+      if (!o || typeof o !== "object") return null;
+      for (const k of ["balance", "saldo", "amount", "total"]) {
+        if (typeof o[k] === "number") return o[k];
+        if (typeof o[k] === "string" && /^\d+(\.\d+)?$/.test(o[k])) return parseFloat(o[k]);
+      }
+      return null;
+    };
+    return cari(d) ?? cari(j);
+  } catch (e) { return null; }
+}
+
+async function tampilkanMenuUtama(env, chatId, from, messageId) {
+  const isAdmin = String(chatId) === String(env.ADMIN_CHAT_ID);
+  const daftar = await daftarAkunUser(env, chatId);
   const live = await ambilStatusServerLive(env);
-  if (!live.map && env.ADMIN_CHAT_ID) {
+  const tersedia = SERVERS.filter((x) => !statusServer(x, live).penuh).length;
+  const saldo = isAdmin ? await ambilSaldoReseller(env) : null;
+  const baris = [GARIS_PANEL, "          MENU UTAMA", GARIS_PANEL, "INFORMASI PELANGGAN",
+    "ID        : " + chatId,
+    "USERNAME  : " + (from?.username ? "@" + from.username : "—"),
+    "ROLE      : " + (isAdmin ? "admin" : "member"),
+    "TOTAL VPN : " + daftar.length + " AKUN"];
+  if (saldo !== null) baris.push("SALDO VPN : Rp" + saldo.toLocaleString("id-ID"));
+  baris.push(GARIS_PANEL, "SERVER TERSEDIA: " + tersedia + " / " + SERVERS.length + " SERVERS", GARIS_PANEL, "OWNER: SANDEKALA VPN", GARIS_PANEL);
+  const html = "<pre>" + escapeHtml(baris.join("\n")) + "</pre>";
+  const tombol = [
+    [{ text: "🛒 Beli VPN", callback_data: "menu:beli" }],
+    [{ text: "🎁 Trial Gratis", callback_data: "menu:trial" }, { text: "📦 Status Order", callback_data: "menu:status" }],
+    [{ text: "👤 Akun Saya", callback_data: "menu:akun" }],
+  ];
+  if (isAdmin) tombol.push([{ text: "📋 Semua Akun", callback_data: "menu:semua" }]);
+  if (messageId) { await editHtml(env, chatId, messageId, html, tombol); return; }
+  // Kirim menu + hapus keyboard bawah lama supaya tampilannya seperti
+  // bot panel (hanya tombol inline). Pesan dikirim dulu dengan
+  // remove_keyboard, lalu tombol inline dipasang lewat edit.
+  const j = await telegramApi(env, "sendMessage", { chat_id: chatId, text: html, parse_mode: "HTML", reply_markup: { remove_keyboard: true } });
+  const mid = j?.result?.message_id;
+  if (mid) await editReplyMarkup(env, chatId, mid, tombol);
+  else await sendHtml(env, chatId, html, tombol);
+}
+
+function teksDaftarServer(daftar, live, judul, halaman, totalHalaman) {
+  const bagian = daftar.map((s) => {
+    const st = statusServer(s, live);
+    const nama = s.nama.replace(" — PENUH", "");
+    const pakai = (st.used !== null && st.limit !== null) ? st.used + "/" + st.limit : "?";
+    return "🔰 Nama Server: " + nama +
+      "\n💵 Harga: 7 hari Rp5.000 • 30 hari Rp10.000" +
+      "\n🧮 Total Akun Dibuat: " + pakai + (st.sisa !== null ? " (sisa " + st.sisa + ")" : "") +
+      (st.penuh ? "\n❌ PENUH" : "") +
+      "\n" + GARIS_PANEL;
+  });
+  return judul + "\n" + GARIS_PANEL + "\n" + bagian.join("\n") +
+    "\nPage " + (halaman + 1) + "/" + totalHalaman + " displayed\n" + GARIS_PANEL + "\n-SANDEKALA-\n" + GARIS_PANEL;
+}
+
+function tombolDaftarServer(daftar, live, mode, halaman, totalHalaman) {
+  const tombol = [];
+  for (let i = 0; i < daftar.length; i += 2) {
+    tombol.push(daftar.slice(i, i + 2).map((s) => {
+      const st = statusServer(s, live);
+      if (mode === "trial") return { text: s.nama.replace(" — PENUH", ""), callback_data: "tserver:" + s.kode };
+      return { text: labelServer(s, live), callback_data: (st.penuh ? "penuh:" : "server:") + s.kode };
+    }));
+  }
+  const nav = [];
+  const kunci = mode === "trial" ? "trypage:" : "srvpage:";
+  if (halaman > 0) nav.push({ text: "⬅️ Prev", callback_data: kunci + (halaman - 1) });
+  if (halaman < totalHalaman - 1) nav.push({ text: "Next ➡️", callback_data: kunci + (halaman + 1) });
+  if (nav.length) tombol.push(nav);
+  tombol.push([{ text: "🔙 Kembali ke Menu", callback_data: "menu:utama" }]);
+  return tombol;
+}
+
+async function tampilkanDaftarServer(env, chatId, mode, halaman, messageId) {
+  const live = await ambilStatusServerLive(env);
+  if (!live.map && env.ADMIN_CHAT_ID && mode === "beli" && halaman === 0) {
     await sendTelegram(env, env.ADMIN_CHAT_ID, "⚠️ Status server live gagal: " + (live.debug || "?") + "\nAngka di /beli pakai snapshot 19 Nov.");
   }
-  const tombol = SERVERS.map((s) => {
-    const st = statusServer(s, live);
-    return [{ text: labelServer(s, live), callback_data: (st.penuh ? "penuh:" : "server:") + s.kode }];
-  });
-  await sendTelegram(env, chatId, "Pilih servernya:\n🟢 Tersedia  •  🟡 Hampir penuh (sisa ≤ 10 slot)  •  ❌ PENUH tidak bisa dipilih\nAngka di tombol = slot kosong" + (live.map ? " (status terbaru)." : " (status per 19 Nov — gagal ambil status terbaru)."), tombol);
+  const semua = mode === "trial" ? SERVERS.filter((x) => !statusServer(x, live).penuh) : SERVERS;
+  const totalHalaman = Math.max(1, Math.ceil(semua.length / SERVER_PER_HALAMAN));
+  halaman = Math.min(Math.max(0, halaman || 0), totalHalaman - 1);
+  const daftar = semua.slice(halaman * SERVER_PER_HALAMAN, (halaman + 1) * SERVER_PER_HALAMAN);
+  const judul = mode === "trial"
+    ? "🎁 Trial gratis 30 menit (kuota 1 GB, 1 IP).\nSyarat: saldo reseller minimal Rp15.000 (tidak dipotong)."
+    : "Pilih servernya:\n🟢 Tersedia  •  🟡 Hampir penuh (sisa ≤ 10 slot)  •  ❌ PENUH tidak bisa dipilih\nAngka = slot kosong" + (live.map ? " (status terbaru)." : " (status per 19 Nov — gagal ambil status terbaru).");
+  const html = "<pre>" + escapeHtml(teksDaftarServer(daftar, live, judul, halaman, totalHalaman)) + "</pre>";
+  const tombol = tombolDaftarServer(daftar, live, mode, halaman, totalHalaman);
+  if (messageId) await editHtml(env, chatId, messageId, html, tombol);
+  else await sendHtml(env, chatId, html, tombol);
+}
+
+async function tampilkanServer(env, chatId, halaman, messageId) {
+  await tampilkanDaftarServer(env, chatId, "beli", halaman || 0, messageId || null);
 }
 
 // Langkah 2 beli: pilih protokol dulu.
@@ -544,21 +651,6 @@ async function tampilkanStatus(env, chatId) {
           " ke QRIS DANA Bisnis (gambar QR sudah dikirim bersama order)."
         : "")
     : "Belum ada order dari kamu.");
-}
-
-// Kirim pesan + tombol bawah permanen (🛒 Beli VPN / 📦 Status Order).
-// Admin dapat baris tambahan: 📋 Semua Akun (tanpa ketik /semuaakun).
-async function sendMenu(env, chatId, text) {
-  const keyboard = [[{ text: "🛒 Beli VPN" }, { text: "📦 Status Order" }]];
-  if (String(chatId) === String(env.ADMIN_CHAT_ID)) keyboard.push([{ text: "📋 Semua Akun" }]);
-  await fetch("https://api.telegram.org/bot" + env.BOT_TOKEN + "/sendMessage", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId, text: String(text).slice(0, 4000),
-      reply_markup: { keyboard, resize_keyboard: true },
-    }),
-  });
 }
 
 // ---- Kelola akun (tombol di bawah config / di /akun) ----
@@ -659,12 +751,8 @@ async function eksekusiGantiProtokol(env, chatId, target, proto, sshPassword) {
   await sendTelegram(env, chatId, "✅ Protokol akun " + (target.username || "") + " sekarang " + proto.toUpperCase() + ". Masa aktif tetap." + (target.config ? "\n\nConfig terbaru:\n" + target.config : ""));
 }
 
-async function tampilkanTrialServer(env, chatId) {
-  const live = await ambilStatusServerLive(env);
-  const tombol = SERVERS.filter((s) => !statusServer(s, live).penuh).map((s) => [
-    { text: labelServer(s, live), callback_data: "tserver:" + s.kode },
-  ]);
-  await sendTelegram(env, chatId, "🎁 Trial gratis 30 menit (kuota 1 GB, 1 IP, zivpn tidak didukung).\nSyarat: saldo reseller minimal Rp15.000 (tidak dipotong).\nPilih server trial:", tombol);
+async function tampilkanTrialServer(env, chatId, halaman, messageId) {
+  await tampilkanDaftarServer(env, chatId, "trial", halaman || 0, messageId || null);
 }
 
 // ---- /semuaakun (ADMIN saja): daftar semua order yang lewat bot ----
@@ -1025,6 +1113,34 @@ async function sendPhoto(env, chatId, photoUrl, caption) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ chat_id: chatId, photo: photoUrl, caption: String(caption || "").slice(0, 1000) }),
   });
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+async function telegramApi(env, method, body) {
+  try {
+    const r = await fetch("https://api.telegram.org/bot" + env.BOT_TOKEN + "/" + method, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    return await r.json().catch(() => null);
+  } catch (e) { return null; }
+}
+async function sendHtml(env, chatId, html, keyboard) {
+  const body = { chat_id: chatId, text: String(html).slice(0, 4000), parse_mode: "HTML" };
+  if (keyboard) body.reply_markup = { inline_keyboard: keyboard };
+  const j = await telegramApi(env, "sendMessage", body);
+  return j?.result?.message_id || null;
+}
+async function editHtml(env, chatId, messageId, html, keyboard) {
+  if (!messageId) return sendHtml(env, chatId, html, keyboard);
+  const body = { chat_id: chatId, message_id: messageId, text: String(html).slice(0, 4000), parse_mode: "HTML" };
+  if (keyboard) body.reply_markup = { inline_keyboard: keyboard };
+  const j = await telegramApi(env, "editMessageText", body);
+  if (!j?.ok) await sendHtml(env, chatId, html, keyboard);
+}
+async function editReplyMarkup(env, chatId, messageId, keyboard) {
+  await telegramApi(env, "editMessageReplyMarkup", { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: keyboard } });
 }
 
 async function sendTelegram(env, chatId, text, keyboard) {
