@@ -573,9 +573,9 @@ async function tampilkanMenuUtama(env, chatId, from, messageId) {
     "ROLE: " + (isAdmin ? "admin" : "member"),
     "TOTAL VPN: " + daftar.length + " AKUN"];
   if (saldo !== null) baris.push("SALDO VPN: Rp" + saldo.toLocaleString("id-ID"));
-  baris.push(GARIS_PANEL, "SERVER TERSEDIA: " + tersedia + " / " + SERVERS.length + " SERVERS", GARIS_PANEL, "OWNER: SANDEKALA VPN", GARIS_PANEL);
+  baris.push(GARIS_PANEL, "SERVER TERSEDIA: " + tersedia + " / " + SERVERS.length + " SERVERS", GARIS_PANEL, "OWNER: @Asepbesot", GARIS_PANEL);
   if (isAdmin) baris.push("ADMIN: /semuaakun • /broadcast PESAN • /konfirmasi ORDER_ID", GARIS_PANEL);
-  const html = baris.map((x) => (x === "MENU UTAMA" || x === "INFORMASI PELANGGAN") ? "<b>" + escapeHtml(x) + "</b>" : escapeHtml(x)).join("\n");
+  const html = baris.map((x) => (x === "MENU UTAMA" || x === "INFORMASI PELANGGAN") ? "<b>" + escapeHtml(x) + "</b>" : (x === "OWNER: @Asepbesot" ? 'OWNER: <a href="https://t.me/Asepbesot">@Asepbesot</a>' : escapeHtml(x))).join("\n");
   const tombol = [
     [{ text: "🛒 Beli VPN", callback_data: "menu:beli" }],
     [{ text: "🎁 Trial Gratis", callback_data: "menu:trial" }, { text: "📦 Status Order", callback_data: "menu:status" }],
