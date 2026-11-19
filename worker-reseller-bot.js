@@ -200,14 +200,6 @@ export default {
       const mKet = bersih.match(/(masuk|diterima|terima|pembayaran|berhasil)[^\d]{0,20}Rp\s?([\d]+)/i);
       const m = mKet || bersih.match(/Rp\s?([\d]+)/i);
       const amount = m ? parseInt(m[m.length - 1], 10) : 0;
-      // DEBUG SEMENTARA (hapus setelah tes bayar berhasil): laporkan
-      // SEMUA callback ke admin supaya kelihatan teks apa yang sampai
-      // ke worker dan nominal berapa yang kebaca.
-      if (env.ADMIN_CHAT_ID) {
-        await sendTelegram(env, env.ADMIN_CHAT_ID,
-          "🔍 DEBUG callback\nTeks: " + String(text).slice(0, 200) +
-          "\nNominal kebaca: Rp" + amount.toLocaleString("id-ID"));
-      }
       if (!amount) return new Response("ok"); // bukan notif pembayaran
       const order = await findPendingOrderByAmount(env, amount);
       if (!order) {
@@ -238,6 +230,24 @@ export default {
   },
 };
 
+// ---- Toko buka/tutup ala warung (19 Nov 2026) ----
+// Status disimpan di KV ORDERS kunci "TOKO_BUKA": "buka" / "tutup".
+// Default: buka (kalau kunci belum ada). Saat TUTUP, pembeli hanya
+// bisa LIHAT (menu, daftar server, status order, akun saya) — beli,
+// trial, dan perpanjang diblokir dengan pesan tutup. Admin tidak
+// diblokir dan bisa buka/tutup lewat tombol di menu atau perintah
+// /buka dan /tutup. Pembayaran kini MANUAL: admin cek Dana lalu
+// /konfirmasi ORDER_ID (MacroDroid sudah tidak dipakai).
+async function tokoBuka(env) {
+  const v = await env.ORDERS.get("TOKO_BUKA").catch(() => null);
+  return v !== "tutup";
+}
+async function setToko(env, buka) {
+  await env.ORDERS.put("TOKO_BUKA", buka ? "buka" : "tutup");
+}
+function adalahAdmin(env, chatId) { return String(chatId) === String(env.ADMIN_CHAT_ID); }
+const PESAN_TUTUP = "🔴 Toko lagi tutup. Lihat-lihat dulu aja, order dibuka lagi nanti ya.";
+
 // ================= ALUR BELI =================
 
 async function handleTelegram(env, update) {
@@ -267,6 +277,13 @@ async function handleTelegram(env, update) {
     if (data === "menu:status") { await tampilkanStatus(env, cb.from.id, cb.message?.message_id); return; }
     if (data === "menu:akun") { await tampilkanAkun(env, cb.from.id, cb.message?.message_id); return; }
     if (data === "menu:semua") { await tampilkanSemuaAkun(env, cb.from.id, cb.message?.message_id); return; }
+    if (data === "menu:toko") {
+      if (!adalahAdmin(env, cb.from.id)) return;
+      const buka = await tokoBuka(env);
+      await setToko(env, !buka);
+      await tampilkanMenuUtama(env, cb.from.id, cb.from, cb.message?.message_id);
+      return;
+    }
     if (data.startsWith("srvpage:")) { await tampilkanDaftarServer(env, cb.from.id, "beli", parseInt(data.slice(8), 10) || 0, cb.message?.message_id); return; }
     if (data.startsWith("trypage:")) { await tampilkanDaftarServer(env, cb.from.id, "trial", parseInt(data.slice(8), 10) || 0, cb.message?.message_id); return; }
     if (data.startsWith("server:")) {
@@ -275,6 +292,7 @@ async function handleTelegram(env, update) {
       // SSH, CLOUDFRONT NUSA tidak tampil VLESS, sisanya semua.
       const serverKode = data.slice(7);
       const server = SERVERS.find((x) => x.kode === serverKode);
+      if (!(await tokoBuka(env)) && !adalahAdmin(env, cb.from.id)) { await jawabAlert(env, cb.id, PESAN_TUTUP); return; }
       const daftar = PROTOKOL.filter((p) => (server?.protocols || ["ssh", "vmess", "vless", "trojan"]).includes(p.kode));
       const tombol = daftar.map((p) => [
         { text: p.nama, callback_data: "proto:" + serverKode + ":" + p.kode },
@@ -286,6 +304,7 @@ async function handleTelegram(env, update) {
     if (data.startsWith("proto:")) {
       // Langkah 3: pilih durasi untuk server + protokol yang dipilih.
       const [, serverKode, proto] = data.split(":");
+      if (!(await tokoBuka(env)) && !adalahAdmin(env, cb.from.id)) { await jawabAlert(env, cb.id, PESAN_TUTUP); return; }
       const tombol = PAKET.map((p) => [
         { text: p.nama + " — Rp" + p.harga.toLocaleString("id-ID"), callback_data: "paket:" + serverKode + ":" + proto + ":" + p.kode },
       ]);
@@ -296,6 +315,7 @@ async function handleTelegram(env, update) {
     if (data.startsWith("paket:")) {
       // Langkah 4: simpan pilihan, minta username.
       const [, serverKode, proto, kodePaket] = data.split(":");
+      if (!(await tokoBuka(env)) && !adalahAdmin(env, cb.from.id)) { await jawabAlert(env, cb.id, PESAN_TUTUP); return; }
       await env.ORDERS.put("pending:" + cb.from.id, JSON.stringify({ server: serverKode, protocol: proto, paket: kodePaket }));
       await editHtml(env, cb.from.id, cb.message?.message_id, escapeHtml(
         "Kamu pilih " + (SERVERS.find((x) => x.kode === serverKode)?.nama || serverKode) +
@@ -310,6 +330,7 @@ async function handleTelegram(env, update) {
     if (data.startsWith("tserver:")) {
       const serverKode = data.slice(8);
       const server = SERVERS.find((x) => x.kode === serverKode);
+      if (!(await tokoBuka(env)) && !adalahAdmin(env, cb.from.id)) { await jawabAlert(env, cb.id, PESAN_TUTUP); return; }
       if (server?.penuh) { await jawabAlert(env, cb.id, "Server ini penuh, pilih server lain ya."); return; }
       const daftar = PROTOKOL.filter((p) => p.kode !== "zivpn" && (server?.protocols || []).includes(p.kode));
       const tombol = daftar.map((p) => [
@@ -322,6 +343,7 @@ async function handleTelegram(env, update) {
     if (data.startsWith("tproto:")) {
       const [, serverKode, proto] = data.split(":");
       const server = SERVERS.find((x) => x.kode === serverKode);
+      if (!(await tokoBuka(env)) && !adalahAdmin(env, cb.from.id)) { await jawabAlert(env, cb.id, PESAN_TUTUP); return; }
       const midTrial = cb.message?.message_id;
       await editHtml(env, cb.from.id, midTrial, escapeHtml("Membuat akun trial " + proto.toUpperCase() + " di " + (server?.nama || serverKode) + "..."), []);
       const hasil = await trialNadiaAccount(env, server?.serverId, proto);
@@ -345,6 +367,7 @@ async function handleTelegram(env, update) {
       const target = await env.ORDERS.get(orderId, "json").catch(() => null);
       if (!target) { await sendTelegram(env, cb.from.id, "Akun tidak ditemukan."); return; }
       if (String(cb.from.id) !== String(target.chatId) && String(cb.from.id) !== String(env.ADMIN_CHAT_ID)) return;
+      if (!(await tokoBuka(env)) && !adalahAdmin(env, cb.from.id)) { await jawabAlert(env, cb.id, PESAN_TUTUP); return; }
       await buatRenewOrder(env, cb.from.id, target, kodePaket);
       return;
     }
@@ -432,6 +455,10 @@ async function handleTelegram(env, update) {
       username = bersih;
     }
     await env.ORDERS.delete("pending:" + chatId);
+    if (!(await tokoBuka(env)) && !adalahAdmin(env, chatId)) {
+      await sendTelegram(env, chatId, PESAN_TUTUP);
+      return;
+    }
     await buatOrder(env, chatId, pending.paket, pending.protocol, username, pending.server, msg.from);
     return;
   }
@@ -471,7 +498,18 @@ async function handleTelegram(env, update) {
     return;
   }
 
-  // Perintah admin: /konfirmasi ORDER_ID (cadangan kalau MacroDroid telat)
+  // Perintah admin: /buka dan /tutup (toko buka/tutup ala warung).
+  if (text === "/buka" || text === "/tutup") {
+    if (!adalahAdmin(env, chatId)) return;
+    await setToko(env, text === "/buka");
+    await sendTelegram(env, chatId, text === "/buka"
+      ? "🟢 Toko DIBUKA. Pembeli sudah bisa order, trial, dan perpanjang lagi."
+      : "🔴 Toko DITUTUP. Pembeli hanya bisa lihat-lihat (menu, daftar server, status, akun).");
+    return;
+  }
+
+  // Perintah admin: /konfirmasi ORDER_ID (cara utama konfirmasi bayar:
+  // cek Dana lalu /konfirmasi — MacroDroid sudah tidak dipakai).
   if (text.startsWith("/konfirmasi ")) {
     if (String(chatId) !== String(env.ADMIN_CHAT_ID)) return;
     const orderId = text.split(" ")[1];
@@ -601,6 +639,7 @@ async function tampilkanMenuUtama(env, chatId, from, messageId) {
   const live = await ambilStatusServerLive(env);
   const tersedia = SERVERS.filter((x) => !statusServer(x, live).penuh).length;
   const saldo = isAdmin ? await ambilSaldoReseller(env) : null;
+  const buka = await tokoBuka(env);
   // Teks biasa (bukan <pre>): <pre> memunculkan tombol SALIN KODE
   // bawaan Telegram di bawah menu — Asep minta dihilangkan di menu
   // (19 Nov 2026). <pre> hanya dipakai saat mengirim config akun.
@@ -610,8 +649,8 @@ async function tampilkanMenuUtama(env, chatId, from, messageId) {
     "ROLE: " + (isAdmin ? "admin" : "member"),
     "TOTAL VPN: " + daftar.length + " AKUN"];
   if (saldo !== null) baris.push("SALDO VPN: Rp" + saldo.toLocaleString("id-ID"));
-  baris.push(GARIS_PANEL, "SERVER TERSEDIA: " + tersedia + " / " + SERVERS.length + " SERVERS", GARIS_PANEL, "OWNER: @Asepbesot", GARIS_PANEL);
-  if (isAdmin) baris.push("ADMIN: /semuaakun • /broadcast PESAN • /konfirmasi ORDER_ID", GARIS_PANEL);
+  baris.push(GARIS_PANEL, "SERVER TERSEDIA: " + tersedia + " / " + SERVERS.length + " SERVERS", "TOKO: " + (buka ? "🟢 BUKA" : "🔴 TUTUP"), GARIS_PANEL, "OWNER: @Asepbesot", GARIS_PANEL);
+  if (isAdmin) baris.push("ADMIN: /semuaakun • /broadcast PESAN • /konfirmasi ORDER_ID • /buka • /tutup", GARIS_PANEL);
   const html = baris.map((x) => (x === "MENU UTAMA" || x === "INFORMASI PELANGGAN") ? "<b>" + escapeHtml(x) + "</b>" : (x === "OWNER: @Asepbesot" ? 'OWNER: <a href="https://t.me/Asepbesot">@Asepbesot</a>' : escapeHtml(x))).join("\n");
   const tombol = [
     [{ text: "🛒 Beli VPN", callback_data: "menu:beli" }],
@@ -619,6 +658,7 @@ async function tampilkanMenuUtama(env, chatId, from, messageId) {
     [{ text: "👤 Akun Saya", callback_data: "menu:akun" }],
   ];
   if (isAdmin) tombol.push([{ text: "📋 Semua Akun", callback_data: "menu:semua" }]);
+  if (isAdmin) tombol.push([{ text: buka ? "🔴 Tutup Toko" : "🟢 Buka Toko", callback_data: "menu:toko" }]);
   if (messageId) { await editHtml(env, chatId, messageId, html, tombol); return; }
   // Kirim menu + hapus keyboard bawah lama supaya tampilannya seperti
   // bot panel (hanya tombol inline).
@@ -732,6 +772,7 @@ async function handleKelola(env, cb, data) {
   // Pembeli pemilik akun atau admin boleh kelola.
   if (String(chatId) !== String(target.chatId) && String(chatId) !== String(env.ADMIN_CHAT_ID)) return;
   if (aksi === "perpanjang") {
+    if (!(await tokoBuka(env)) && !adalahAdmin(env, chatId)) { await jawabAlert(env, cb.id, PESAN_TUTUP); return; }
     const tombol = PAKET.map((p) => [
       { text: p.nama + " — Rp" + p.harga.toLocaleString("id-ID"), callback_data: "renew:" + orderId + ":" + p.kode },
     ]);
@@ -804,7 +845,7 @@ async function buatRenewOrder(env, chatId, target, kodePaket) {
     "Order perpanjang " + orderId + " dibuat.\n\n" +
     "Akun: " + (target.username || "") + " — tambah " + paket.nama + " — Rp" + paket.harga.toLocaleString("id-ID") + "\n" +
     "Bayar (nominal unik, JANGAN dibulatkan): Rp" + nominalUnik.toLocaleString("id-ID") + "\n\n" +
-    "Scan QRIS DANA Bisnis SANDEKALA dengan nominal di atas. Begitu pembayaran masuk, masa aktif langsung bertambah.");
+    "Scan QRIS DANA Bisnis SANDEKALA dengan nominal di atas. Setelah bayar, admin akan cek pembayaranmu lalu masa aktif bertambah.");
   if (env.QRIS_IMAGE_URL) {
     await sendPhoto(env, chatId, env.QRIS_IMAGE_URL,
       "QRIS DANA Bisnis SANDEKALA — bayar Rp" + nominalUnik.toLocaleString("id-ID") + ". Order " + orderId);
@@ -975,7 +1016,7 @@ async function buatOrder(env, chatId, kodePaket, protocol, customUsername, serve
     "Bayar (nominal unik, JANGAN dibulatkan): " +
     "Rp" + nominalUnik.toLocaleString("id-ID") + "\n\n" +
     "Scan QRIS DANA Bisnis SANDEKALA dengan nominal di atas. " +
-    "Begitu pembayaran masuk, config langsung dikirim ke sini otomatis.\n" +
+    "Setelah bayar, admin akan cek pembayaranmu lalu config dikirim ke sini.\n" +
     "Order ini berlaku 30 menit.");
   await kabariAdmin(env, chatId,
     "🛒 Order baru " + orderId + " (menunggu bayar)\n" +
