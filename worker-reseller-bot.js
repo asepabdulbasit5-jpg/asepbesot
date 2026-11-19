@@ -1062,11 +1062,17 @@ function pesanErrorPenyedia(error) {
 // penyedia), pembeli biasa lihat versi yang dimengerti + admin dikabari
 // error mentahnya.
 async function kabariGagal(env, chatId, judul, error) {
+  // Error mentah penyedia (mis. dump SQL) bisa sangat panjang — potong
+  // jadi maks. 500 karakter supaya chat admin tetap enak dibaca; inti
+  // diagnosanya (jenis error + kolom/tabel) ada di awal pesan.
+  const mentah = String(error || "");
+  const ringkas = mentah.length > 500 ? mentah.slice(0, 500) + "\u2026 (dipotong)" : mentah;
   if (String(chatId) === String(env.ADMIN_CHAT_ID)) {
-    await sendTelegram(env, chatId, judul + ": " + error);
+    await sendTelegram(env, chatId, judul + ": " + ringkas);
   } else {
     await sendTelegram(env, chatId, judul + ": " + pesanErrorPenyedia(error));
-    await kabariAdmin(env, chatId, "⚠️ " + judul + " gagal: " + error);
+    // judul sudah mengandung kata "gagal" — jangan ditambah lagi.
+    await kabariAdmin(env, chatId, "⚠️ " + judul + ": " + ringkas);
   }
 }
 
