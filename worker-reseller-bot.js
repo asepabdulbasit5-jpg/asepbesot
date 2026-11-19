@@ -365,6 +365,21 @@ async function handleTelegram(env, update) {
         "Kalau cocok, lanjut beli paket lewat /beli.", null, midTrial);
       return;
     }
+    // ---- Konfirmasi bayar (tombol admin, ganti ketik /konfirmasi) ----
+    // Dipakai di notif "Order baru", notif gagal buat akun, dan daftar
+    // /semuaakun. Admin cukup ketuk — order ID sudah nempel di tombol.
+    if (data.startsWith("konfirmasi:")) {
+      if (!adalahAdmin(env, cb.from.id)) return;
+      const orderId = data.slice("konfirmasi:".length);
+      const order = await env.ORDERS.get(orderId, "json").catch(() => null);
+      if (!order) { await jawabAlert(env, cb.id, "Order tidak ditemukan."); return; }
+      if (order.status === "selesai") { await jawabAlert(env, cb.id, "Order ini sudah selesai."); return; }
+      await selesaikanOrder(env, orderId, order);
+      await jawabAlert(env, cb.id, order.status === "selesai"
+        ? "Order " + orderId + " dikonfirmasi, config dikirim ke pembeli."
+        : "Order " + orderId + " gagal dibuat, cek pesan berikutnya.");
+      return;
+    }
     // ---- Kelola akun: Perpanjang / Pindah / Ganti / Perbaiki / Hapus ----
     if (data.startsWith("kelola:")) {
       await handleKelola(env, cb, data);
@@ -850,7 +865,8 @@ async function buatRenewOrder(env, chatId, target, kodePaket) {
     "🔄 Order perpanjang baru " + orderId + " (menunggu bayar)\n" +
     "Pembeli: " + (target.pembeli || ("ID " + chatId)) + " — akun " + (target.username || "") +
     " — tambah " + paket.nama + " — bayar Rp" + nominalUnik.toLocaleString("id-ID") + "\n" +
-    "Berlaku 30 menit. Kalau tidak ada kabar bayar masuk, cek Dana / /semuaakun lalu /konfirmasi " + orderId + ".");
+    "Berlaku 30 menit. Kalau uang sudah masuk Dana, ketuk tombol Konfirmasi di bawah.",
+    [[{ text: "✅ Konfirmasi Pembayaran", callback_data: "konfirmasi:" + orderId }]]);
   await sendTelegram(env, chatId,
     "Order perpanjang " + orderId + " dibuat.\n\n" +
     "Akun: " + (target.username || "") + " — tambah " + paket.nama + " — Rp" + paket.harga.toLocaleString("id-ID") + "\n" +
@@ -902,6 +918,10 @@ async function tampilkanSemuaAkun(env, chatId, messageId) {
   orders.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   const total = orders.length;
   const tampil = orders.slice(0, 30);
+  // Tombol konfirmasi untuk order yang masih menunggu bayar / gagal
+  // (maks 10, terbaru dulu) — admin tinggal ketuk, tanpa ketik ID.
+  const butuhKonfirmasi = tampil.filter((o) => o.status === "menunggu bayar" || o.status === "gagal").slice(0, 10);
+  const tombolKonfirmasi = butuhKonfirmasi.map((o) => [{ text: "✅ Konfirmasi " + o.id, callback_data: "konfirmasi:" + o.id }]);
   const baris = tampil.map((o) => {
     let status = o.status || "?";
     if (status === "menunggu bayar" && o.createdAt && Date.now() - o.createdAt > ORDER_TTL_MS) status = "menunggu bayar (kedaluwarsa)";
@@ -919,11 +939,12 @@ async function tampilkanSemuaAkun(env, chatId, messageId) {
   // Kirim per potongan supaya tidak kepotong limit Telegram.
   // Potongan pertama menggantikan pesan menu (kalau dari tombol),
   // tombol kembali ada di potongan terakhir.
+  const tombolAkhir = tombolKonfirmasi.concat(tombolKembali);
   for (let i = 0; i < teks.length; i += 3500) {
     const potong = teks.slice(i, i + 3500);
     const terakhir = i + 3500 >= teks.length;
-    if (messageId && i === 0) await editHtml(env, chatId, messageId, escapeHtml(potong), terakhir ? tombolKembali : []);
-    else await sendTelegram(env, chatId, potong, terakhir ? tombolKembali : undefined);
+    if (messageId && i === 0) await editHtml(env, chatId, messageId, escapeHtml(potong), terakhir ? tombolAkhir : []);
+    else await sendTelegram(env, chatId, potong, terakhir ? tombolAkhir : undefined);
   }
 }
 
@@ -990,9 +1011,9 @@ function namaPembeli(from) {
 // Kabari admin kalau ada order baru / penjualan berhasil.
 // Dipakai supaya admin tetap tahu walau MacroDroid gagal baca notif
 // Dana — admin bisa cek Dana lalu /konfirmasi manual.
-async function kabariAdmin(env, chatIdPembeli, teks) {
+async function kabariAdmin(env, chatIdPembeli, teks, tombol) {
   if (!env.ADMIN_CHAT_ID || String(env.ADMIN_CHAT_ID) === String(chatIdPembeli)) return;
-  await sendTelegram(env, env.ADMIN_CHAT_ID, teks);
+  await sendTelegram(env, env.ADMIN_CHAT_ID, teks, tombol);
 }
 
 async function buatOrder(env, chatId, kodePaket, protocol, customUsername, serverKode, from) {
@@ -1033,7 +1054,8 @@ async function buatOrder(env, chatId, kodePaket, protocol, customUsername, serve
     "Pembeli: " + (order.pembeli || ("ID " + chatId)) + "\n" +
     "Paket: " + paket.nama + " — " + proto.toUpperCase() + " — " + server.nama + "\n" +
     "Username: " + username + " — bayar Rp" + nominalUnik.toLocaleString("id-ID") + "\n" +
-    "Berlaku 30 menit. Kalau tidak ada kabar bayar masuk, cek Dana / /semuaakun lalu /konfirmasi " + orderId + ".");
+    "Berlaku 30 menit. Kalau uang sudah masuk Dana, ketuk tombol Konfirmasi di bawah.",
+    [[{ text: "✅ Konfirmasi Pembayaran", callback_data: "konfirmasi:" + orderId }]]);
   // Gambar QRIS: kirim fotonya kalau QRIS_IMAGE_URL sudah diisi di
   // Secrets Worker. Kalau belum diisi, jujur ke pembeli supaya dia
   // tidak menunggu gambar yang tidak akan datang.
@@ -1088,8 +1110,8 @@ async function selesaikanOrder(env, orderId, order) {
       "⚠️ Order " + orderId + " SUDAH DIBAYAR Rp" +
       order.nominalUnik.toLocaleString("id-ID") +
       " tapi gagal buat akun reseller: " + hasil.error +
-      "\nCek saldo/API reseller, lalu /konfirmasi " + orderId +
-      " setelah diperbaiki — atau refund manual ke pembeli.");
+      "\nCek saldo/API reseller, lalu ketuk tombol Konfirmasi Ulang di bawah setelah diperbaiki — atau refund manual ke pembeli.",
+      [[{ text: "🔄 Konfirmasi Ulang", callback_data: "konfirmasi:" + orderId }]]);
     await sendTelegram(env, order.chatId,
       "Pembayaranmu sudah masuk, tapi pembuatan akun lagi gangguan. " +
       "Admin sudah dikabari, config akan dikirim secepatnya. " +
