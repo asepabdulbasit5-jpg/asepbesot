@@ -192,11 +192,28 @@ export default {
       if (req.headers.get("X-Pay-Secret") !== env.PAY_SECRET)
         return new Response("no", { status: 403 });
       const { text = "" } = await req.json().catch(() => ({}));
-      const m = String(text).replace(/\./g, "").match(/Rp\s?([\d]+)/i);
-      const amount = m ? parseInt(m[1], 10) : 0;
+      const bersih = String(text).replace(/\./g, "");
+      // Ambil nominal: utamakan angka setelah kata "masuk/diterima/
+      // terima/pembayaran/berhasil" (nominal pembayaran), bukan angka
+      // pertama di teks — notif Dana kadang menyebut saldo dulu.
+      // Contoh: "Saldo Rp50.000. Dana masuk Rp1.275" -> 1275, bukan 50000.
+      const mKet = bersih.match(/(masuk|diterima|terima|pembayaran|berhasil)[^\d]{0,20}Rp\s?([\d]+)/i);
+      const m = mKet || bersih.match(/Rp\s?([\d]+)/i);
+      const amount = m ? parseInt(m[m.length - 1], 10) : 0;
       if (!amount) return new Response("ok"); // bukan notif pembayaran
       const order = await findPendingOrderByAmount(env, amount);
-      if (!order) return new Response("ok"); // tidak ada order cocok
+      if (!order) {
+        // Jangan diam: kabari admin kalau ada uang masuk tapi tidak ada
+        // order yang cocok (nominal salah / order kedaluwarsa). Hanya
+        // untuk teks yang memang seperti pembayaran, supaya notif promo
+        // Dana yang kebetulan berisi "Rp" tidak jadi spam.
+        if (/masuk|diterima|terima|pembayaran|berhasil/i.test(String(text)) && env.ADMIN_CHAT_ID) {
+          await sendTelegram(env, env.ADMIN_CHAT_ID,
+            "💰 Dana masuk Rp" + amount.toLocaleString("id-ID") +
+            " tapi TIDAK ADA order yang cocok.\nKemungkinan: pembeli bayar nominal salah (bukan nominal unik), atau order sudah kedaluwarsa (30 menit).\nCek mutasi Dana, lalu /konfirmasi ORDER_ID secara manual.\nNotif: " + String(text).slice(0, 200));
+        }
+        return new Response("ok");
+      }
       await selesaikanOrder(env, order.id, order);
       return new Response("ok");
     }
