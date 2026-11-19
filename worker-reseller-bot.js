@@ -1245,13 +1245,13 @@ async function kirimConfig(env, chatId, pembuka, config, penutup, keyboard, mess
   // ubah dulu jadi teks — jangan sampai "[object Object]" kekirim lagi.
   const teksConfig = typeof config === "string" ? config : ubahConfigJadiTeks(config);
   let isi;
-  if (/^(vless|vmess|trojan|ss):\/\//im.test(teksConfig) || /^GET\s/m.test(teksConfig)) {
-    // Beberapa link/payload: tiap link & tiap baris payload dapat blok
-    // <pre> sendiri supaya tombol SALIN KODE-nya per item; label, info
-    // akun & tanggal exp jadi teks biasa di antara blok-blok itu.
+  if (/^(vless|vmess|trojan|ss):\/\//im.test(teksConfig)) {
+    // Beberapa link: tiap link dapat blok <pre> sendiri supaya tombol
+    // SALIN KODE-nya per link; label, info akun & tanggal exp jadi
+    // teks biasa di antara blok-blok itu.
     isi = teksConfig.split("\n").map((b) => {
       const t = b.trim();
-      if (/^(vless|vmess|trojan|ss):\/\//i.test(t) || /^GET\s/i.test(t)) return "<pre>" + escapeHtml(t) + "</pre>";
+      if (/^(vless|vmess|trojan|ss):\/\//i.test(t)) return "<pre>" + escapeHtml(t) + "</pre>";
       return t === "" ? "" : escapeHtml(b);
     }).join("\n").trim();
   } else {
@@ -1462,7 +1462,7 @@ function formatPort(v) {
     if (!nilai) continue;
     if (perNilai.has(nilai)) continue; // duplikat nilai — tampil sekali saja
     const label = LABEL[String(k).toLowerCase()] || String(k).toUpperCase();
-    perNilai.set(nilai, label + ": " + nilai);
+    perNilai.set(nilai, label + " : " + nilai);
   }
   if (!perNilai.size) return null;
   return [...perNilai.values()].join("\n");
@@ -1483,6 +1483,88 @@ function cariDomain(d) {
     if (v) return v;
   }
   return null;
+}
+
+// Port pertama untuk sebuah kunci port (mis. ws_http -> 80,
+// ws_tls -> 443). Dipakai untuk seksi "Format Account" (format
+// host:port@user:pass ala bot referensi).
+function portPertama(d, kunciList) {
+  const raw = d?.port ?? d?.config?.port ?? d?.data?.port ?? d?.account?.port ?? null;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  for (const k of kunciList) {
+    const v = raw[k];
+    if (Array.isArray(v) && v.length) return String(v[0]);
+    if (v !== undefined && v !== null && v !== "") return String(v);
+  }
+  return null;
+}
+
+// Satu seksi "Payload WebSocket" (template standar Nadia, host diisi
+// dari domain akun). Dipakai renderSSH dan sebagai fallback di
+// ambilConfigDariData.
+function bagianPayload(domain) {
+  const garis = "────────────────────";
+  return "◆ Payload WebSocket\n" + garis + "\n" +
+    "TLS :\nGET /worryfree/ssh HTTP/1.1[crlf]Host: " + domain + "[crlf]Upgrade: websocket[crlf][crlf]\n" +
+    "NON-TLS :\nGET /worryfree/ssh HTTP/1.1[crlf]Host: " + domain + "[crlf]Upgrade: websocket[crlf][crlf]\n" +
+    "CDN :\nGET / HTTP/1.1[crlf]Host: [host_port][crlf]User-Agent: [ua][crlf]Upgrade: websocket[crlf][crlf]\n" +
+    "WITH PATH :\nGET /worryfree/ssh HTTP/1.1[crlf]Host: BUG[crlf]User-Agent: [ua][crlf]Upgrade: websocket[crlf][crlf]";
+}
+
+// Render config SSH rapih per seksi ala bot referensi (Informasi Akun /
+// Domain & Koneksi / Format Account / Payload WebSocket / Masa Aktif),
+// dalam satu blok <pre> supaya rata. `entri` = [{label, nilai}] dari
+// susunBaris; `o` = object respons mentah (untuk port pertama).
+function renderSSH(entri, o) {
+  const peta = new Map(entri.map((e) => [e.label, e.nilai]));
+  const garis = "────────────────────";
+  const seksi = [];
+  const tambah = (judul, baris) => {
+    const isi = baris.filter((b) => b !== null && b !== undefined && b !== "");
+    if (isi.length) seksi.push("◆ " + judul + "\n" + garis + "\n" + isi.join("\n"));
+  };
+  tambah("Informasi Akun", [
+    peta.has("Username") ? "Username : " + peta.get("Username") : null,
+    peta.has("Password") ? "Password : " + peta.get("Password") : null,
+    peta.has("UUID") ? "UUID : " + peta.get("UUID") : null,
+  ]);
+  const serverVal = peta.get("Server") || null;
+  const domain = peta.get("Host / Domain") || (serverVal && !/^\d+\.\d+\.\d+\.\d+$/.test(serverVal) ? serverVal : null);
+  const koneksi = [];
+  if (domain) koneksi.push("Domain : " + domain);
+  if (serverVal) koneksi.push("Server : " + serverVal);
+  if (peta.has("Name Server")) koneksi.push("Ns-Domain : " + peta.get("Name Server"));
+  if (peta.has("Public Key")) koneksi.push("Pubkey : " + peta.get("Public Key"));
+  if (domain) koneksi.push("DNS : " + domain);
+  if (peta.has("Squid Proxy")) koneksi.push("Squid Proxy : " + peta.get("Squid Proxy"));
+  if (peta.has("HTTP Custom")) koneksi.push("HTTP Custom : " + peta.get("HTTP Custom"));
+  if (peta.has("OpenVPN")) koneksi.push("OpenVPN : " + peta.get("OpenVPN"));
+  if (peta.has("SNI")) koneksi.push("SNI : " + peta.get("SNI"));
+  if (peta.has("Path")) koneksi.push("Path : " + peta.get("Path"));
+  if (peta.has("Port")) {
+    const grid = peta.get("Port");
+    koneksi.push(grid.includes("\n") ? "Port :\n" + grid : "Port : " + grid);
+  }
+  tambah("Domain & Koneksi", koneksi);
+  const user = peta.get("Username"), pass = peta.get("Password");
+  const wsPort = portPertama(o, ["ws_http", "none", "ws"]);
+  const tlsPort = portPertama(o, ["ws_tls", "tls"]);
+  if (domain && user && pass && (wsPort || tlsPort)) {
+    const fmt = [];
+    if (wsPort) fmt.push("WS :\n" + domain + ":" + wsPort + "@" + user + ":" + pass);
+    if (tlsPort) fmt.push("TLS :\n" + domain + ":" + tlsPort + "@" + user + ":" + pass);
+    tambah("Format Account", fmt);
+  }
+  if (domain) seksi.push(bagianPayload(domain));
+  const lim = peta.get("Limit Device");
+  tambah("Masa Aktif", [
+    peta.has("Berlaku sampai") ? "Expires : " + peta.get("Berlaku sampai") : null,
+    peta.has("Sisa waktu") ? "Sisa waktu : " + peta.get("Sisa waktu") : null,
+    lim ? "IP Limit : " + String(lim).replace(/ IP$/, "") + " Device" : null,
+    peta.has("Limit IP & Kuota") ? "IP Limit : " + peta.get("Limit IP & Kuota") : null,
+    peta.has("Kuota") ? "Kuota : " + peta.get("Kuota") : null,
+  ]);
+  return seksi.join("\n\n");
 }
 
 // Ubah nilai config apa pun (string / object) jadi teks yang bisa
@@ -1537,7 +1619,7 @@ function ubahConfigJadiTeks(x) {
         return null;
       };
       const baris = [];
-      const cetak = (label, v) => { if (v !== null && v !== undefined && v !== "") baris.push(label + ": " + v); };
+      const cetak = (label, v) => { if (v !== null && v !== undefined && v !== "") baris.push({ label, nilai: String(v) }); };
       cetak("Username", ambil(["username", "user", "name"]));
       cetak("Password", ambil(["password", "pass"]));
       cetak("UUID", ambil(["uuid"]));
@@ -1551,10 +1633,7 @@ function ubahConfigJadiTeks(x) {
       const domainVal = (srvObj && (srvObj.domain || srvObj.host)) || ambil(["domain", "hostname", "host_domain", "host"]);
       if (domainVal && String(domainVal) !== String(serverVal)) cetak("Host / Domain", domainVal);
       const portTeks = formatPort(o.port ?? o.ports ?? null);
-      if (portTeks !== null) {
-        if (portTeks.includes("\n")) baris.push("Port:\n" + portTeks);
-        else baris.push("Port: " + portTeks);
-      }
+      if (portTeks !== null) baris.push({ label: "Port", nilai: portTeks });
       cetak("Squid Proxy", ambil(["squid", "proxy", "http_proxy", "squid_proxy"]));
       // HTTP Custom dari API bentuknya "host:1-65535@user:pass" — bagian
       // @user:pass sudah ada di baris Username/Password di atas, jadi
@@ -1570,25 +1649,30 @@ function ubahConfigJadiTeks(x) {
       const limitIp = ambil(["limit_ip", "ip_limit", "max_ip", "max_devices", "device_limit", "max_device", "devices", "limit"]);
       const kuota = ambil(["quota", "kuota", "data_quota", "quota_limit", "limit_quota"]);
       if (limitIp !== null && kuota !== null) {
-        baris.push("Limit IP & Kuota: " + limitIp + " Dev / " + (/unlimit/i.test(String(kuota)) ? "Unli" : String(kuota)));
+        baris.push({ label: "Limit IP & Kuota", nilai: limitIp + " Dev / " + (/unlimit/i.test(String(kuota)) ? "Unli" : String(kuota)) });
       } else if (limitIp !== null) {
-        baris.push("Limit Device: " + limitIp + " IP");
+        baris.push({ label: "Limit Device", nilai: limitIp + " IP" });
       } else if (kuota !== null) {
-        baris.push("Kuota: " + (/unlimit/i.test(String(kuota)) ? "Unli" : String(kuota)));
+        baris.push({ label: "Kuota", nilai: (/unlimit/i.test(String(kuota)) ? "Unli" : String(kuota)) });
       }
       cetak("SNI", ambil(["sni", "server_name"]));
       cetak("Path", ambil(["path"]));
       const expRaw = ambil(["expired_at", "expires_at", "expired", "expiry"]);
       if (expRaw) {
-        baris.push("Berlaku sampai: " + formatExpired(expRaw));
+        baris.push({ label: "Berlaku sampai", nilai: formatExpired(expRaw) });
         const sisa = sisaWaktu(expRaw);
-        if (sisa) baris.push("Sisa waktu: " + sisa);
+        if (sisa) baris.push({ label: "Sisa waktu", nilai: sisa });
       }
       return baris;
     };
-    let baris = susunBaris(x);
-    if (!baris.length && x.account && typeof x.account === "object") baris = susunBaris(x.account);
-    if (baris.length) return baris.join("\n");
+    let entri = susunBaris(x);
+    if (!entri.length && x.account && typeof x.account === "object") entri = susunBaris(x.account);
+    if (entri.length) {
+      // SSH (punya Password): render rapih per seksi; yang lain tetap
+      // daftar baris biasa.
+      if (entri.some((e) => e.label === "Password")) return renderSSH(entri, x);
+      return entri.map((e) => (e.nilai.includes("\n") ? e.label + ":\n" + e.nilai : e.label + ": " + e.nilai)).join("\n");
+    }
     // 3) Terakhir: JSON mentah supaya info tidak hilang.
     return JSON.stringify(x).slice(0, 1500);
   }
@@ -1819,11 +1903,11 @@ function ambilConfigDariData(d) {
     const domainPayload = cariDomain(d);
     const adaPassword = !!cariField(d, ["password", "pass"]);
     if (adaPassword && domainPayload && !teks.includes("Payload")) {
-      teks += "\n\nPayload WebSocket (HTTP Custom):\n— TLS —\nGET /worryfree/ssh HTTP/1.1[crlf]Host: " + domainPayload + "[crlf]Upgrade: websocket[crlf][crlf]\n— NON-TLS —\nGET /worryfree/ssh HTTP/1.1[crlf]Host: " + domainPayload + "[crlf]Upgrade: websocket[crlf][crlf]\n— CDN —\nGET / HTTP/1.1[crlf]Host: [host_port][crlf]User-Agent: [ua][crlf]Upgrade: websocket[crlf][crlf]\n— WITH PATH —\nGET /worryfree/ssh HTTP/1.1[crlf]Host: BUG[crlf]User-Agent: [ua][crlf]Upgrade: websocket[crlf][crlf]";
+      teks += "\n\n" + bagianPayload(domainPayload);
     }
   }
   const exp = cariExpired(d);
-  if (exp && !teks.includes("Berlaku sampai")) {
+  if (exp && !teks.includes("Berlaku sampai") && !teks.includes("Expires :")) {
     teks += "\n\nBerlaku sampai: " + formatExpired(exp);
     const sisa = sisaWaktu(exp);
     if (sisa) teks += "\nSisa waktu: " + sisa;
@@ -1841,20 +1925,32 @@ function ambilConfigDariData(d) {
 function gabungConfig(configBaru, configLama) {
   if (!configLama || typeof configLama !== "string") return configBaru;
   if (!configBaru || typeof configBaru !== "string") return configLama;
+  // Config SSH baru berbentuk seksi ("◆ ...") — gabung per seksi supaya
+  // baris kaya (grid Port, Pubkey, payload) tidak hilang dan tidak
+  // nyasar ke seksi yang salah.
+  if (configBaru.includes("◆ ") && configLama.includes("◆ ")) return gabungConfigSeksi(configBaru, configLama);
   let hasil = configBaru;
   const LABEL_INFO = ["Port", "Public Key", "Name Server", "Limit Device", "Limit IP & Kuota", "Kuota", "Host / Domain", "Squid Proxy", "HTTP Custom", "OpenVPN", "SNI", "Path"];
+  const adaLabel = (teks, label) => teks.includes(label + ":") || teks.includes(label + " :");
   const ambilBaris = (teks, label) => {
-    const i = teks.indexOf(label + ":");
-    if (i < 0) return null;
-    const j = teks.indexOf("\n", i);
-    return teks.slice(i, j < 0 ? teks.length : j);
+    for (const g of teks.split("\n")) {
+      if (g.startsWith(label + ":") || g.startsWith(label + " :")) return g;
+    }
+    return null;
+  };
+  const cariAnchor = (teks) => {
+    for (const a of ["◆ Masa Aktif", "Berlaku sampai:", "Berlaku sampai :"]) {
+      const i = teks.indexOf(a);
+      if (i >= 0) return i;
+    }
+    return -1;
   };
   for (const label of LABEL_INFO) {
-    if (hasil.includes(label + ":")) continue;
+    if (adaLabel(hasil, label)) continue;
     const barisLama = ambilBaris(configLama, label);
     if (!barisLama) continue;
-    const iExp = hasil.indexOf("Berlaku sampai:");
-    if (iExp >= 0) hasil = hasil.slice(0, iExp) + barisLama + "\n" + hasil.slice(iExp);
+    const iAnchor = cariAnchor(hasil);
+    if (iAnchor >= 0) hasil = hasil.slice(0, iAnchor) + barisLama + "\n" + hasil.slice(iAnchor);
     else hasil += "\n" + barisLama;
   }
   // Link lama dipertahankan kalau config baru tidak membawa link.
@@ -1864,10 +1960,53 @@ function gabungConfig(configBaru, configLama) {
   }
   // Payload lama dipertahankan kalau config baru tidak membawanya.
   if (!hasil.includes("Payload WebSocket") && configLama.includes("Payload WebSocket")) {
-    const iPay = configLama.indexOf("Payload WebSocket");
-    hasil += "\n\n" + configLama.slice(iPay).trim();
+    const iPay = configLama.indexOf("◆ Payload WebSocket");
+    const awal = iPay >= 0 ? iPay : configLama.indexOf("Payload WebSocket");
+    hasil += "\n\n" + configLama.slice(awal).trim();
   }
   return hasil;
+}
+
+// Gabung dua config SSH berbentuk seksi: tiap seksi diambil dari yang
+// lebih lengkap; "Masa Aktif" selalu dari yang baru (exp terbaru),
+// kecuali baris Limit yang dipertahankan dari lama kalau tidak ada.
+function gabungConfigSeksi(configBaru, configLama) {
+  const pecah = (teks) => {
+    const bagian = [];
+    let cur = null;
+    for (const baris of teks.split("\n")) {
+      if (baris.startsWith("◆ ")) {
+        cur = { judul: baris, isi: [] };
+        bagian.push(cur);
+      } else if (cur && baris.trim()) cur.isi.push(baris);
+      else if (!cur && baris.trim()) bagian.push({ judul: null, isi: [baris] });
+    }
+    return bagian;
+  };
+  const baru = pecah(configBaru), lama = pecah(configLama);
+  const cari = (arr, judul) => arr.find((b) => b.judul === judul);
+  const hitung = (arr) => arr.filter((x) => x.trim()).length;
+  const hasil = [];
+  // Urutan seksi baku — seksi yang hanya ada di config lama (mis.
+  // Format Account) harus kembali ke tempatnya, bukan nyangkut di akhir.
+  const URUTAN = [null, "◆ Informasi Akun", "◆ Domain & Koneksi", "◆ Format Account", "◆ Payload WebSocket", "◆ Masa Aktif"];
+  const urutan = [...URUTAN, ...[...new Set([...baru.map((b) => b.judul), ...lama.map((b) => b.judul)])].filter((j) => !URUTAN.includes(j))];
+  for (const judul of urutan) {
+    const b = cari(baru, judul), l = cari(lama, judul);
+    if (!b) { if (l) hasil.push(l); continue; }
+    if (!l) { hasil.push(b); continue; }
+    if (judul && judul.includes("Masa Aktif")) {
+      const isi = [...b.isi];
+      for (const baris of l.isi) {
+        const t = baris.trim();
+        if (/^(IP Limit|Limit|Kuota)/.test(t) && !isi.some((x) => x.trim().startsWith(t.split(":")[0].trim()))) isi.push(baris);
+      }
+      hasil.push({ judul, isi });
+      continue;
+    }
+    hasil.push(hitung(l.isi) > hitung(b.isi) ? l : b);
+  }
+  return hasil.map((b) => (b.judul ? b.judul + "\n" + b.isi.join("\n") : b.isi.join("\n"))).join("\n\n").trim();
 }
 
 // Cari account_id Nadia — letaknya bisa di root, di dalam `account`,
