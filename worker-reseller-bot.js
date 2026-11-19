@@ -357,7 +357,14 @@ async function handleTelegram(env, update) {
       await editHtml(env, cb.from.id, midTrial, escapeHtml("Membuat akun trial " + proto.toUpperCase() + " di " + (server?.nama || serverKode) + "..."), []);
       const hasil = await trialNadiaAccount(env, server?.serverId, proto);
       if (!hasil.ok) {
-        await editHtml(env, cb.from.id, midTrial, escapeHtml("Trial gagal: " + hasil.error + "\n(Syarat trial: saldo reseller minimal Rp15.000. Saldo Asep terakhir Rp14.691 — kemungkinan harus topup dulu.)"), []);
+        const soalSaldo = /saldo|balance|insufficient/i.test(String(hasil.error || ""));
+        const teksTrial = String(cb.from.id) === String(env.ADMIN_CHAT_ID)
+          ? "Trial gagal: " + hasil.error
+          : "Trial gagal: " + pesanErrorPenyedia(hasil.error) + (soalSaldo ? "\n(Syarat trial: saldo reseller minimal Rp15.000 — kemungkinan harus topup dulu.)" : "");
+        await editHtml(env, cb.from.id, midTrial, escapeHtml(teksTrial), []);
+        if (String(cb.from.id) !== String(env.ADMIN_CHAT_ID)) {
+          await kabariAdmin(env, cb.from.id, "⚠️ Trial gagal (" + (server?.nama || serverKode) + " / " + proto.toUpperCase() + "): " + hasil.error);
+        }
         return;
       }
       if (hasil.config && !hasil.config.includes("Berlaku sampai")) {
@@ -407,7 +414,7 @@ async function handleTelegram(env, update) {
       if (!server || server.penuh) { await jawabAlert(env, cb.id, "Server ini penuh, pilih server lain ya."); return; }
       await sendTelegram(env, cb.from.id, "Memindahkan akun " + (target.username || "") + " ke " + server.nama + "...");
       const r = await nadiaPost(env, "/vpn/migrate", { account_id: target.accountId, new_server_id: server.serverId });
-      if (!r.ok) { await sendTelegram(env, cb.from.id, "Pindah server gagal: " + r.error); return; }
+      if (!r.ok) { await kabariGagal(env, cb.from.id, "Pindah server gagal", r.error); return; }
       target.server = server.kode; target.serverNama = server.nama; target.serverId = server.serverId;
       await env.ORDERS.put(orderId, JSON.stringify(target));
       if (r.data?.config) await kirimConfig(env, cb.from.id, "✅ Akun berhasil dipindah ke " + server.nama + ". Sisa masa aktif tetap. Config tidak berubah kecuali IP.\n\nConfig terbaru:", ambilConfigDariData(r.data));
@@ -830,7 +837,7 @@ async function handleKelola(env, cb, data) {
     if (!target.accountId) { await sendTelegram(env, chatId, "Akun ini tidak punya ID akun tersimpan — perbaiki manual, hubungi admin."); return; }
     await sendTelegram(env, chatId, "Mengambil data terbaru akun " + (target.username || "") + " dari penyedia...");
     const r = await nadiaPost(env, "/vpn/account/details", { account_id: target.accountId });
-    if (!r.ok) { await sendTelegram(env, chatId, "Perbaiki akun gagal: " + r.error); return; }
+    if (!r.ok) { await kabariGagal(env, chatId, "Perbaiki akun gagal", r.error); return; }
     const cfg = ambilConfigDariData(r.data);
     target.config = cfg;
     await env.ORDERS.put(orderId, JSON.stringify(target));
@@ -887,7 +894,7 @@ async function eksekusiGantiProtokol(env, chatId, target, proto, sshPassword) {
   if (proto === "ssh" && sshPassword) body.ssh_password = sshPassword;
   await sendTelegram(env, chatId, "Mengganti protokol akun " + (target.username || "") + " ke " + proto.toUpperCase() + "...");
   const r = await nadiaPost(env, "/vpn/change-protocol", body);
-  if (!r.ok) { await sendTelegram(env, chatId, "Ganti protokol gagal: " + r.error); return; }
+  if (!r.ok) { await kabariGagal(env, chatId, "Ganti protokol gagal", r.error); return; }
   target.protocol = proto;
   if (r.data?.config) target.config = ambilConfigDariData(r.data);
   await env.ORDERS.put(target.id, JSON.stringify(target));
@@ -1017,6 +1024,35 @@ function namaPembeli(from) {
 async function kabariAdmin(env, chatIdPembeli, teks, tombol) {
   if (!env.ADMIN_CHAT_ID || String(env.ADMIN_CHAT_ID) === String(chatIdPembeli)) return;
   await sendTelegram(env, env.ADMIN_CHAT_ID, teks, tombol);
+}
+
+// Terjemahkan error mentah dari API penyedia jadi bahasa yang dimengerti
+// pembeli. Error mentah (sering berupa dump SQL) tetap dikirim ke admin
+// supaya bisa dilaporkan ke penyedia — pembeli jangan dikasih lihat itu.
+function pesanErrorPenyedia(error) {
+  const e = String(error || "");
+  if (/SQLSTATE|Column not found|Unknown column|database|mysql|SQL:/i.test(e)) {
+    return "Server penyedia lagi gangguan (database-nya error). Coba lagi nanti ya — admin sudah dikabari.";
+  }
+  if (/tidak bisa hubungi|Failed to fetch|network|timeout|ECONN/i.test(e)) {
+    return "Tidak bisa hubungi server penyedia. Coba lagi sebentar lagi ya.";
+  }
+  if (/saldo|balance|insufficient/i.test(e)) {
+    return "Saldo reseller admin kurang. Hubungi admin ya.";
+  }
+  return e.length > 200 ? e.slice(0, 200) + "…" : e;
+}
+
+// Kirim pesan gagal: admin lihat error mentah (butuh buat lapor ke
+// penyedia), pembeli biasa lihat versi yang dimengerti + admin dikabari
+// error mentahnya.
+async function kabariGagal(env, chatId, judul, error) {
+  if (String(chatId) === String(env.ADMIN_CHAT_ID)) {
+    await sendTelegram(env, chatId, judul + ": " + error);
+  } else {
+    await sendTelegram(env, chatId, judul + ": " + pesanErrorPenyedia(error));
+    await kabariAdmin(env, chatId, "⚠️ " + judul + " gagal: " + error);
+  }
 }
 
 async function buatOrder(env, chatId, kodePaket, protocol, customUsername, serverKode, from) {
