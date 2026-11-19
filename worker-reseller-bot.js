@@ -1557,8 +1557,8 @@ function susunInfoAkun(d, links) {
   cetak("Domain CloudFront", cfDomain);
   cetak("ISP Server", cariField(d, ["isp", "isp_server", "provider"]));
   cetak("Lokasi", cariField(d, ["location", "lokasi", "city", "kota"]));
-  const limitIp = cariField(d, ["limit_ip", "ip_limit", "max_ip", "max_devices", "device_limit"]);
-  const kuota = cariField(d, ["quota", "kuota"]);
+  const limitIp = cariField(d, ["limit_ip", "ip_limit", "max_ip", "max_devices", "device_limit", "max_device", "devices", "limit"]);
+  const kuota = cariField(d, ["quota", "kuota", "data_quota", "quota_limit", "limit_quota"]);
   if (limitIp !== null || kuota !== null) {
     const k = kuota === null ? "?" : (/unlimit/i.test(String(kuota)) ? "Unli" : String(kuota));
     baris.push("Limit IP & Kuota: " + (limitIp !== null ? limitIp + " Dev" : "?") + " / " + k);
@@ -1595,6 +1595,14 @@ function perbaruiExpDiConfig(configLama, configBaru) {
   if (sisaBaru) {
     const ganti = gantiBaris(hasil, "Sisa waktu", sisaBaru);
     hasil = ganti === null ? hasil + "\n" + sisaBaru : ganti;
+  }
+  // Pertahankan baris "Limit IP & Kuota" dari config lama kalau respons
+  // baru tidak membawanya (respons renew tidak menyertakan limit).
+  const limitLama = ambilBaris(configLama, "Limit IP & Kuota");
+  if (limitLama && !hasil.includes("Limit IP & Kuota")) {
+    const iExp = hasil.indexOf("Berlaku sampai:");
+    if (iExp >= 0) hasil = hasil.slice(0, iExp) + limitLama + "\n" + hasil.slice(iExp);
+    else hasil += "\n\n" + limitLama;
   }
   return hasil;
 }
