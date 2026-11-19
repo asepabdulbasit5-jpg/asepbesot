@@ -870,7 +870,7 @@ async function buatRenewOrder(env, chatId, target, kodePaket) {
   await sendTelegram(env, chatId,
     "Order perpanjang " + orderId + " dibuat.\n\n" +
     "Akun: " + (target.username || "") + " — tambah " + paket.nama + " — Rp" + paket.harga.toLocaleString("id-ID") + "\n" +
-    "Bayar (nominal unik, JANGAN dibulatkan): Rp" + nominalUnik.toLocaleString("id-ID") + "\n\n" +
+    "TOLONG BAYAR SESUAI NOMINAL HARGA YANG TERTERA: Rp" + nominalUnik.toLocaleString("id-ID") + "\n\n" +
     "Scan QRIS DANA Bisnis SANDEKALA dengan nominal di atas. Setelah bayar, admin akan cek pembayaranmu lalu masa aktif bertambah.");
   if (env.QRIS_IMAGE_URL) {
     await sendPhoto(env, chatId, env.QRIS_IMAGE_URL,
@@ -1044,7 +1044,7 @@ async function buatOrder(env, chatId, kodePaket, protocol, customUsername, serve
     "Server: " + server.nama + "\n" +
     "Protokol: " + proto.toUpperCase() + "\n" +
     "Username: " + username + "\n" +
-    "Bayar (nominal unik, JANGAN dibulatkan): " +
+    "TOLONG BAYAR SESUAI NOMINAL HARGA YANG TERTERA: " +
     "Rp" + nominalUnik.toLocaleString("id-ID") + "\n\n" +
     "Scan QRIS DANA Bisnis SANDEKALA dengan nominal di atas. " +
     "Setelah bayar, admin akan cek pembayaranmu lalu config dikirim ke sini.\n" +
@@ -1062,10 +1062,10 @@ async function buatOrder(env, chatId, kodePaket, protocol, customUsername, serve
   if (env.QRIS_IMAGE_URL) {
     await sendPhoto(env, chatId, env.QRIS_IMAGE_URL,
       "QRIS DANA Bisnis SANDEKALA — bayar Rp" + nominalUnik.toLocaleString("id-ID") +
-      " (nominal unik, jangan dibulatkan). Order " + orderId);
+      " (TOLONG BAYAR SESUAI NOMINAL HARGA YANG TERTERA). Order " + orderId);
   } else {
     await sendTelegram(env, chatId,
-      "Catatan: gambar QRIS belum dipasang di bot ini — minta gambar QRIS ke admin dulu, lalu bayar nominal unik di atas.");
+      "Catatan: gambar QRIS belum dipasang di bot ini — minta gambar QRIS ke admin dulu, lalu bayar sesuai nominal harga yang tertera di atas.");
   }
 }
 
