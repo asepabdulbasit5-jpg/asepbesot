@@ -580,23 +580,19 @@ async function tampilkanMenuUtama(env, chatId, from, messageId) {
   if (isAdmin) tombol.push([{ text: "📋 Semua Akun", callback_data: "menu:semua" }]);
   if (messageId) { await editHtml(env, chatId, messageId, html, tombol); return; }
   // Kirim menu + hapus keyboard bawah lama supaya tampilannya seperti
-  // bot panel (hanya tombol inline). Pesan dikirim dulu dengan
-  // remove_keyboard, lalu tombol inline dipasang lewat edit.
-  // BUG 19 Nov 2026 (ketemu pas tes akun kedua): edit penempel tombol
-  // kadang gagal diam-diam (Telegram belum selesai memproses pesan
-  // yang baru dikirim) dan hasilnya tidak dicek — menu tampil tanpa
-  // tombol, tombol baru muncul setelah navigasi (editHtml). Perbaikan:
-  // cek hasil edit, coba ulang sekali setelah jeda, dan kalau tetap
-  // gagal kirim ulang menu lengkap dengan tombolnya.
-  const j = await telegramApi(env, "sendMessage", { chat_id: chatId, text: html, parse_mode: "HTML", reply_markup: { remove_keyboard: true } });
+  // bot panel (hanya tombol inline).
+  // BUG 19 Nov 2026 (tes akun kedua): editMessageReplyMarkup untuk
+  // menempel tombol ke pesan yang baru dikirim GAGAL TERUS (bukan
+  // cuma kadang) — perbaikan pertama (retry + kirim ulang) memang
+  // memunculkan tombol, tapi jadi ada 2 pesan menu. Perbaikan final:
+  // jangan pakai editMessageReplyMarkup sama sekali. Kirim dulu pesan
+  // placeholder dengan remove_keyboard, lalu ubah pesan ITU menjadi
+  // menu lengkap + tombol lewat editMessageText (editHtml) — jalur
+  // yang sama dengan navigasi menu, yang selama ini selalu berhasil.
+  const j = await telegramApi(env, "sendMessage", { chat_id: chatId, text: "⏳ Memuat menu...", reply_markup: { remove_keyboard: true } });
   const mid = j?.result?.message_id;
-  if (!mid) { await sendHtml(env, chatId, html, tombol); return; }
-  let r = await editReplyMarkup(env, chatId, mid, tombol);
-  if (!r?.ok) {
-    await new Promise((res) => setTimeout(res, 700));
-    r = await editReplyMarkup(env, chatId, mid, tombol);
-  }
-  if (!r?.ok) await sendHtml(env, chatId, html, tombol);
+  if (mid) await editHtml(env, chatId, mid, html, tombol);
+  else await sendHtml(env, chatId, html, tombol);
 }
 
 function teksDaftarServer(daftar, live, judul, halaman, totalHalaman) {
