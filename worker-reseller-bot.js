@@ -360,6 +360,9 @@ async function handleTelegram(env, update) {
         await editHtml(env, cb.from.id, midTrial, escapeHtml("Trial gagal: " + hasil.error + "\n(Syarat trial: saldo reseller minimal Rp15.000. Saldo Asep terakhir Rp14.691 — kemungkinan harus topup dulu.)"), []);
         return;
       }
+      if (hasil.config && !hasil.config.includes("Berlaku sampai")) {
+        hasil.config += "\n\nBerlaku sampai: " + formatExpired(new Date(Date.now() + 30 * 60000));
+      }
       await kirimConfig(env, cb.from.id,
         "🎁 Ini config trial kamu (30 menit, kuota 1 GB):", hasil.config,
         "Kalau cocok, lanjut beli paket lewat /beli.", null, midTrial);
@@ -1120,6 +1123,14 @@ async function selesaikanOrder(env, orderId, order) {
       "Order: " + orderId);
     return;
   }
+  // Kalau API tidak mengembalikan tanggal exp, hitung dari durasi paket
+  // supaya pembeli tetap tahu masa aktifnya.
+  if (hasil.config && !hasil.config.includes("Berlaku sampai")) {
+    const paket = PAKET.find((p) => p.kode === order.paket) || PAKET[0];
+    const hari = paket.nadiaType === "week" ? 7 * paket.nadiaDuration : paket.nadiaType === "month" ? 30 * paket.nadiaDuration : paket.nadiaDuration;
+    const dasar = order.kind === "renew" ? Date.now() : (order.createdAt || Date.now());
+    hasil.config += "\n\nBerlaku sampai: " + formatExpired(new Date(dasar + hari * 86400000));
+  }
   order.status = "selesai";
   if (order.kind === "renew") {
     // Perpanjang: perbarui order akun lama (nama paket + config baru
@@ -1167,7 +1178,20 @@ async function kirimConfig(env, chatId, pembuka, config, penutup, keyboard, mess
   // Pengaman terakhir: kalau config masih berupa object (parser luput),
   // ubah dulu jadi teks — jangan sampai "[object Object]" kekirim lagi.
   const teksConfig = typeof config === "string" ? config : ubahConfigJadiTeks(config);
-  const html = escapeHtml(pembuka) + "\n\n<pre>" + escapeHtml(teksConfig || "") + "</pre>" + (penutup ? "\n\n" + escapeHtml(penutup) : "");
+  let isi;
+  if (/^(vless|vmess|trojan|ss):\/\//im.test(teksConfig)) {
+    // Beberapa link: tiap link dapat blok <pre> sendiri supaya tombol
+    // SALIN KODE-nya per link; label, info akun & tanggal exp jadi
+    // teks biasa di antara blok-blok itu.
+    isi = teksConfig.split("\n").map((b) => {
+      const t = b.trim();
+      if (/^(vless|vmess|trojan|ss):\/\//i.test(t)) return "<pre>" + escapeHtml(t) + "</pre>";
+      return t === "" ? "" : escapeHtml(b);
+    }).join("\n").trim();
+  } else {
+    isi = "<pre>" + escapeHtml(teksConfig || "") + "</pre>";
+  }
+  const html = escapeHtml(pembuka) + "\n\n" + isi + (penutup ? "\n\n" + escapeHtml(penutup) : "");
   if (messageId) await editHtml(env, chatId, messageId, html, keyboard);
   else await sendHtml(env, chatId, html, keyboard);
 }
@@ -1345,9 +1369,175 @@ function ubahConfigJadiTeks(x) {
   return String(x ?? "");
 }
 
+// Kumpulkan SEMUA link config (vless://, vmess://, trojan://, ss://)
+// yang ada di respons API — rekursif, tanpa duplikat. Web Nadia
+// menampilkan banyak varian (TLS, NONE, GRPC, UPTLS, UPNTLS + versi
+// CloudFront); bot sekarang mengirim semuanya, bukan cuma satu.
+function kumpulkanLink(x, dalam = 0, hasil = new Set()) {
+  if (typeof x === "string") {
+    if (/^(vless|vmess|trojan|ss):\/\//i.test(x.trim())) hasil.add(x.trim());
+    return hasil;
+  }
+  if (!x || typeof x !== "object" || dalam > 3) return hasil;
+  for (const k of Object.keys(x)) kumpulkanLink(x[k], dalam + 1, hasil);
+  return hasil;
+}
+
+// Label varian dari isi link-nya sendiri (seperti label di web Nadia).
+function labelLink(link) {
+  const m = link.match(/^(vless|vmess|trojan|ss):\/\//i);
+  const scheme = m ? m[1].toLowerCase() : "";
+  if (scheme === "vmess") return "VMESS";
+  if (scheme === "ss") return "SS";
+  try {
+    const u = new URL(link);
+    const p = u.searchParams;
+    const type = (p.get("type") || "ws").toLowerCase();
+    const sec = (p.get("security") || "").toLowerCase();
+    const cf = u.hostname.includes("cloudfront.net");
+    let l;
+    if (scheme === "trojan") l = sec === "tls" ? "TROJAN TLS" : "TROJAN";
+    else if (type === "grpc") l = "GRPC";
+    else if (type === "httpupgrade") l = sec === "tls" ? "UPTLS" : "UPNTLS";
+    else if (sec === "tls") l = "TLS";
+    else if (sec === "none") l = "NONE";
+    else l = type.toUpperCase();
+    return cf ? "CF " + l : l;
+  } catch (e) {
+    return scheme.toUpperCase() || "CONFIG";
+  }
+}
+
+// Urutan seperti di web: varian langsung dulu (TLS, NONE, GRPC,
+// UPTLS, UPNTLS), baru versi CloudFront dengan urutan yang sama.
+function urutkanLink(links) {
+  const rank = (l) => {
+    const lab = labelLink(l);
+    const kunci = lab.replace(/^CF /, "");
+    const dasar = { "TLS": 0, "NONE": 1, "GRPC": 2, "UPTLS": 3, "UPNTLS": 4, "TROJAN TLS": 0, "TROJAN": 1, "VMESS": 0, "SS": 0 };
+    return (lab.startsWith("CF ") ? 10 : 0) + (dasar[kunci] ?? 5);
+  };
+  return links.slice().sort((a, b) => rank(a) - rank(b));
+}
+
+// Cari nilai field (string/angka) di respons, termasuk di dalam
+// `account` / `data` / `config` (respons tiap endpoint beda-beda).
+function cariField(d, kunci, dalam = 0) {
+  if (!d || typeof d !== "object" || dalam > 2) return null;
+  for (const k of kunci) {
+    const v = d[k];
+    if (v !== undefined && v !== null && v !== "" && typeof v !== "object") return v;
+  }
+  for (const k of ["account", "data", "config"]) {
+    const v = cariField(d[k], kunci, dalam + 1);
+    if (v !== null && v !== undefined && v !== "") return v;
+  }
+  return null;
+}
+
+// Cari tanggal expired di respons (nama field-nya bisa macam-macam).
+function cariExpired(d, dalam = 0) {
+  if (!d || typeof d !== "object" || dalam > 2) return null;
+  for (const k of ["expired_at", "expires_at", "expired", "expiry", "expire_at", "end_date", "valid_until", "endAt"]) {
+    if (d[k] !== undefined && d[k] !== null && d[k] !== "") return d[k];
+  }
+  for (const k of ["account", "data"]) {
+    const v = cariExpired(d[k], dalam + 1);
+    if (v) return v;
+  }
+  return null;
+}
+
+function parseTanggal(v) {
+  if (v instanceof Date) return v;
+  if (typeof v === "number") return new Date(v < 1e12 ? v * 1000 : v);
+  if (typeof v === "string") {
+    const d = new Date(v.trim().replace(" ", "T"));
+    if (!isNaN(d)) return d;
+  }
+  return null;
+}
+
+// "2026-11-20T16:42:00Z" -> "20 Nov 2026, 23:42 WIB"
+function formatExpired(v) {
+  const d = parseTanggal(v);
+  if (!d) return String(v);
+  return d.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).replace(".", ":") + " WIB";
+}
+
+function sisaWaktu(v) {
+  const d = parseTanggal(v);
+  if (!d) return null;
+  const ms = d - Date.now();
+  if (ms <= 0) return "habis";
+  const jam = Math.floor(ms / 3600000);
+  const menit = Math.floor((ms % 3600000) / 60000);
+  if (jam >= 24) return Math.floor(jam / 24) + " hari " + (jam % 24) + " jam";
+  return jam + " jam " + menit + " menit";
+}
+
+// Info akun ala kartu di web Nadia: username, UUID, server, domain
+// CloudFront, ISP, lokasi, limit IP & kuota, tanggal exp + sisa waktu.
+// Hanya baris yang datanya ada di respons yang ditampilkan; UUID &
+// server diambil dari link config kalau field-nya tidak ada.
+function susunInfoAkun(d, links) {
+  const baris = [];
+  const cetak = (label, v) => { if (v !== null && v !== undefined && v !== "") baris.push(label + ": " + v); };
+  let uuid = null;
+  let namaServer = cariField(d, ["server", "host", "domain", "address"]);
+  let cfDomain = cariField(d, ["cloudfront", "cf_domain", "cf", "cloudfront_domain"]);
+  let username = cariField(d, ["username", "user"]);
+  if (links && links.length) {
+    for (const l of links) {
+      try {
+        const u = new URL(l);
+        if (!uuid && u.username) uuid = u.username;
+        if (!username && u.hash) username = u.hash.slice(1);
+        if (!namaServer && !u.hostname.includes("cloudfront.net")) namaServer = u.hostname;
+        if (!cfDomain && u.hostname.includes("cloudfront.net")) cfDomain = u.hostname;
+      } catch (e) { /* abaikan link yang tidak bisa diurai */ }
+      if (uuid && username && namaServer && cfDomain) break;
+    }
+  }
+  if (!uuid) uuid = cariField(d, ["uuid"]);
+  cetak("Username", username);
+  cetak("UUID", uuid);
+  cetak("Server", namaServer);
+  cetak("Domain CloudFront", cfDomain);
+  cetak("ISP Server", cariField(d, ["isp", "isp_server", "provider"]));
+  cetak("Lokasi", cariField(d, ["location", "lokasi", "city", "kota"]));
+  const limitIp = cariField(d, ["limit_ip", "ip_limit", "max_ip", "max_devices", "device_limit"]);
+  const kuota = cariField(d, ["quota", "kuota"]);
+  if (limitIp !== null || kuota !== null) {
+    const k = kuota === null ? "?" : (/unlimit/i.test(String(kuota)) ? "Unli" : String(kuota));
+    baris.push("Limit IP & Kuota: " + (limitIp !== null ? limitIp + " Dev" : "?") + " / " + k);
+  }
+  const exp = cariExpired(d);
+  if (exp) {
+    cetak("Berlaku sampai", formatExpired(exp));
+    cetak("Sisa waktu", sisaWaktu(exp));
+  }
+  return baris.join("\n");
+}
+
 function ambilConfigDariData(d) {
   if (!d || typeof d !== "object") return String(d ?? "");
-  return ubahConfigJadiTeks(d.config || d.link || d.vless || d.vmess || d.trojan || d.url || d);
+  const links = urutkanLink([...kumpulkanLink(d)]);
+  let teks;
+  if (links.length) {
+    const info = susunInfoAkun(d, links);
+    const daftar = links.map((l) => "— " + labelLink(l) + " —\n" + l).join("\n\n");
+    teks = info ? info + "\n\n" + daftar : daftar;
+  } else {
+    teks = ubahConfigJadiTeks(d.config || d.link || d.vless || d.vmess || d.trojan || d.url || d);
+  }
+  const exp = cariExpired(d);
+  if (exp && !teks.includes("Berlaku sampai")) {
+    teks += "\n\nBerlaku sampai: " + formatExpired(exp);
+    const sisa = sisaWaktu(exp);
+    if (sisa) teks += "\nSisa waktu: " + sisa;
+  }
+  return teks;
 }
 
 // Cari account_id Nadia — letaknya bisa di root, di dalam `account`,
