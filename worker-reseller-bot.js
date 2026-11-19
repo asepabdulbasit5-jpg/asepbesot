@@ -1169,12 +1169,20 @@ async function selesaikanOrder(env, orderId, order) {
   }
   order.status = "selesai";
   if (order.kind === "renew") {
-    // Perpanjang: perbarui order akun lama (nama paket + config baru
-    // kalau Nadia mengembalikan config baru).
+    // Perpanjang: perbarui order akun lama (nama paket + config).
+    // Respons renew biasanya TIDAK membawa link (config tidak berubah,
+    // hanya masa aktif bertambah) — jadi pakai config lama yang
+    // tersimpan supaya pembeli tetap dapat link lengkapnya, cuma
+    // tanggal exp-nya diperbarui dari respons renew.
     const target = await env.ORDERS.get(order.targetOrderId, "json").catch(() => null);
+    let configKirim = hasil.config;
     if (target) {
       target.namaPaket = order.namaPaket;
-      if (hasil.config) target.config = hasil.config;
+      if (hasil.config) {
+        const adaLink = /^(vless|vmess|trojan|ss):\/\//im.test(hasil.config);
+        target.config = adaLink || !target.config ? hasil.config : perbaruiExpDiConfig(target.config, hasil.config);
+        configKirim = target.config;
+      }
       await env.ORDERS.put(order.targetOrderId, JSON.stringify(target));
     }
     await env.ORDERS.put(orderId, JSON.stringify(order));
@@ -1182,8 +1190,8 @@ async function selesaikanOrder(env, orderId, order) {
       "✅ Perpanjang berhasil: " + orderId + "\n" +
       "Pembeli: " + (order.pembeli || ("ID " + order.chatId)) + " — akun " + (order.username || "") +
       " — " + order.namaPaket + " — Rp" + order.nominalUnik.toLocaleString("id-ID") + " sudah masuk.");
-    if (hasil.config) await kirimConfig(env, order.chatId,
-      "✅ Akun " + (order.username || "") + " berhasil diperpanjang (" + order.namaPaket + ").\n\nConfig terbaru:", hasil.config);
+    if (configKirim) await kirimConfig(env, order.chatId,
+      "✅ Akun " + (order.username || "") + " berhasil diperpanjang (" + order.namaPaket + ").\n\nConfig terbaru:", configKirim);
     else await sendTelegram(env, order.chatId,
       "✅ Akun " + (order.username || "") + " berhasil diperpanjang (" + order.namaPaket + ").");
     return;
@@ -1561,6 +1569,34 @@ function susunInfoAkun(d, links) {
     cetak("Sisa waktu", sisaWaktu(exp));
   }
   return baris.join("\n");
+}
+
+// Ambil baris "Berlaku sampai" + "Sisa waktu" dari config baru, lalu
+// ganti baris yang sama di config lama (dipakai saat renew: link tidak
+// berubah, hanya tanggal exp yang bertambah).
+function perbaruiExpDiConfig(configLama, configBaru) {
+  const ambilBaris = (teks, label) => {
+    const i = teks.indexOf(label + ":");
+    if (i < 0) return null;
+    const akhir = teks.indexOf("\n", i);
+    return teks.slice(i, akhir < 0 ? teks.length : akhir);
+  };
+  const gantiBaris = (teks, label, barisBaru) => {
+    const i = teks.indexOf(label + ":");
+    if (i < 0) return null;
+    const akhir = teks.indexOf("\n", i);
+    return teks.slice(0, i) + barisBaru + teks.slice(akhir < 0 ? teks.length : akhir);
+  };
+  const expBaru = ambilBaris(configBaru, "Berlaku sampai");
+  if (!expBaru) return configLama;
+  let hasil = gantiBaris(configLama, "Berlaku sampai", expBaru);
+  if (hasil === null) hasil = configLama + "\n\n" + expBaru;
+  const sisaBaru = ambilBaris(configBaru, "Sisa waktu");
+  if (sisaBaru) {
+    const ganti = gantiBaris(hasil, "Sisa waktu", sisaBaru);
+    hasil = ganti === null ? hasil + "\n" + sisaBaru : ganti;
+  }
+  return hasil;
 }
 
 function ambilConfigDariData(d) {
