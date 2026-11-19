@@ -851,7 +851,7 @@ async function handleKelola(env, cb, data) {
       }
     }
     if (!r.ok) { await kabariGagal(env, chatId, "Perbaiki akun gagal", r.error); return; }
-    const cfg = ambilConfigDariData(r.data);
+    const cfg = gabungConfig(ambilConfigDariData(r.data), target.config);
     target.config = cfg;
     await env.ORDERS.put(orderId, JSON.stringify(target));
     await kirimConfig(env, chatId, "🛠️ Ini config terbaru akun " + (target.username || "") + ":", cfg);
@@ -1488,9 +1488,14 @@ function ubahConfigJadiTeks(x) {
       cetak("Username", ambil(["username", "user", "name"]));
       cetak("Password", ambil(["password", "pass"]));
       cetak("UUID", ambil(["uuid"]));
-      const serverVal = ambil(["server", "host", "address", "ip"]);
+      // `server` bisa berupa OBJECT {server_id, name, domain}
+      // (respons details 20 Nov 2026) — ambil nama & domainnya, jangan
+      // tampilkan server_id internalnya.
+      const srvObj = (o.server && typeof o.server === "object" && !Array.isArray(o.server)) ? o.server
+        : ((o.host && typeof o.host === "object" && !Array.isArray(o.host)) ? o.host : null);
+      const serverVal = srvObj ? (srvObj.name || srvObj.domain || null) : ambil(["server", "host", "address", "ip"]);
       cetak("Server", serverVal);
-      const domainVal = ambil(["domain", "hostname", "host_domain", "host"]);
+      const domainVal = (srvObj && (srvObj.domain || srvObj.host)) || ambil(["domain", "hostname", "host_domain", "host"]);
       if (domainVal && String(domainVal) !== String(serverVal)) cetak("Host / Domain", domainVal);
       cetak("Port", ambil(["port"]));
       cetak("Squid Proxy", ambil(["squid", "proxy", "http_proxy", "squid_proxy"]));
@@ -1737,7 +1742,8 @@ function ambilConfigDariData(d) {
     // SSH: template payload WebSocket (HTTP Custom) ala web Nadia —
     // host diisi dari domain akun ini; kalau domain tidak diketahui,
     // payload tidak ditampilkan (jangan ditebak).
-    const domainPayload = cariField(d, ["domain", "hostname", "host_domain", "host"]);
+    const srvObjPayload = (d.server && typeof d.server === "object") ? d.server : ((d.host && typeof d.host === "object") ? d.host : null);
+    const domainPayload = cariField(d, ["domain", "hostname", "host_domain", "host"]) || (srvObjPayload ? (srvObjPayload.domain || srvObjPayload.host || null) : null);
     if (d.password && typeof d.password === "string" && domainPayload && !teks.includes("Payload")) {
       teks += "\n\nPayload WebSocket (HTTP Custom):\n— TLS —\nGET /worryfree/ssh HTTP/1.1[crlf]Host: " + domainPayload + "[crlf]Upgrade: websocket[crlf][crlf]\n— NON-TLS —\nGET /worryfree/ssh HTTP/1.1[crlf]Host: " + domainPayload + "[crlf]Upgrade: websocket[crlf][crlf]\n— CDN —\nGET / HTTP/1.1[crlf]Host: [host_port][crlf]User-Agent: [ua][crlf]Upgrade: websocket[crlf][crlf]\n— WITH PATH —\nGET /worryfree/ssh HTTP/1.1[crlf]Host: BUG[crlf]User-Agent: [ua][crlf]Upgrade: websocket[crlf][crlf]";
     }
@@ -1749,6 +1755,45 @@ function ambilConfigDariData(d) {
     if (sisa) teks += "\nSisa waktu: " + sisa;
   }
   return teks;
+}
+
+// Gabungkan config baru (biasanya dari endpoint details yang
+// responsnya minim) dengan config lama yang tersimpan: baris info yang
+// tidak dikirim details (Port, Public Key, Name Server, Limit, Squid,
+// OpenVPN, payload) dipertahankan dari config lama. Tanpa ini, Perbaiki
+// Akun justru MENGHAPUS data kaya yang didapat waktu order/ganti
+// protokol (kejadian 20 Nov 2026: config SSH lengkap jadi tinggal
+// Username/Password/Server/exp setelah Perbaiki).
+function gabungConfig(configBaru, configLama) {
+  if (!configLama || typeof configLama !== "string") return configBaru;
+  if (!configBaru || typeof configBaru !== "string") return configLama;
+  let hasil = configBaru;
+  const LABEL_INFO = ["Port", "Public Key", "Name Server", "Limit Device", "Limit IP & Kuota", "Kuota", "Host / Domain", "Squid Proxy", "HTTP Custom", "OpenVPN", "SNI", "Path"];
+  const ambilBaris = (teks, label) => {
+    const i = teks.indexOf(label + ":");
+    if (i < 0) return null;
+    const j = teks.indexOf("\n", i);
+    return teks.slice(i, j < 0 ? teks.length : j);
+  };
+  for (const label of LABEL_INFO) {
+    if (hasil.includes(label + ":")) continue;
+    const barisLama = ambilBaris(configLama, label);
+    if (!barisLama) continue;
+    const iExp = hasil.indexOf("Berlaku sampai:");
+    if (iExp >= 0) hasil = hasil.slice(0, iExp) + barisLama + "\n" + hasil.slice(iExp);
+    else hasil += "\n" + barisLama;
+  }
+  // Link lama dipertahankan kalau config baru tidak membawa link.
+  if (!/^(vless|vmess|trojan|ss):\/\//im.test(hasil)) {
+    const linkLama = configLama.split("\n").filter((b) => /^(vless|vmess|trojan|ss):\/\//i.test(b.trim()));
+    if (linkLama.length) hasil += "\n\n" + linkLama.join("\n");
+  }
+  // Payload lama dipertahankan kalau config baru tidak membawanya.
+  if (!hasil.includes("Payload WebSocket") && configLama.includes("Payload WebSocket")) {
+    const iPay = configLama.indexOf("Payload WebSocket");
+    hasil += "\n\n" + configLama.slice(iPay).trim();
+  }
+  return hasil;
 }
 
 // Cari account_id Nadia — letaknya bisa di root, di dalam `account`,
