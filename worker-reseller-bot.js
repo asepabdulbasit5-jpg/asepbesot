@@ -582,10 +582,21 @@ async function tampilkanMenuUtama(env, chatId, from, messageId) {
   // Kirim menu + hapus keyboard bawah lama supaya tampilannya seperti
   // bot panel (hanya tombol inline). Pesan dikirim dulu dengan
   // remove_keyboard, lalu tombol inline dipasang lewat edit.
+  // BUG 19 Nov 2026 (ketemu pas tes akun kedua): edit penempel tombol
+  // kadang gagal diam-diam (Telegram belum selesai memproses pesan
+  // yang baru dikirim) dan hasilnya tidak dicek — menu tampil tanpa
+  // tombol, tombol baru muncul setelah navigasi (editHtml). Perbaikan:
+  // cek hasil edit, coba ulang sekali setelah jeda, dan kalau tetap
+  // gagal kirim ulang menu lengkap dengan tombolnya.
   const j = await telegramApi(env, "sendMessage", { chat_id: chatId, text: html, parse_mode: "HTML", reply_markup: { remove_keyboard: true } });
   const mid = j?.result?.message_id;
-  if (mid) await editReplyMarkup(env, chatId, mid, tombol);
-  else await sendHtml(env, chatId, html, tombol);
+  if (!mid) { await sendHtml(env, chatId, html, tombol); return; }
+  let r = await editReplyMarkup(env, chatId, mid, tombol);
+  if (!r?.ok) {
+    await new Promise((res) => setTimeout(res, 700));
+    r = await editReplyMarkup(env, chatId, mid, tombol);
+  }
+  if (!r?.ok) await sendHtml(env, chatId, html, tombol);
 }
 
 function teksDaftarServer(daftar, live, judul, halaman, totalHalaman) {
@@ -1179,7 +1190,7 @@ async function editHtml(env, chatId, messageId, html, keyboard) {
   if (!j?.ok) await sendHtml(env, chatId, html, keyboard);
 }
 async function editReplyMarkup(env, chatId, messageId, keyboard) {
-  await telegramApi(env, "editMessageReplyMarkup", { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: keyboard } });
+  return await telegramApi(env, "editMessageReplyMarkup", { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: keyboard } });
 }
 
 async function sendTelegram(env, chatId, text, keyboard) {
