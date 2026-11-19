@@ -1385,10 +1385,26 @@ function ubahConfigJadiTeks(x) {
     // 2) Tidak ada link: susun baris-baris dari field yang dikenal.
     const susunBaris = (o) => {
       if (!o || typeof o !== "object") return [];
+      // Nilai bisa berupa object (mis. Port berisi beberapa port:
+      // {ssh: 22, ssl: 443, ws: 80}) — tampilkan isinya, jangan
+      // sampai jadi "[object Object]" (kejadian 20 Nov 2026, ganti
+      // protokol ke SSH: "Port: [object Object]").
+      const nilaiTeks = (v) => {
+        if (v === undefined || v === null || v === "") return null;
+        if (typeof v === "object") {
+          if (Array.isArray(v)) {
+            const isi = v.map((x) => (typeof x === "object" ? JSON.stringify(x) : String(x))).join(", ");
+            return isi || null;
+          }
+          const entri = Object.entries(v).map(([k, val]) => k + ": " + (typeof val === "object" ? JSON.stringify(val) : String(val)));
+          return entri.length ? entri.join(", ") : null;
+        }
+        return v;
+      };
       const ambil = (kunci) => {
         for (const k of kunci) {
-          const v = o[k];
-          if (v !== undefined && v !== null && v !== "") return v;
+          const v = nilaiTeks(o[k]);
+          if (v !== null) return v;
         }
         return null;
       };
@@ -1399,7 +1415,7 @@ function ubahConfigJadiTeks(x) {
       cetak("UUID", ambil(["uuid"]));
       cetak("Server", ambil(["server", "host", "address", "ip"]));
       cetak("Port", ambil(["port"]));
-      cetak("Name Server", ambil(["nameserver", "name_server", "ns", "dns_server"]));
+      cetak("Name Server", ambil(["nameserver", "name_server", "ns", "dns_server", "dns", "nameservers", "slowdns", "ns_server"]));
       cetak("Public Key", ambil(["public_key", "pubkey", "publickey"]));
       cetak("SNI", ambil(["sni", "server_name"]));
       cetak("Path", ambil(["path"]));
