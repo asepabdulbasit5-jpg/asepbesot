@@ -615,13 +615,15 @@ function teksDaftarServer(daftar, live, judul, halaman, totalHalaman) {
 }
 
 function tombolDaftarServer(daftar, live, mode, halaman, totalHalaman) {
+  // Satu tombol per baris (lebar penuh): sebelumnya 2 kolom, nama server
+  // yang panjang kepotong dan tanda kapasitas (🟢/🟡 sisa X) tidak
+  // kelihatan (19 Nov 2026). Ukuran huruf tombol tidak bisa diubah —
+  // itu diatur Telegram — jadi solusinya tombolnya dilebarkan.
   const tombol = [];
-  for (let i = 0; i < daftar.length; i += 2) {
-    tombol.push(daftar.slice(i, i + 2).map((s) => {
-      const st = statusServer(s, live);
-      if (mode === "trial") return { text: s.nama.replace(" — PENUH", ""), callback_data: "tserver:" + s.kode };
-      return { text: labelServer(s, live), callback_data: (st.penuh ? "penuh:" : "server:") + s.kode };
-    }));
+  for (const s of daftar) {
+    const st = statusServer(s, live);
+    if (mode === "trial") tombol.push([{ text: s.nama.replace(" — PENUH", ""), callback_data: "tserver:" + s.kode }]);
+    else tombol.push([{ text: labelServer(s, live), callback_data: (st.penuh ? "penuh:" : "server:") + s.kode }]);
   }
   const nav = [];
   const kunci = mode === "trial" ? "trypage:" : "srvpage:";
