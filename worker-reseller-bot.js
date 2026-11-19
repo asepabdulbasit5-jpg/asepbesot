@@ -227,6 +227,14 @@ async function handleTelegram(env, update) {
       await jawabAlert(env, cb.id, "Server " + (server?.nama || "ini") + " penuh, pilih server lain ya.");
       return;
     }
+    // Tombol di pesan navigasi yang sudah lama (>10 menit): jangan
+    // edit pesan itu lagi — Telegram akan melompat ke pesan lama di
+    // atas chat (membingungkan, 19 Nov 2026). Suruh buka menu baru.
+    const NAV_AWAL = ["menu:", "server:", "proto:", "paket:", "tserver:", "tproto:", "srvpage:", "trypage:"];
+    if (NAV_AWAL.some((aw) => data.startsWith(aw)) && cb.message?.date && Date.now() / 1000 - cb.message.date > 600) {
+      await jawabAlert(env, cb.id, "Pesan ini sudah lama, ketik /start untuk buka menu baru ya.");
+      return;
+    }
     await jawabCallback(env, cb.id);
     if (data === "menu:utama") { await tampilkanMenuUtama(env, cb.from.id, cb.from, cb.message?.message_id); return; }
     if (data === "menu:beli") { await tampilkanDaftarServer(env, cb.from.id, "beli", 0, cb.message?.message_id); return; }
@@ -596,8 +604,13 @@ async function tampilkanMenuUtama(env, chatId, from, messageId) {
   // yang sama dengan navigasi menu, yang selama ini selalu berhasil.
   const j = await telegramApi(env, "sendMessage", { chat_id: chatId, text: "⏳ Memuat menu...", reply_markup: { remove_keyboard: true } });
   const mid = j?.result?.message_id;
-  if (mid) await editHtml(env, chatId, mid, html, tombol);
-  else await sendHtml(env, chatId, html, tombol);
+  if (mid) {
+    // Jeda sebentar: edit yang dilakukan persis setelah kirim kadang
+    // gagal karena Telegram belum selesai memproses pesan barunya
+    // (placeholder "⏳ Memuat menu..." jadi nyangkut, 19 Nov 2026).
+    await new Promise((res) => setTimeout(res, 600));
+    await editHtml(env, chatId, mid, html, tombol);
+  } else await sendHtml(env, chatId, html, tombol);
 }
 
 function teksDaftarServer(daftar, live, judul, halaman, totalHalaman) {
@@ -1226,8 +1239,19 @@ async function editHtml(env, chatId, messageId, html, keyboard) {
   if (!messageId) return sendHtml(env, chatId, html, keyboard);
   const body = { chat_id: chatId, message_id: messageId, text: String(html).slice(0, 4000), parse_mode: "HTML" };
   if (keyboard) body.reply_markup = { inline_keyboard: keyboard };
-  const j = await telegramApi(env, "editMessageText", body);
-  if (!j?.ok) await sendHtml(env, chatId, html, keyboard);
+  let j = await telegramApi(env, "editMessageText", body);
+  if (!j?.ok) {
+    // Pesan yang baru dikirim kadang belum bisa diedit (Telegram belum
+    // selesai memprosesnya) — coba sekali lagi setelah jeda.
+    await new Promise((res) => setTimeout(res, 600));
+    j = await telegramApi(env, "editMessageText", body);
+  }
+  if (!j?.ok) {
+    // Tetap gagal: kirim pesan baru, lalu hapus pesan lama supaya
+    // tidak tertinggal pesan nyangkut (mis. "⏳ Memuat menu...").
+    await sendHtml(env, chatId, html, keyboard);
+    await telegramApi(env, "deleteMessage", { chat_id: chatId, message_id: messageId });
+  }
 }
 async function editReplyMarkup(env, chatId, messageId, keyboard) {
   return await telegramApi(env, "editMessageReplyMarkup", { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: keyboard } });
