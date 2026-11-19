@@ -1352,12 +1352,19 @@ function ubahConfigJadiTeks(x) {
       const cetak = (label, v) => { if (v !== null && v !== undefined && v !== "") baris.push(label + ": " + v); };
       cetak("Username", ambil(["username", "user", "name"]));
       cetak("Password", ambil(["password", "pass"]));
-      cetak("UUID", ambil(["uuid", "account_id", "accountId"]));
+      cetak("UUID", ambil(["uuid"]));
       cetak("Server", ambil(["server", "host", "address", "ip"]));
       cetak("Port", ambil(["port"]));
+      cetak("Name Server", ambil(["nameserver", "name_server", "ns", "dns_server"]));
+      cetak("Public Key", ambil(["public_key", "pubkey", "publickey"]));
       cetak("SNI", ambil(["sni", "server_name"]));
       cetak("Path", ambil(["path"]));
-      cetak("Berlaku sampai", ambil(["expired_at", "expires_at", "expired", "expiry"]));
+      const expRaw = ambil(["expired_at", "expires_at", "expired", "expiry"]);
+      if (expRaw) {
+        baris.push("Berlaku sampai: " + formatExpired(expRaw));
+        const sisa = sisaWaktu(expRaw);
+        if (sisa) baris.push("Sisa waktu: " + sisa);
+      }
       return baris;
     };
     let baris = susunBaris(x);
