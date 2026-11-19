@@ -292,9 +292,9 @@ async function handleTelegram(env, update) {
         await sendTelegram(env, cb.from.id, "Trial gagal: " + hasil.error + "\n(Syarat trial: saldo reseller minimal Rp15.000. Saldo Asep terakhir Rp14.691 — kemungkinan harus topup dulu.)");
         return;
       }
-      await sendTelegram(env, cb.from.id,
-        "🎁 Ini config trial kamu (30 menit, kuota 1 GB):\n\n" + hasil.config +
-        "\n\nKalau cocok, lanjut beli paket lewat /beli.");
+      await kirimConfig(env, cb.from.id,
+        "🎁 Ini config trial kamu (30 menit, kuota 1 GB):", hasil.config,
+        "Kalau cocok, lanjut beli paket lewat /beli.");
       return;
     }
     // ---- Kelola akun: Perpanjang / Pindah / Ganti / Perbaiki / Hapus ----
@@ -323,7 +323,8 @@ async function handleTelegram(env, update) {
       if (!r.ok) { await sendTelegram(env, cb.from.id, "Pindah server gagal: " + r.error); return; }
       target.server = server.kode; target.serverNama = server.nama; target.serverId = server.serverId;
       await env.ORDERS.put(orderId, JSON.stringify(target));
-      await sendTelegram(env, cb.from.id, "✅ Akun berhasil dipindah ke " + server.nama + ". Sisa masa aktif tetap. Config tidak berubah kecuali IP." + (r.data?.config ? "\n\nConfig terbaru:\n" + ambilConfigDariData(r.data) : ""));
+      if (r.data?.config) await kirimConfig(env, cb.from.id, "✅ Akun berhasil dipindah ke " + server.nama + ". Sisa masa aktif tetap. Config tidak berubah kecuali IP.\n\nConfig terbaru:", ambilConfigDariData(r.data));
+      else await sendTelegram(env, cb.from.id, "✅ Akun berhasil dipindah ke " + server.nama + ". Sisa masa aktif tetap. Config tidak berubah kecuali IP.");
       return;
     }
     if (data.startsWith("gproto:")) {
@@ -563,15 +564,18 @@ async function tampilkanMenuUtama(env, chatId, from, messageId) {
   const live = await ambilStatusServerLive(env);
   const tersedia = SERVERS.filter((x) => !statusServer(x, live).penuh).length;
   const saldo = isAdmin ? await ambilSaldoReseller(env) : null;
-  const baris = [GARIS_PANEL, "          MENU UTAMA", GARIS_PANEL, "INFORMASI PELANGGAN",
-    "ID        : " + chatId,
-    "USERNAME  : " + (from?.username ? "@" + from.username : "—"),
-    "ROLE      : " + (isAdmin ? "admin" : "member"),
-    "TOTAL VPN : " + daftar.length + " AKUN"];
-  if (saldo !== null) baris.push("SALDO VPN : Rp" + saldo.toLocaleString("id-ID"));
+  // Teks biasa (bukan <pre>): <pre> memunculkan tombol SALIN KODE
+  // bawaan Telegram di bawah menu — Asep minta dihilangkan di menu
+  // (19 Nov 2026). <pre> hanya dipakai saat mengirim config akun.
+  const baris = [GARIS_PANEL, "MENU UTAMA", GARIS_PANEL, "INFORMASI PELANGGAN",
+    "ID: " + chatId,
+    "USERNAME: " + (from?.username ? "@" + from.username : "—"),
+    "ROLE: " + (isAdmin ? "admin" : "member"),
+    "TOTAL VPN: " + daftar.length + " AKUN"];
+  if (saldo !== null) baris.push("SALDO VPN: Rp" + saldo.toLocaleString("id-ID"));
   baris.push(GARIS_PANEL, "SERVER TERSEDIA: " + tersedia + " / " + SERVERS.length + " SERVERS", GARIS_PANEL, "OWNER: SANDEKALA VPN", GARIS_PANEL);
   if (isAdmin) baris.push("ADMIN: /semuaakun • /broadcast PESAN • /konfirmasi ORDER_ID", GARIS_PANEL);
-  const html = "<pre>" + escapeHtml(baris.join("\n")) + "</pre>";
+  const html = baris.map((x) => (x === "MENU UTAMA" || x === "INFORMASI PELANGGAN") ? "<b>" + escapeHtml(x) + "</b>" : escapeHtml(x)).join("\n");
   const tombol = [
     [{ text: "🛒 Beli VPN", callback_data: "menu:beli" }],
     [{ text: "🎁 Trial Gratis", callback_data: "menu:trial" }, { text: "📦 Status Order", callback_data: "menu:status" }],
@@ -640,7 +644,9 @@ async function tampilkanDaftarServer(env, chatId, mode, halaman, messageId) {
   const judul = mode === "trial"
     ? "🎁 Trial gratis 30 menit (kuota 1 GB, 1 IP).\nSyarat: saldo reseller minimal Rp15.000 (tidak dipotong)."
     : "Pilih servernya:\n🟢 Tersedia  •  🟡 Hampir penuh (sisa ≤ 10 slot)  •  ❌ PENUH tidak bisa dipilih\nAngka = slot kosong" + (live.map ? " (status terbaru)." : " (status per 19 Nov — gagal ambil status terbaru).");
-  const html = "<pre>" + escapeHtml(teksDaftarServer(daftar, live, judul, halaman, totalHalaman)) + "</pre>";
+  // Teks biasa (bukan <pre>) supaya tidak muncul tombol SALIN KODE
+  // bawaan Telegram — sama seperti menu (permintaan Asep 19 Nov 2026).
+  const html = escapeHtml(teksDaftarServer(daftar, live, judul, halaman, totalHalaman));
   const tombol = tombolDaftarServer(daftar, live, mode, halaman, totalHalaman);
   if (messageId) await editHtml(env, chatId, messageId, html, tombol);
   else await sendHtml(env, chatId, html, tombol);
@@ -708,7 +714,7 @@ async function handleKelola(env, cb, data) {
     const cfg = ambilConfigDariData(r.data);
     target.config = cfg;
     await env.ORDERS.put(orderId, JSON.stringify(target));
-    await sendTelegram(env, chatId, "🛠️ Ini config terbaru akun " + (target.username || "") + ":\n\n" + cfg);
+    await kirimConfig(env, chatId, "🛠️ Ini config terbaru akun " + (target.username || "") + ":", cfg);
     return;
   }
   if (aksi === "hapus") {
@@ -764,7 +770,8 @@ async function eksekusiGantiProtokol(env, chatId, target, proto, sshPassword) {
   target.protocol = proto;
   if (r.data?.config) target.config = ambilConfigDariData(r.data);
   await env.ORDERS.put(target.id, JSON.stringify(target));
-  await sendTelegram(env, chatId, "✅ Protokol akun " + (target.username || "") + " sekarang " + proto.toUpperCase() + ". Masa aktif tetap." + (target.config ? "\n\nConfig terbaru:\n" + target.config : ""));
+  if (target.config) await kirimConfig(env, chatId, "✅ Protokol akun " + (target.username || "") + " sekarang " + proto.toUpperCase() + ". Masa aktif tetap.\n\nConfig terbaru:", target.config);
+  else await sendTelegram(env, chatId, "✅ Protokol akun " + (target.username || "") + " sekarang " + proto.toUpperCase() + ". Masa aktif tetap.");
 }
 
 async function tampilkanTrialServer(env, chatId, halaman, messageId) {
@@ -983,9 +990,10 @@ async function selesaikanOrder(env, orderId, order) {
       "✅ Perpanjang berhasil: " + orderId + "\n" +
       "Pembeli: " + (order.pembeli || ("ID " + order.chatId)) + " — akun " + (order.username || "") +
       " — " + order.namaPaket + " — Rp" + order.nominalUnik.toLocaleString("id-ID") + " sudah masuk.");
-    await sendTelegram(env, order.chatId,
-      "✅ Akun " + (order.username || "") + " berhasil diperpanjang (" + order.namaPaket + ")." +
-      (hasil.config ? "\n\nConfig terbaru:\n" + hasil.config : ""));
+    if (hasil.config) await kirimConfig(env, order.chatId,
+      "✅ Akun " + (order.username || "") + " berhasil diperpanjang (" + order.namaPaket + ").\n\nConfig terbaru:", hasil.config);
+    else await sendTelegram(env, order.chatId,
+      "✅ Akun " + (order.username || "") + " berhasil diperpanjang (" + order.namaPaket + ").");
     return;
   }
   // Akun baru: simpan account_id Nadia (UUID) — WAJIB untuk
@@ -1000,10 +1008,19 @@ async function selesaikanOrder(env, orderId, order) {
     "Akun: " + (order.username || "") + " — " + order.namaPaket + " — " + (order.protocol || "?").toUpperCase() +
     " — " + (order.serverNama || order.server || "?") + "\n" +
     "Rp" + order.nominalUnik.toLocaleString("id-ID") + " sudah masuk, config sudah dikirim ke pembeli.");
-  await sendTelegram(env, order.chatId,
-    "✅ Pembayaran diterima! Ini config " + order.namaPaket + " kamu:\n\n" +
-    hasil.config + "\n\nMasa aktif mulai hari ini. Selamat memakai!",
-    tombolKelola(orderId));
+  await kirimConfig(env, order.chatId,
+    "✅ Pembayaran diterima! Ini config " + order.namaPaket + " kamu:", hasil.config,
+    "Masa aktif mulai hari ini. Selamat memakai!", tombolKelola(orderId));
+}
+
+// Kirim config akun ke pembeli dalam blok <pre> supaya Telegram
+// menampilkan tombol SALIN KODE — pembeli tinggal tap untuk menyalin
+// link/config ke v2rayNG. Hanya dipakai untuk config akun, bukan
+// untuk menu/daftar server (di sana <pre> dihapus atas permintaan
+// Asep 19 Nov 2026 karena tombol SALIN KODE mengganggu).
+async function kirimConfig(env, chatId, pembuka, config, penutup, keyboard) {
+  const html = escapeHtml(pembuka) + "\n\n<pre>" + escapeHtml(String(config || "")) + "</pre>" + (penutup ? "\n\n" + escapeHtml(penutup) : "");
+  await sendHtml(env, chatId, html, keyboard);
 }
 
 // Tombol kelola akun (pembeli & admin): Perpanjang, Pindah Server,
