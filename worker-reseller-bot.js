@@ -267,6 +267,11 @@ async function handleTelegram(env, update) {
   const cb = update.callback_query;
   if (cb) { // tombol yang diklik pembeli
     const data = String(cb.data || "");
+    // Tombol yang diklik di grup: arahkan ke DM, jangan proses apa pun.
+    if (cb.message?.chat?.type === "group" || cb.message?.chat?.type === "supergroup") {
+      await jawabAlert(env, cb.id, "Order lewat chat pribadi ya — buka @sandekalavpn_bot, biar config kamu nggak kelihatan orang lain.");
+      return;
+    }
     if (data.startsWith("penuh:")) {
       // Server penuh: tombolnya tidak bisa lanjut — kasih peringatan
       // pop-up di Telegram, lalu kembali ke daftar server.
@@ -462,6 +467,19 @@ async function handleTelegram(env, update) {
   const chatId = msg.chat.id;
   const text = msg.text.trim();
 
+  // Mode grup: di grup bot hanya jadi etalase. Perintah yang dilayani:
+  // /start, /menu, /harga (boleh pakai @namabot di belakangnya).
+  // Sisanya diabaikan — jualan tetap di DM supaya config pembeli
+  // tidak bocor ke semua anggota grup.
+  const diGrup = msg.chat.type === "group" || msg.chat.type === "supergroup";
+  if (diGrup) {
+    const perintah = text.split(" ")[0].replace(/@.+$/, "");
+    if (perintah === "/start" || perintah === "/menu" || perintah === "/harga") {
+      await tampilkanPromoGrup(env, chatId);
+    }
+    return;
+  }
+
   // Tombol bawah permanen = sama dengan perintahnya.
   if (text === "🛒 Beli VPN") { await tampilkanServer(env, chatId); return; }
   if (text === "📦 Status Order") { await tampilkanStatus(env, chatId); return; }
@@ -541,6 +559,14 @@ async function handleTelegram(env, update) {
 
   if (text === "/status") {
     await tampilkanStatus(env, chatId);
+    return;
+  }
+
+  if (text === "/harga") {
+    const buka = await tokoBuka(env);
+    await sendTelegram(env, chatId,
+      "💰 Harga SANDEKALA VPN\n\n1 hari — Rp1.000\n7 hari — Rp5.000\n30 hari — Rp10.000\n\n🎁 Trial gratis 30 menit (kuota 1 GB).\nTOKO: " + (buka ? "🟢 BUKA" : "🔴 TUTUP"),
+      [[{ text: "🛒 Beli VPN", callback_data: "menu:beli" }]]);
     return;
   }
 
@@ -688,6 +714,21 @@ async function ambilSaldoReseller(env) {
     };
     return cari(d) ?? cari(j);
   } catch (e) { return null; }
+}
+
+// Mode grup: di grup bot hanya jadi etalase — info singkat + tombol
+// ke DM. Jualan (beli/trial/config) HANYA di chat pribadi supaya
+// config pembeli tidak bocor ke semua anggota grup.
+async function tampilkanPromoGrup(env, chatId) {
+  const buka = await tokoBuka(env);
+  const teks =
+    "🛡️ SANDEKALA VPN\n\n" +
+    "Harga: 1 hari Rp1.000 • 7 hari Rp5.000 • 30 hari Rp10.000\n" +
+    "🎁 Trial gratis 30 menit (kuota 1 GB).\n" +
+    "TOKO: " + (buka ? "🟢 BUKA" : "🔴 TUTUP") + "\n\n" +
+    "Order lewat chat pribadi ya — klik tombol di bawah.";
+  await sendTelegram(env, chatId, teks,
+    [[{ text: "🛒 Order di Chat Pribadi", url: "https://t.me/sandekalavpn_bot" }]]);
 }
 
 async function tampilkanMenuUtama(env, chatId, from, messageId) {
