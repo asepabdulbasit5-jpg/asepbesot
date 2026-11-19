@@ -247,6 +247,14 @@ async function setToko(env, buka) {
 }
 function adalahAdmin(env, chatId) { return String(chatId) === String(env.ADMIN_CHAT_ID); }
 const PESAN_TUTUP = "🔴 Toko lagi tutup. Lihat-lihat dulu aja, order dibuka lagi nanti ya.";
+// Siarkan status buka/tutup ke semua pembeli (yang pernah order lewat
+// bot). Dipanggil setiap admin buka/tutup toko — lewat tombol menu
+// maupun perintah /buka dan /tutup.
+async function siarkanStatusToko(env, buka) {
+  await kirimBroadcast(env, env.ADMIN_CHAT_ID, buka
+    ? "🟢 SANDEKALA VPN sudah BUKA!\n\nSilakan order VPN lewat bot ini. Ketik /start untuk mulai.\n\nHarga: 1 hari Rp1.000 • 7 hari Rp5.000 • 30 hari Rp10.000"
+    : "🔴 SANDEKALA VPN lagi TUTUP dulu ya.\n\nOrder dibuka lagi nanti — pantau terus bot ini. Ketik /start untuk lihat menu.");
+}
 
 // ================= ALUR BELI =================
 
@@ -282,6 +290,7 @@ async function handleTelegram(env, update) {
       const buka = await tokoBuka(env);
       await setToko(env, !buka);
       await tampilkanMenuUtama(env, cb.from.id, cb.from, cb.message?.message_id);
+      await siarkanStatusToko(env, !buka);
       return;
     }
     if (data.startsWith("srvpage:")) { await tampilkanDaftarServer(env, cb.from.id, "beli", parseInt(data.slice(8), 10) || 0, cb.message?.message_id); return; }
@@ -505,6 +514,7 @@ async function handleTelegram(env, update) {
     await sendTelegram(env, chatId, text === "/buka"
       ? "🟢 Toko DIBUKA. Pembeli sudah bisa order, trial, dan perpanjang lagi."
       : "🔴 Toko DITUTUP. Pembeli hanya bisa lihat-lihat (menu, daftar server, status, akun).");
+    await siarkanStatusToko(env, text === "/buka");
     return;
   }
 
