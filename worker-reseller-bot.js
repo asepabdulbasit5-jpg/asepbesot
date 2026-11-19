@@ -104,16 +104,19 @@
 // ============================================================
 
 // ---- HARGA JUAL (harga final Asep, 19 Nov 2026) ----
-// Asep hanya jual mingguan & bulanan (pilihan harian dihapus
-// 19 Nov 2026). Bulanan dijual Rp10.000:
+// Harian sempat dihapus 19 Nov 2026, diaktifkan lagi malam harinya
+// (untung bersih Rp533/akun setelah fee). Bulanan dijual Rp10.000:
+//   1 hari:  modal Rp267   -> jual Rp1.000  (untung Rp733, bersih Rp533)
 //   7 hari:  modal Rp1.869 -> jual Rp5.000  (untung Rp3.131)
 //   30 hari: modal Rp6.000 -> jual Rp10.000 (untung Rp4.000)
-// (Belum dikurangi fee order Nadia Rp200/order.)
+// (Belum dikurangi fee order Nadia Rp200/order, kecuali harian di atas.)
 // Nominal unik 100-999 ditambahkan otomatis supaya nominal tiap
 // order beda (mis. 10.000 jadi 10.137).
-// Pemetaan ke Nadia: 7 hari = type "week", duration 1.
+// Pemetaan ke Nadia: 1 hari = type "day", duration 1.
+//                    7 hari = type "week", duration 1.
 //                    30 hari = type "month", duration 1.
 const PAKET = [
+  { kode: "1hari",  nama: "VPN 1 hari",  harga: 1000,  durasiHari: 1,  nadiaType: "day",   nadiaDuration: 1 },
   { kode: "7hari",  nama: "VPN 7 hari",  harga: 5000,  durasiHari: 7,  nadiaType: "week",  nadiaDuration: 1 },
   { kode: "30hari", nama: "VPN 30 hari", harga: 10000, durasiHari: 30, nadiaType: "month", nadiaDuration: 1 },
 ];
@@ -585,7 +588,7 @@ function teksDaftarServer(daftar, live, judul, halaman, totalHalaman) {
     const nama = s.nama.replace(" — PENUH", "");
     const pakai = (st.used !== null && st.limit !== null) ? st.used + "/" + st.limit : "?";
     return "🔰 Nama Server: " + nama +
-      "\n💵 Harga: 7 hari Rp5.000 • 30 hari Rp10.000" +
+      "\n💵 Harga: 1 hari Rp1.000 • 7 hari Rp5.000 • 30 hari Rp10.000" +
       "\n🧮 Total Akun Dibuat: " + pakai + (st.sisa !== null ? " (sisa " + st.sisa + ")" : "") +
       (st.penuh ? "\n❌ PENUH" : "") +
       "\n" + GARIS_PANEL;
