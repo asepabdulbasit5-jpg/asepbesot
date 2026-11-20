@@ -5,8 +5,8 @@
 # pembayaran. Secret BOT_TOKEN dipasang di dashboard Cloudflare
 # (Worker > Settings > Variables), bukan di workflow ini.
 # Secrets yang dibutuhkan: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID,
-# ADMIN_CHAT_ID, TELEGRAM_BOT_TOKEN (token bot reseller, dipakai hanya
-# untuk notifikasi deploy ke admin).
+# ADMIN_CHAT_ID, DARKTUNNEL_BOT_TOKEN (token @autosetdark_bot, dipakai
+# hanya untuk notifikasi deploy ke admin).
 name: Deploy Dark Tunnel Bot
 
 on:
@@ -49,19 +49,19 @@ jobs:
       - name: Kabari deploy berhasil
         if: success()
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          DARKTUNNEL_BOT_TOKEN: ${{ secrets.DARKTUNNEL_BOT_TOKEN }}
           ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
         run: |
-          curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+          curl -s -X POST "https://api.telegram.org/bot$DARKTUNNEL_BOT_TOKEN/sendMessage" \
             -d "chat_id=$ADMIN_CHAT_ID" \
             --data-urlencode "text=✅ Deploy berhasil — bot Dark Tunnel (@autosetdark_bot) sudah pakai versi terbaru." > /dev/null
 
       - name: Kabari deploy gagal
         if: failure()
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          DARKTUNNEL_BOT_TOKEN: ${{ secrets.DARKTUNNEL_BOT_TOKEN }}
           ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
         run: |
-          curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+          curl -s -X POST "https://api.telegram.org/bot$DARKTUNNEL_BOT_TOKEN/sendMessage" \
             -d "chat_id=$ADMIN_CHAT_ID" \
             --data-urlencode "text=❌ Deploy GAGAL — bot Dark Tunnel (@autosetdark_bot) masih pakai versi lama. Cek tab Actions buat detail errornya." > /dev/null
