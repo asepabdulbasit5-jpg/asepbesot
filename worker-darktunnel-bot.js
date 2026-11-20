@@ -492,13 +492,7 @@ function keyboardMetodePayload() {
 
 const PESAN_START =
   "👋 <b>Generator Config Dark Tunnel</b>\n\n" +
-  "Kirim akun kamu apa adanya — bot akan buatkan config Dark Tunnel-nya.\n\n" +
-  "Yang bisa diproses:\n" +
-  "• Link <b>VLESS / VMess / Trojan / Shadowsocks</b> (boleh banyak sekaligus)\n" +
-  "• Akun <b>SSH</b> (host, port, username, password) — tulis bebas, boleh acak\n" +
-  "• Kalau akun pakai <b>bug / SNI</b>, tulis juga bug-nya (mis. <code>SNI: bug.example.com</code>) supaya inject aktif\n\n" +
-  "Bot akan balas dengan file <code>.dark</code> (satu file per config).\n" +
-  "Cara impor: di aplikasi Dark Tunnel, pilih <b>Import / Restore</b> lalu pilih file-nya.";
+  "Kirim akun kamu apa adanya — bot akan buatkan config Dark Tunnel-nya.";
 
 const PESAN_GRUP =
   "👋 <b>Generator Config Dark Tunnel</b>\n\n" +
