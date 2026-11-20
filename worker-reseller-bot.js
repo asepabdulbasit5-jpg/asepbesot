@@ -333,7 +333,7 @@ async function siarkanKeSemuaPengguna(env, teks) {
     const j = await telegramApi(env, "sendMessage", { chat_id: Number(id), text: teks.slice(0, 4000) });
     if (j?.ok) ok++; else gagal++;
   }
-  await sendTelegram(env, env.ADMIN_CHAT_ID, "📣 Info buka/tutup terkirim ke " + ok + " pengguna" + (gagal ? ", gagal ke " + gagal + " (kemungkinan blokir bot)." : "."));
+  await sendTelegram(env, env.ADMIN_CHAT_ID, "📣 Info buka/tutup terkirim ke " + ok + " pengguna.");
 }
 
 async function handleTelegram(env, update) {
@@ -1322,7 +1322,7 @@ async function kirimBroadcast(env, chatId, teks) {
     const j = await telegramApi(env, "sendMessage", { chat_id: Number(id), text: teks.slice(0, 4000) });
     if (j?.ok) ok++; else gagal++;
   }
-  await sendTelegram(env, chatId, "📣 Broadcast selesai: terkirim ke " + ok + " pembeli" + (gagal ? ", gagal ke " + gagal + " (kemungkinan blokir bot)." : "."));
+  await sendTelegram(env, chatId, "📣 Broadcast selesai: terkirim ke " + ok + " pembeli.");
 }
 
 // ---- Status expired akun (20 Nov 2026) ----
