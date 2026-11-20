@@ -43,6 +43,9 @@ jobs:
           name = "darktunnel-config"
           main = "worker-darktunnel-bot.js"
           compatibility_date = "2026-11-20"
+          [[kv_namespaces]]
+          binding = "DATA"
+          id = "d570a49feae948b68b7f334a05117efc"
           EOF
           npx -y wrangler@latest deploy
 
