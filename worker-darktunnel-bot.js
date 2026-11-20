@@ -496,14 +496,7 @@ const PESAN_START =
   "Yang bisa diproses:\n" +
   "• Link <b>VLESS / VMess / Trojan / Shadowsocks</b> (boleh banyak sekaligus)\n" +
   "• Akun <b>SSH</b> (host, port, username, password) — tulis bebas, boleh acak\n" +
-  "• Kalau akun pakai <b>bug / SNI</b>, tulis juga bug-nya (mis. <code>SNI: bug.example.com</code>) supaya inject aktif\n" +
-  "• Ketik /bug buat lihat daftar bug host per operator\n" +
-  "• Ketik /cek buat cek apakah sebuah domain merespons\n" +
-  "• Ketik /update buat lihat update terbaru\n" +
-  "• Ketik /config buat ambil config contoh dari admin\n\n" +
-  "Atau pakai tombol di bawah: 🔍 Cari Bug, 🌐 Cek Domain, 🆕 Update Terbaru, 📥 Download APK.\n\n" +
-  "Contoh SSH:\n" +
-  "<pre>Host: sg1.contoh.com\nPort: 22\nUsername: userku\nPassword: passku</pre>\n\n" +
+  "• Kalau akun pakai <b>bug / SNI</b>, tulis juga bug-nya (mis. <code>SNI: bug.example.com</code>) supaya inject aktif\n\n" +
   "Bot akan balas dengan file <code>.dark</code> (satu file per config).\n" +
   "Cara impor: di aplikasi Dark Tunnel, pilih <b>Import / Restore</b> lalu pilih file-nya.";
 
