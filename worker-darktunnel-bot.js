@@ -329,12 +329,16 @@ export const BUG_DB = {
       "www.northlink.co.za", "104.21.52.82") },
     nonton: { label: "Nonton", hosts: daftarBug("s.ytimg.com") },
   } },
-  // Tri (3) — hanya 2 host yang jelas dari bahan grup (§9.2 Opok,
-  // "MODE BOLAK BALIK"): bimatri.ioh.co.id (aplikasi BimaTri) dan
-  // three.co.uk (brand Three). Tambah lagi lewat /tambahbug bila ada.
+  // Tri (3) — dari bahan grup §9.2 Opok ("MODE BOLAK BALIK") + kiriman Asep
+  // 21 Nov 2026: opok (bimatri, three, static.ovo.id, baidu.com, IP) dan
+  // sosmed (TikTok: api24-normal, apac-marketing, IP). Payload opok =
+  // template SSH+payload; payload sosmed = template Direct (bug TikTok).
   tri: { label: "Tri (3)", kategori: {
     opok: { label: "Opok", hosts: daftarBug(
-      "bimatri.ioh.co.id", "three.co.uk") },
+      "bimatri.ioh.co.id", "three.co.uk", "static.ovo.id|cf", "baidu.com",
+      "104.117.252.101", "23.73.192.165", "104.18.6.170", "104.21.22.52") },
+    sosmed: { label: "Sosmed", hosts: daftarBug(
+      "api24-normal.tiktokv.com", "apac-marketing.tiktok.com", "162.159.141.236") },
   } },
 };
 
