@@ -551,11 +551,13 @@ function escapeHtml(s) {
 }
 
 // Nama file .dark dari nama config: huruf kecil, hanya [a-z0-9_-],
-// maks 40 karakter; bila nama kosong pakai "config.dark".
+// maks 40 karakter; bila nama kosong pakai "config". Ditambah sufiks
+// " by @autosetdark_bot" supaya branding bot kelihatan di nama file
+// (permintaan Asep 20 Nov 2026 — ganti caption, yang tidak dipakai).
 export function namaFileDark(namaConfig) {
   let s = String(namaConfig || "").toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
   if (!s) s = "config";
-  return s + ".dark";
+  return s + " by @autosetdark_bot.dark";
 }
 
 // ================= GENERATOR TUNNELCONFIG =================
