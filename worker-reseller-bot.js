@@ -469,10 +469,11 @@ async function handleTelegram(env, update) {
       await editHtml(env, cb.from.id, midTrial, escapeHtml("Membuat akun trial " + proto.toUpperCase() + " di " + (server?.nama || serverKode) + "..."), []);
       const hasil = await trialNadiaAccount(env, server?.serverId, proto);
       if (!hasil.ok) {
-        const soalSaldo = /saldo|balance|insufficient/i.test(String(hasil.error || ""));
+        // Pembeli cuma dikasih tahu trial gagal (tanpa alasan internal,
+        // mis. saldo reseller) — admin dikabari error mentahnya di bawah.
         const teksTrial = String(cb.from.id) === String(env.ADMIN_CHAT_ID)
           ? "Trial gagal: " + hasil.error
-          : "Trial gagal: " + pesanErrorPenyedia(hasil.error) + (soalSaldo ? "\n(Syarat trial: saldo reseller minimal Rp15.000 — kemungkinan harus topup dulu.)" : "");
+          : "Trial gagal, coba lagi nanti ya.";
         await editHtml(env, cb.from.id, midTrial, escapeHtml(teksTrial), []);
         if (String(cb.from.id) !== String(env.ADMIN_CHAT_ID)) {
           await kabariAdmin(env, cb.from.id, "⚠️ Trial gagal (" + (server?.nama || serverKode) + " / " + proto.toUpperCase() + "): " + hasil.error);
