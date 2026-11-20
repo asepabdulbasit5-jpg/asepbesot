@@ -77,7 +77,7 @@ function daftarBug(...items) {
 }
 
 export const BUG_DB = {
-  xl: { label: "XL / Axis", kategori: {
+  xl: { label: "XL", kategori: {
     edu: { label: "Edu", hosts: daftarBug(
       "edu.ruangguru.com", "api.qiscus.com", "api.midtrans.com", "event.skillacademy.com",
       "form-staging.ruangguru.com", "gorontalo.ruangguru.com", "event.ruangguru.com",
@@ -94,8 +94,92 @@ export const BUG_DB = {
       "104.16.143.237", "104.16.142.237", "172.66.152.99") },
     opok: { label: "Opok", hosts: daftarBug(
       "static.ovo.id|cf", "pub-static.pmang.com|cf", "xl.co.id", "ovo.id",
-      "arjuna.axis.co.id", "gopay.co.id", "chat.xl.co.id", "pilih.xl.co.id",
+      "gopay.co.id", "chat.xl.co.id", "pilih.xl.co.id",
       "wp-assets.ovo.id|cf", "livinapp.onelink.me|cf", "auth.xlcyberscan.xl.co.id|cf",
+      "assets.web.q4inc.com|cf", "asphalt.gojek.com|cf", "bpd.m.dana.id", "dana.onelink.me",
+      "three.co.uk", "baidu.com",
+      "13.249.231.12", "13.249.231.14", "13.249.231.31", "13.249.231.42",
+      "13.249.231.43", "13.249.231.51", "13.249.231.71", "13.249.231.72",
+      "13.249.231.97", "13.249.231.99", "13.249.231.85", "13.249.231.84",
+      "13.249.251.81", "13.35.202.97", "18.161.49.87", "18.244.51.92",
+      "13.35.202.3", "13.35.202.129", "104.19.168.112", "108.138.141.61",
+      "108.138.141.90", "108.157.254.16", "54.192.164.97", "54.192.164.129",
+      "3.168.203.26") },
+    wa: { label: "WA", hosts: daftarBug(
+      "listen.noice.id|wc/sni", "creators.noice.id|wc", "academy.noice.id",
+      "cf-prod-cdn.noice.id", "cdn.noiceid.cc", "go.noice.id", "www.noice.id",
+      "fonts.googleapis.com|sni", "googleads.g.doubleclick.net", "line.me",
+      "media.fcgk35-1.fna.whatsapp.net", "c.whatsapp.net", "v.whatsaap.net",
+      "wbbb65a4c1kqkoav7b-gm3temzxg43tgojr.snr.whatsapp.net",
+      "31.13.67.51", "104.22.3.25", "104.18.214.235", "104.18.147.61",
+      "104.18.42.238", "104.16.51.111") },
+    game: { label: "Game", hosts: daftarBug(
+      "dl.cvs.freefiremobile.com|ws/wc", "www.freefiremobile.com|sni", "poe.garena.com|sni",
+      "cdn.aihelp.net|ws", "play.mobilelegends.com", "m.mobilelegends.com|sni",
+      "go.appsflyer.com", "df.game.naver.com", "ava.game.naver.com",
+      "redstone.game.naver.com|cf", "sogood.linefriends.com", "bcmsuporte.garena.com|ws",
+      "m.freefiremobile.com|sni", "suporte.garena.com|sni", "akmpicture.youngjoygame.com|sni",
+      "mediacf.gameloft.com", "cdn.appsflyer.com|cf", "cftxvid.vod.nimo.tv",
+      "ir.huya.com", "dev.appsflyer.com", "www.pubgmobile.com|sni",
+      "104.16.241.118", "162.159.140.159", "104.16.16.243") },
+    sosmed: { label: "Sosmed", hosts: daftarBug(
+      "api24-normal-alisg.tiktokv.com|ws/wc", "api24-normal.tiktokv.com",
+      "api24-normal-useast1a.tiktokv.com", "apac-marketing.tiktok.com", "v27.tiktokcdn.com",
+      "api2.musical.ly", "m-va.tiktokv.com", "www.tiktok.com|sni", "frontier.tiktokv.com",
+      "log.tiktokv.com", "mon16-normal-alisg.tiktokv.com", "search16-normal.tiktokv.com",
+      "search22-normal.tiktokv.com", "tnc0-normal-alisg.tiktokv.com",
+      "safety-enforcement.tiktok.com|sni", "static.cdninstagram.com", "graph.instagram.com",
+      "live-upload.instagram.com", "opensource.fb.com", "graph.facobook.com", "status.fb.com",
+      "investor.fb.com", "investor.atmeta.com", "go2.facebookinc.com",
+      "172.66.1.232", "162.159.141.236", "104.18.19.183",
+      "162.159.130.11", "162.159.129.11") },
+    musik: { label: "Musik", hosts: daftarBug(
+      "investors.spotify.com|wc", "hello.podcasters.spotify.com|cf",
+      "open.spotify.com|sni", "community.spotify.com|sni", "investor.spotify.com") },
+    nonton: { label: "Nonton", hosts: daftarBug(
+      "www.iflix.com|cf/sni", "htrace.wetvinfo.com", "live.iflix.com", "upload.iflix.com",
+      "start.iflix.com", "vod.iflix.com", "pbdebugaccess.iflix.com", "source.iflix.com",
+      "videocdn.iflix.com", "vplay.iflix.com", "pbaccess.iflix.com", "access.iflix.com",
+      "tv.iflix.com", "vcds-kwi001-zain-001.iflix.com", "access.wetv.vip", "live.wetv.vip",
+      "t.rconfig.wetv.vip", "zenvideo.wetv.vip", "quiz.int.vidio.com|ws",
+      "dev-legacy.visionplus.id", "sindo.visionplus.id", "entitlement.visionplus.id|cf",
+      "link.visionplus.id", "partner.catchplay.com", "support-id.catchplay.com",
+      "support-tw.catchplay.com", "creativeservices.netflix.com", "cache.netflix.com",
+      "www.genflix.co.id", "www.sushiroll.co.id|ws", "cms.sushiroll.co.id",
+      "blog.sushiroll.co.id", "go2.webtoons.com", "zaintest.vuclip.com",
+      "162.159.140.147", "172.66.0.145", "76.223.54.146", "3.33.139.32",
+      "185.93.1.245", "44.230.85.241", "52.117.52.70", "13.248.169.48",
+      "104.20.25.114",
+      "104.21.58.186", "172.67.206.64", "104.21.235.171", "172.67.192.40",
+      "104.21.73.208", "104.21.235.172", "162.159.128.7", "104.18.225.52",
+      "172.67.213.134") },
+    conference: { label: "Conference", hosts: daftarBug(
+      "support.zoom.us|wc", "zoomcares.zoom.us", "cdn-cf.zoom.us", "beta.zoom.us",
+      "kiwisuccess.zoom.us", "gomarketplacecontent-cf.zoom.us", "meetings.googleapis.com",
+      "mobilemaps.googleapis.com", "tellafriendreceiver.whatsapp.net", "go.medallia.com",
+      "youtubei.googleapis.com", "git.ajax.googleapis.com", "m.ajax.googleapis.com",
+      "maps.googleapis.com", "web.whatsapp.com", "blog.webex.com", "api.webex.com",
+      "caic.zoom.us", "170.114.46.0") },
+  } },
+  axis: { label: "Axis", kategori: {
+    edu: { label: "Edu", hosts: daftarBug(
+      "edu.ruangguru.com", "api.qiscus.com", "api.midtrans.com", "event.skillacademy.com",
+      "form-staging.ruangguru.com", "gorontalo.ruangguru.com", "event.ruangguru.com",
+      "gw.ruangguru.com", "gw2.ruangguru.com", "account-staging.ruangguru.com|ws/sni",
+      "helpdesk.kelaspintar.id", "www.zenius.com|cf", "www.zenius.net|cf",
+      "edu.udemy.com", "support.udemy.com", "blog.ruangguru.com",
+      "internship.ruangguru.com", "me.ruangguru.com", "get.ruangguru.com",
+      "pages.coursera.org", "ajakrekan.skillacademy.com", "akunprakerja.skillacademy.com",
+      "blog.skillacademy.com", "camp.skillacademy.com", "1udemy-images.udemy.com",
+      "ablink.udemybusiness.udemy.com", "inside165.udemy.com", "edu.jln.my.id",
+      "auth.zellify.app", "app.parentaiapp.com", "www.ruangguru.com",
+      "162.159.140.147", "104.18.3.2", "104.18.2.2", "104.17.72.206",
+      "104.17.3.81", "104.17.74.206", "188.114.97.3", "188.114.96.3",
+      "104.16.143.237", "104.16.142.237", "172.66.152.99") },
+    opok: { label: "Opok", hosts: daftarBug(
+      "static.ovo.id|cf", "pub-static.pmang.com|cf", "ovo.id",
+      "arjuna.axis.co.id", "gopay.co.id",
+      "wp-assets.ovo.id|cf", "livinapp.onelink.me|cf",
       "assets.web.q4inc.com|cf", "asphalt.gojek.com|cf", "bpd.m.dana.id", "dana.onelink.me",
       "staging.games.axis.co.id|ws", "go.axis.co.id", "www.axis.co.id",
       "kuota.axis.co.id", "three.co.uk", "baidu.com",
@@ -369,12 +453,11 @@ async function catatPengguna(env, chatId, nama) {
 }
 
 // ---- Validasi operator / kategori untuk perintah admin ----
-const OPERATOR_ADMIN = { xl: "XL / Axis", telkomsel: "Telkomsel", indosat: "Indosat", smartfren: "Smartfren", tri: "Tri (3)" };
+const OPERATOR_ADMIN = { xl: "XL", axis: "Axis", telkomsel: "Telkomsel", indosat: "Indosat", smartfren: "Smartfren", tri: "Tri (3)" };
 const URUTAN_KATEGORI = ["edu", "opok", "wa", "game", "sosmed", "musik", "nonton", "conference"];
 
 export function normalisasiOperator(op) {
   const k = String(op || "").toLowerCase();
-  if (k === "axis") return "xl"; // alias
   return OPERATOR_ADMIN[k] ? k : null;
 }
 
@@ -1511,7 +1594,7 @@ async function handleTambahBug(env, chatId, teks) {
   const op = normalisasiOperator(opRaw);
   if (!op) {
     await sendTelegram(env, chatId,
-      "😕 Operator tidak dikenal. Pakai salah satu: <b>xl, telkomsel, indosat, smartfren, tri</b> (axis = xl).\n\n" +
+      "😕 Operator tidak dikenal. Pakai salah satu: <b>xl, axis, telkomsel, indosat, smartfren, tri</b>.\n\n" +
       "Format: <code>/tambahbug &lt;operator&gt; &lt;kategori&gt; &lt;host&gt; [catatan]</code>\n" +
       "Contoh: <code>/tambahbug telkomsel opok tdwcontent.telkomsel.com</code>");
     return;
@@ -1642,7 +1725,7 @@ async function handleAdminTertunda(env, chatId, teks) {
     const [opRaw, katRaw, hostRaw, ...catatanParts] = bagian;
     const op = normalisasiOperator(opRaw);
     if (!op) {
-      await sendTelegram(env, chatId, "😕 Operator tidak dikenal. Pakai salah satu: <b>xl, telkomsel, indosat, smartfren, tri</b> (axis = xl).");
+      await sendTelegram(env, chatId, "😕 Operator tidak dikenal. Pakai salah satu: <b>xl, axis, telkomsel, indosat, smartfren, tri</b>.");
       return true;
     }
     const kat = normalisasiKategori(katRaw);
