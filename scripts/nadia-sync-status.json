@@ -1,7 +1,7 @@
 {
-  "checkedAt": "2026-11-20T07:26:37.410Z",
+  "checkedAt": "2026-11-20T07:57:37.189Z",
   "live": null,
   "bot": null,
   "changed": false,
-  "error": "tidak bisa ambil daftar server (HTTP 403)"
+  "error": "tidak bisa ambil data via relay Worker (HTTP 500)"
 }
