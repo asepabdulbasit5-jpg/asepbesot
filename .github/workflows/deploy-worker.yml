@@ -1,11 +1,19 @@
-# Deploy Worker ke Cloudflare (manual dari tab Actions).
-# Dipakai setelah file worker-reseller-bot.js di-update di GitHub.
-# Hanya deploy — tidak cek Nadia, tidak ubah file. Cron Trigger
-# auto-cek Nadia ikut terpasang lewat wrangler.toml di bawah.
+# Deploy Worker ke Cloudflare — OTOMATIS tiap file bot di-push ke main,
+# plus manual dari tab Actions. Dipakai setelah file
+# worker-reseller-bot.js di-update di GitHub. Hanya deploy — tidak
+# cek Nadia, tidak ubah file. Cron Trigger auto-cek Nadia ikut
+# terpasang lewat wrangler.toml di bawah.
+# Secrets yang dibutuhkan: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID,
+# ADMIN_CHAT_ID, TELEGRAM_BOT_TOKEN
+# (repo > Settings > Secrets and variables > Actions).
 name: Deploy Worker
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - worker-reseller-bot.js
 
 permissions:
   contents: read
