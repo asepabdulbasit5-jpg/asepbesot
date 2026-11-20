@@ -64,8 +64,10 @@ const PAYLOAD_TEMPLATE = "[method] [host_port] [protocol][crlf]Host: [host][crlf
 const UA_STANDAR = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36";
 
 // ================= DATABASE BUG HOST (dari grup SANDEKALA) =================
-// Dirapikan dari hidden_files/bahan-grup.md: duplikat dihapus, IP mentah
-// dibuang, hanya host yang bermakna. Format entri: "host" atau "host|catatan".
+// Dirapikan dari hidden_files/bahan-grup.md: duplikat dihapus. Entri bisa
+// berupa hostname maupun alamat IP — bug IP tetap ditampilkan (koreksi
+// 21 Nov 2026: hilangnya bug IP dari daftar adalah masalah, bukan perintah
+// hapus). Format entri: "host" atau "host|catatan".
 // Bug bisa mati sewaktu-waktu — daftar ini referensi, bukan jaminan.
 function daftarBug(...items) {
   return items.map((s) => {
@@ -86,20 +88,32 @@ export const BUG_DB = {
       "pages.coursera.org", "ajakrekan.skillacademy.com", "akunprakerja.skillacademy.com",
       "blog.skillacademy.com", "camp.skillacademy.com", "1udemy-images.udemy.com",
       "ablink.udemybusiness.udemy.com", "inside165.udemy.com", "edu.jln.my.id",
-      "auth.zellify.app", "app.parentaiapp.com", "www.ruangguru.com") },
+      "auth.zellify.app", "app.parentaiapp.com", "www.ruangguru.com",
+      "162.159.140.147", "104.18.3.2", "104.18.2.2", "104.17.72.206",
+      "104.17.3.81", "104.17.74.206", "188.114.97.3", "188.114.96.3",
+      "104.16.143.237", "104.16.142.237", "172.66.152.99") },
     opok: { label: "Opok", hosts: daftarBug(
       "static.ovo.id|cf", "pub-static.pmang.com|cf", "xl.co.id", "ovo.id",
       "arjuna.axis.co.id", "gopay.co.id", "chat.xl.co.id", "pilih.xl.co.id",
       "wp-assets.ovo.id|cf", "livinapp.onelink.me|cf", "auth.xlcyberscan.xl.co.id|cf",
       "assets.web.q4inc.com|cf", "asphalt.gojek.com|cf", "bpd.m.dana.id", "dana.onelink.me",
       "staging.games.axis.co.id|ws", "go.axis.co.id", "www.axis.co.id",
-      "kuota.axis.co.id", "three.co.uk", "baidu.com") },
+      "kuota.axis.co.id", "three.co.uk", "baidu.com",
+      "13.249.231.12", "13.249.231.14", "13.249.231.31", "13.249.231.42",
+      "13.249.231.43", "13.249.231.51", "13.249.231.71", "13.249.231.72",
+      "13.249.231.97", "13.249.231.99", "13.249.231.85", "13.249.231.84",
+      "13.249.251.81", "13.35.202.97", "18.161.49.87", "18.244.51.92",
+      "13.35.202.3", "13.35.202.129", "104.19.168.112", "108.138.141.61",
+      "108.138.141.90", "108.157.254.16", "54.192.164.97", "54.192.164.129",
+      "3.168.203.26") },
     wa: { label: "WA", hosts: daftarBug(
       "listen.noice.id|wc/sni", "creators.noice.id|wc", "academy.noice.id",
       "cf-prod-cdn.noice.id", "cdn.noiceid.cc", "go.noice.id", "www.noice.id",
       "fonts.googleapis.com|sni", "googleads.g.doubleclick.net", "line.me",
       "media.fcgk35-1.fna.whatsapp.net", "c.whatsapp.net", "v.whatsaap.net",
-      "wbbb65a4c1kqkoav7b-gm3temzxg43tgojr.snr.whatsapp.net") },
+      "wbbb65a4c1kqkoav7b-gm3temzxg43tgojr.snr.whatsapp.net",
+      "31.13.67.51", "104.22.3.25", "104.18.214.235", "104.18.147.61",
+      "104.18.42.238", "104.16.51.111") },
     game: { label: "Game", hosts: daftarBug(
       "dl.cvs.freefiremobile.com|ws/wc", "www.freefiremobile.com|sni", "poe.garena.com|sni",
       "cdn.aihelp.net|ws", "play.mobilelegends.com", "m.mobilelegends.com|sni",
@@ -107,7 +121,8 @@ export const BUG_DB = {
       "redstone.game.naver.com|cf", "sogood.linefriends.com", "bcmsuporte.garena.com|ws",
       "m.freefiremobile.com|sni", "suporte.garena.com|sni", "akmpicture.youngjoygame.com|sni",
       "mediacf.gameloft.com", "cdn.appsflyer.com|cf", "cftxvid.vod.nimo.tv",
-      "ir.huya.com", "dev.appsflyer.com", "www.pubgmobile.com|sni") },
+      "ir.huya.com", "dev.appsflyer.com", "www.pubgmobile.com|sni",
+      "104.16.241.118", "162.159.140.159", "104.16.16.243") },
     sosmed: { label: "Sosmed", hosts: daftarBug(
       "api24-normal-alisg.tiktokv.com|ws/wc", "api24-normal.tiktokv.com",
       "api24-normal-useast1a.tiktokv.com", "apac-marketing.tiktok.com", "v27.tiktokcdn.com",
@@ -116,7 +131,9 @@ export const BUG_DB = {
       "search22-normal.tiktokv.com", "tnc0-normal-alisg.tiktokv.com",
       "safety-enforcement.tiktok.com|sni", "static.cdninstagram.com", "graph.instagram.com",
       "live-upload.instagram.com", "opensource.fb.com", "graph.facobook.com", "status.fb.com",
-      "investor.fb.com", "investor.atmeta.com", "go2.facebookinc.com") },
+      "investor.fb.com", "investor.atmeta.com", "go2.facebookinc.com",
+      "172.66.1.232", "162.159.141.236", "104.18.19.183",
+      "162.159.130.11", "162.159.129.11") },
     musik: { label: "Musik", hosts: daftarBug(
       "investors.spotify.com|wc", "hello.podcasters.spotify.com|cf",
       "open.spotify.com|sni", "community.spotify.com|sni", "investor.spotify.com") },
@@ -130,14 +147,20 @@ export const BUG_DB = {
       "link.visionplus.id", "partner.catchplay.com", "support-id.catchplay.com",
       "support-tw.catchplay.com", "creativeservices.netflix.com", "cache.netflix.com",
       "www.genflix.co.id", "www.sushiroll.co.id|ws", "cms.sushiroll.co.id",
-      "blog.sushiroll.co.id", "go2.webtoons.com", "zaintest.vuclip.com") },
+      "blog.sushiroll.co.id", "go2.webtoons.com", "zaintest.vuclip.com",
+      "162.159.140.147", "172.66.0.145", "76.223.54.146", "3.33.139.32",
+      "185.93.1.245", "44.230.85.241", "52.117.52.70", "13.248.169.48",
+      "104.20.25.114",
+      "104.21.58.186", "172.67.206.64", "104.21.235.171", "172.67.192.40",
+      "104.21.73.208", "104.21.235.172", "162.159.128.7", "104.18.225.52",
+      "172.67.213.134") },
     conference: { label: "Conference", hosts: daftarBug(
       "support.zoom.us|wc", "zoomcares.zoom.us", "cdn-cf.zoom.us", "beta.zoom.us",
       "kiwisuccess.zoom.us", "gomarketplacecontent-cf.zoom.us", "meetings.googleapis.com",
       "mobilemaps.googleapis.com", "tellafriendreceiver.whatsapp.net", "go.medallia.com",
       "youtubei.googleapis.com", "git.ajax.googleapis.com", "m.ajax.googleapis.com",
       "maps.googleapis.com", "web.whatsapp.com", "blog.webex.com", "api.webex.com",
-      "caic.zoom.us") },
+      "caic.zoom.us", "170.114.46.0") },
   } },
   telkomsel: { label: "Telkomsel", kategori: {
     edu: { label: "Edu", hosts: daftarBug(
@@ -169,16 +192,25 @@ export const BUG_DB = {
       "status.udemy.com", "video.quipper.com", "parent.quipper.com", "learn.kuncie.com",
       "externalcmsassets.kuncie.com", "cbtbanksoal.kuncie.com", "cbt-api.skul.id",
       "referral-dashboard.zenius.net", "static-media.zenius.net",
-      "cdnlecture.kelaspintar.id", "cdn.kelaspintar.id") },
+      "cdnlecture.kelaspintar.id", "cdn.kelaspintar.id",
+      "74.125.68.100", "142.91.102.190", "104.18.17.214", "188.114.97.2",
+      "162.159.134.42", "104.20.28.42", "104.18.9.196", "104.18.8.196",
+      "172.66.152.99", "172.67.74.70", "170.114.45.6", "104.26.3.86",
+      "104.18.25.139", "104.18.24.139") },
     opok: { label: "Opok", hosts: daftarBug(
       "tdwcontent.telkomsel.com|cf", "12342835.monterey.org", "login.gopay.co.id",
       "static.ovo.id|cf", "ngage.telkomsel.com|cf", "tma-api.telkomsel.com|cf",
       "mta-sts.insurance.gopay.co.id", "goplatform.gojekapi.com", "api.myorbit.id",
       "cdn.linkaja.com|cf", "app.gopay.co.id", "space.byu.id", "blog.acer.com",
       "account.kompas.com", "activity.kompas.com", "ads2.kompas.com", "ads3.kompas.com",
-      "amp.kompas.com", "www.kompas.com") },
+      "amp.kompas.com", "www.kompas.com",
+      "104.18.17.214", "15.232.198.233", "15.232.29.104", "108.138.141.79",
+      "18.161.49.111", "18.161.49.41", "18.161.49.87", "18.161.49.116",
+      "162.159.128.79", "54.192.164.25", "65.8.76.45", "65.8.76.7",
+      "162.159.138.78", "162.159.138.79") },
     game: { label: "Game", hosts: daftarBug(
-      "i.nimo.tv", "ir.huya.com", "cf-vod.nimo.tv", "images.rbxcdn.com") },
+      "i.nimo.tv", "ir.huya.com", "cf-vod.nimo.tv", "images.rbxcdn.com",
+      "18.64.37.89") },
     nonton: { label: "Nonton", hosts: daftarBug(
       "assets.nflxext.com|sni", "help.nflxext.com|sni", "occ-0-64-58.1.nflxso.net|sni",
       "img.email.cashback.opera.com", "img.marketing.mola.tv", "www.lipcon.com",
@@ -197,11 +229,12 @@ export const BUG_DB = {
       "meet.google.com", "teams.live.com", "teams.microsoft.com", "teams.cdn.office.net",
       "teams.skype.com", "caic.zoom.us", "api.qiscus.com", "api.midtrans.com",
       "event.skillacademy.com", "privacy.teams.live.com|sni", "login.teams.live.com|sni",
-      "api.webex.com") },
+      "api.webex.com", "141.193.213.20") },
     opok: { label: "Opok", hosts: daftarBug(
       "myim3api1.ioh.co.id", "static.ovo.id|cf", "myim3.ioh.co.id",
       "myim3asset.ioh.co.id", "myim3-he1.ioh.co.id", "myim3-he.indosatooredoo.com",
-      "bimatri.ioh.co.id", "three.co.uk", "baidu.com") },
+      "bimatri.ioh.co.id", "three.co.uk", "baidu.com",
+      "104.18.21.18", "198.19.1.179", "34.54.192.69", "198.18.0.22") },
     conference: { label: "Conference", hosts: daftarBug(
       "caic.zoom.us", "api.webex.com", "meet.google.com", "teams.live.com") },
   } },
@@ -209,7 +242,7 @@ export const BUG_DB = {
     opok: { label: "Opok", hosts: daftarBug(
       "static.ovo.id|cf", "web.web.whatsapp.com|sni", "api.ovo.id",
       "cuplikan.freshchat.com|cf", "onelinksmartscript.appsflyer.com|cf",
-      "www.northlink.co.za") },
+      "www.northlink.co.za", "104.21.52.82") },
     nonton: { label: "Nonton", hosts: daftarBug("s.ytimg.com") },
   } },
   // Tri (3) — hanya 2 host yang jelas dari bahan grup (§9.2 Opok,
@@ -244,8 +277,8 @@ export function daftarBugPesan(opKey, katKey) {
   const op = BUG_DB[opKey];
   const kat = op?.kategori?.[katKey];
   if (!op || !kat) return null;
-  // Entri berupa IP tidak ditampilkan (permintaan Asep).
-  const hosts = kat.hosts.filter((e) => !isIP(e.h));
+  // Entri berupa IP tetap ditampilkan seperti host biasa.
+  const hosts = kat.hosts;
   const judul = "🐛 <b>Bug " + op.label + " — " + kat.label + "</b> (" + hosts.length + " host)\n\n";
   const baris = hosts.map((e) => "• <code>" + e.h + "</code>" + (e.n ? " (" + e.n + ")" : ""));
   const pesan = [];
@@ -360,8 +393,9 @@ function labelKategori(opKey, katKey) {
 }
 
 // True bila host berupa alamat IP (IPv4, atau IPv6 sederhana).
-// Dipakai untuk menyaring bug IP dari daftar dan menolak bug IP baru
-// (permintaan Asep — bug berupa IP tidak disimpan / tidak ditampilkan).
+// Dipakai /cek (bersihkanDomain + reverse DNS). Bug berupa IP BOLEH
+// ditampilkan di daftar bug dan ditambahkan admin (koreksi 21 Nov 2026:
+// hilangnya bug IP dari daftar adalah masalah, bukan perintah hapus).
 export function isIP(host) {
   let h = String(host || "").trim();
   const mPort = h.match(/^(.+):(\d{1,5})$/);
@@ -438,7 +472,7 @@ export async function daftarBugPesanGabungan(env, opKey, katKey) {
   const op = BUG_DB[opKey];
   const kat = op?.kategori?.[katKey];
   const kv = await ambilBugsKv(env);
-  const kvList = (kv?.[opKey]?.[katKey] || []).filter((e) => e && e.host && !isIP(e.host));
+  const kvList = (kv?.[opKey]?.[katKey] || []).filter((e) => e && e.host);
   if (!kat && kvList.length === 0) return null;
   const ada = new Set(kvList.map((e) => String(e.host).toLowerCase()));
   const baru = (e) => e.ts && Date.now() - e.ts < 7 * 86400 * 1000;
@@ -447,7 +481,7 @@ export async function daftarBugPesanGabungan(env, opKey, katKey) {
     (e.catatan ? " (" + escapeHtml(e.catatan) + ")" : "") +
     (baru(e) ? " 🆕" : ""));
   const barisBawaan = kat
-    ? kat.hosts.filter((e) => !isIP(e.h) && !ada.has(e.h.toLowerCase())).map((e) =>
+    ? kat.hosts.filter((e) => !ada.has(e.h.toLowerCase())).map((e) =>
       "• <code>" + e.h + "</code>" + (e.n ? " (" + e.n + ")" : ""))
     : [];
   const semua = [...barisKv, ...barisBawaan];
@@ -1494,10 +1528,6 @@ async function handleTambahBug(env, chatId, teks) {
     return;
   }
   const host = hostRaw.trim().toLowerCase();
-  if (isIP(host)) {
-    await sendTelegram(env, chatId, "😕 Bug berupa IP tidak disimpan — kirim hostname/domain saja.");
-    return;
-  }
   if (!env.DATA) {
     await sendTelegram(env, chatId, "⚠️ Fitur admin belum aktif — KV belum dipasang di Worker.");
     return;
@@ -1625,10 +1655,6 @@ async function handleAdminTertunda(env, chatId, teks) {
       return true;
     }
     const host = hostRaw.toLowerCase();
-    if (isIP(host)) {
-      await sendTelegram(env, chatId, "😕 Bug berupa IP tidak disimpan — kirim hostname/domain saja.");
-      return true;
-    }
     if (!env.DATA) {
       await sendTelegram(env, chatId, "⚠️ Fitur admin belum aktif — KV belum dipasang di Worker.");
       return true;
