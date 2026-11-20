@@ -292,16 +292,60 @@ const PESAN_TUTUP = "🔴 Toko lagi tutup. Lihat-lihat dulu aja, order dibuka la
 // bot). Dipanggil setiap admin buka/tutup toko — lewat tombol menu
 // maupun perintah /buka dan /tutup.
 async function siarkanStatusToko(env, buka) {
-  await kirimBroadcast(env, env.ADMIN_CHAT_ID, buka
+  await siarkanKeSemuaPengguna(env, buka
     ? "🟢 SANDEKALA VPN sudah BUKA!\n\nSilakan order VPN lewat bot ini. Ketik /start untuk mulai.\n\nHarga: 1 hari Rp1.000 • 7 hari Rp5.000 • 30 hari Rp10.000"
     : "🔴 SANDEKALA VPN lagi TUTUP dulu ya.\n\nOrder dibuka lagi nanti — pantau terus bot ini. Ketik /start untuk lihat menu.");
 }
 
 // ================= ALUR BELI =================
 
+// ---- Daftar pengguna bot (untuk broadcast buka/tutup, 20 Nov 2026) ----
+// Semua pengguna yang pernah membuka bot (DM) dicatat sekali saat
+// pertama kali berinteraksi — bukan cuma pembeli. Dipakai supaya
+// pesan buka/tutup toko sampai ke semua orang yang pernah buka bot,
+// selama mereka tidak memblokir bot. /broadcast manual tetap ke
+// pembeli saja. Disimpan di KV ORDERS kunci "USER:<chatId>".
+async function catatPengguna(env, chatId, nama) {
+  if (!chatId) return;
+  const kunci = "USER:" + chatId;
+  const ada = await env.ORDERS.get(kunci).catch(() => null);
+  if (ada) return;
+  await env.ORDERS.put(kunci, JSON.stringify({ nama: nama || null, pertama: Date.now() }));
+}
+
+async function daftarSemuaPengguna(env) {
+  const list = await env.ORDERS.list({ prefix: "USER:" });
+  const hasil = new Set();
+  for (const key of list.keys) {
+    const id = key.name.slice("USER:".length);
+    if (id && id !== String(env.ADMIN_CHAT_ID)) hasil.add(id);
+  }
+  return hasil;
+}
+
+// Broadcast buka/tutup toko ke SEMUA pengguna yang pernah membuka bot.
+// Yang memblokir bot otomatis gagal dikirimi (dihitung di laporan).
+async function siarkanKeSemuaPengguna(env, teks) {
+  const tujuan = await daftarSemuaPengguna(env);
+  if (!tujuan.size) { await sendTelegram(env, env.ADMIN_CHAT_ID, "Belum ada pengguna yang tercatat di bot."); return; }
+  let ok = 0, gagal = 0;
+  for (const id of tujuan) {
+    const j = await telegramApi(env, "sendMessage", { chat_id: Number(id), text: teks.slice(0, 4000) });
+    if (j?.ok) ok++; else gagal++;
+  }
+  await sendTelegram(env, env.ADMIN_CHAT_ID, "📣 Info buka/tutup terkirim ke " + ok + " pengguna" + (gagal ? ", gagal ke " + gagal + " (kemungkinan blokir bot)." : "."));
+}
+
 async function handleTelegram(env, update) {
   const msg = update.message;
   const cb = update.callback_query;
+  // Catat pengguna yang membuka bot (DM saja) — dipakai untuk
+  // broadcast buka/tutup toko ke semua pengguna, bukan cuma pembeli.
+  const pengirim = cb?.from || msg?.from;
+  const tipeChat = cb?.message?.chat?.type || msg?.chat?.type;
+  if (pengirim && tipeChat === "private") {
+    await catatPengguna(env, pengirim.id, [pengirim.first_name, pengirim.last_name].filter(Boolean).join(" ") || (pengirim.username ? "@" + pengirim.username : null));
+  }
   if (cb) { // tombol yang diklik pembeli
     const data = String(cb.data || "");
     // Tombol yang diklik di grup: arahkan ke DM, jangan proses apa pun.
@@ -478,6 +522,7 @@ async function handleTelegram(env, update) {
       if (!target) { await sendTelegram(env, cb.from.id, "Akun tidak ditemukan."); return; }
       if (String(cb.from.id) !== String(target.chatId) && String(cb.from.id) !== String(env.ADMIN_CHAT_ID)) return;
       if (!(await tokoBuka(env)) && !adalahAdmin(env, cb.from.id)) { await jawabAlert(env, cb.id, PESAN_TUTUP); return; }
+      if (akunExpired(target)) { await sendTelegram(env, cb.from.id, "Akun " + (target.username || "") + " sudah expired — tidak bisa diperpanjang. Beli akun baru lewat /beli ya."); return; }
       await buatRenewOrder(env, cb.from.id, target, kodePaket);
       return;
     }
@@ -943,6 +988,10 @@ async function handleKelola(env, cb, data) {
   if (String(chatId) !== String(target.chatId) && String(chatId) !== String(env.ADMIN_CHAT_ID)) return;
   if (aksi === "perpanjang") {
     if (!(await tokoBuka(env)) && !adalahAdmin(env, chatId)) { await jawabAlert(env, cb.id, PESAN_TUTUP); return; }
+    if (akunExpired(target)) {
+      await sendTelegram(env, chatId, "Akun " + (target.username || "") + " sudah expired — tidak bisa diperpanjang. Beli akun baru lewat /beli ya.");
+      return;
+    }
     const tombol = PAKET.map((p) => [
       { text: p.nama + " — Rp" + p.harga.toLocaleString("id-ID"), callback_data: "renew:" + orderId + ":" + p.kode },
     ]);
@@ -1276,6 +1325,34 @@ async function kirimBroadcast(env, chatId, teks) {
   await sendTelegram(env, chatId, "📣 Broadcast selesai: terkirim ke " + ok + " pembeli" + (gagal ? ", gagal ke " + gagal + " (kemungkinan blokir bot)." : "."));
 }
 
+// ---- Status expired akun (20 Nov 2026) ----
+// Akun yang sudah lewat tanggal "Berlaku sampai" tidak bisa
+// diperpanjang lagi (sinkron sama Nadia — akun expired tidak bisa
+// di-renew di sisi penyedia). Di daftar /akun, akun expired diberi
+// label "⏰ EXPIRED" dan tombol Perpanjang disembunyikan.
+const BULAN_ID = { jan: 0, feb: 1, mar: 2, apr: 3, mei: 4, jun: 5, jul: 6, agu: 7, sep: 8, okt: 9, nov: 10, des: 11 };
+
+// Parse tanggal dari teks "Berlaku sampai: 20 Nov 2026, 23:42 WIB"
+// (atau "Expires: ...") -> timestamp ms. Jam dianggap WIB (UTC+7).
+// Kembalikan null kalau tidak bisa diparse.
+function parseExpiredDariConfig(config) {
+  if (!config || typeof config !== "string") return null;
+  const m = config.match(/(?:Berlaku sampai|Expires)\s*:?\s*(\d{1,2})\s+([A-Za-z]{3,})\s+(\d{4}),?\s+(\d{1,2}):(\d{2})/i);
+  if (!m) return null;
+  const bln = BULAN_ID[m[2].toLowerCase().slice(0, 3)];
+  if (bln === undefined) return null;
+  return Date.UTC(+m[3], bln, +m[1], +m[4] - 7, +m[5]);
+}
+
+// true kalau akun sudah expired (lewat tanggal Berlaku sampai).
+// Kalau tanggal exp tidak bisa dibaca dari config, anggap BELUM
+// expired (jangan blokir perpanjang hanya karena data tidak lengkap).
+function akunExpired(order) {
+  const exp = parseExpiredDariConfig(order?.config);
+  if (exp === null) return false;
+  return exp <= Date.now();
+}
+
 async function tampilkanAkun(env, chatId, messageId) {
   const daftar = await daftarAkunUser(env, chatId);
   if (!daftar.length) {
@@ -1286,12 +1363,13 @@ async function tampilkanAkun(env, chatId, messageId) {
   }
   for (let i = 0; i < daftar.length; i++) {
     const o = daftar[i];
+    const expired = akunExpired(o);
     const teks =
-      "Akun: " + (o.username || "?") + "\n" +
+      "Akun: " + (o.username || "?") + (expired ? " ⏰ EXPIRED" : "") + "\n" +
       "Paket: " + (o.namaPaket || "?") + " — " + (o.protocol || "?").toUpperCase() + "\n" +
       "Server: " + (o.serverNama || o.server || "?") + "\n" +
-      "Order: " + o.id;
-    const tombol = tombolKelola(o.id);
+      "Order: " + o.id + (expired ? "\nAkun ini sudah habis masa aktifnya — tidak bisa diperpanjang, beli akun baru lewat /beli." : "");
+    const tombol = tombolKelola(o.id, !expired);
     if (i === daftar.length - 1) tombol.push([{ text: "🔙 Kembali ke Menu", callback_data: "menu:utama" }]);
     if (messageId && i === 0) await editHtml(env, chatId, messageId, escapeHtml(teks), tombol);
     else await sendTelegram(env, chatId, teks, tombol);
@@ -1555,14 +1633,16 @@ async function kirimConfig(env, chatId, pembuka, config, penutup, keyboard, mess
 
 // Tombol kelola akun (pembeli & admin): Perpanjang, Pindah Server,
 // Ganti Protokol, Perbaiki Akun, Hapus.
-function tombolKelola(orderId) {
-  return [
-    [{ text: "🔄 Perpanjang", callback_data: "kelola:perpanjang:" + orderId }],
+function tombolKelola(orderId, tampilkanPerpanjang = true) {
+  const tombol = [];
+  if (tampilkanPerpanjang) tombol.push([{ text: "🔄 Perpanjang", callback_data: "kelola:perpanjang:" + orderId }]);
+  tombol.push(
     [{ text: "🔀 Pindah Server", callback_data: "kelola:pindah:" + orderId }],
     [{ text: "🔁 Ganti Protokol", callback_data: "kelola:ganti:" + orderId }],
     [{ text: "🛠️ Perbaiki Akun", callback_data: "kelola:perbaiki:" + orderId }],
     [{ text: "🗑️ Hapus", callback_data: "kelola:hapus:" + orderId }],
-  ];
+  );
+  return tombol;
 }
 
 async function tambahkanAkunUser(env, chatId, orderId) {
