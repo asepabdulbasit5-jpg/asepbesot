@@ -121,24 +121,24 @@ const PAKET = [
   { kode: "30hari", nama: "VPN 30 hari", harga: 10000, durasiHari: 30, nadiaType: "month", nadiaDuration: 1 },
 ];
 
-// Server yang bisa dipilih pembeli — SEMUA 24 server Nadia
+// Server yang bisa dipilih pembeli — SEMUA 22 server Nadia
+// 20 Nov 2026 (/ceknadia): LITE & LITE PRO dihapus (hilang dari
+// Nadia); SGCLOUDHOST & CLOUDFRONT NUSA diganti nama mengikuti Nadia.
 // (19 Nov 2026, atas permintaan Asep). Data dari katalog
 // GET /api/v1/servers 19 Nov 2026 (harga sama semua:
 // Rp267/hari, Rp1.869/minggu, Rp6.000/bulan).
 // Catatan: 4 server ditandai PENUH (kapasitas 100/100) — tetap
 // ditampilkan sesuai permintaan, tapi order di sana kemungkinan
 // ditolak Nadia; pembeli disarankan pilih yang lain.
-// 3 server SSH SELOW hanya dukung protokol SSH — tombol protokol
+// 1 server SSH SELOW hanya dukung protokol SSH — tombol protokol
 // otomatis disaring per server, jadi pembeli tidak bisa salah pilih.
 // Server CLOUDFRONT NUSA tidak dukung VLESS.
 // Alur beli: /beli -> pilih SERVER -> pilih protokol ->
 // pilih durasi -> ketik username (atau "-") -> order dibuat.
 const SERVERS = [
   { kode: "slowmini",  nama: "SSH SELOW DNS & UDP MINI",      serverId: "01a1a126-b5c7-710c-953a-68e8d0ea6e98", protocols: ["ssh"], used: 162, limit: 250 },
-  { kode: "slowlite",  nama: "SSH SELOW DNS & UDP LITE",      serverId: "01a1d3e1-c32a-70b6-866e-ea2c2dce9012", protocols: ["ssh"], used: 42, limit: 250 },
-  { kode: "slowpro",   nama: "SSH SELOW DNS & UDP LITE PRO",  serverId: "01a1d418-8228-7366-8328-5f1cfea65311", protocols: ["ssh"], used: 76, limit: 250 },
   { kode: "cloudmat",  nama: "CLOUDMATIKA",                   serverId: "019ecafe-9826-7339-8939-8c6c03daaac5", protocols: ["ssh", "vmess", "vless", "trojan"], used: 149, limit: 155 },
-  { kode: "sgcloud",   nama: "SGCLOUDHOST (SG)",              serverId: "019d416c-91ab-70cf-ae93-98251456366e", protocols: ["ssh", "vmess", "vless", "trojan"], used: 124, limit: 127 },
+  { kode: "sgcloud",   nama: "SGCLOUDHOST",              serverId: "019d416c-91ab-70cf-ae93-98251456366e", protocols: ["ssh", "vmess", "vless", "trojan"], used: 124, limit: 127 },
   { kode: "rajasa",    nama: "PT.RAJASA — PENUH",             serverId: "01a03c0a-b07a-736c-a192-a3be583503ae", protocols: ["ssh", "vmess", "vless", "trojan"], penuh: true, used: 100, limit: 100 },
   { kode: "rsa",       nama: "PT.RSA ABADI — PENUH",          serverId: "01a05b60-b5c7-71d3-a762-c6400b439b09", protocols: ["ssh", "vmess", "vless", "trojan"], penuh: true, used: 50, limit: 50 },
   { kode: "neolite",   nama: "NEO-LITE — PENUH",              serverId: "019d4b9f-7fb5-7369-8f4b-8974abd0123c", protocols: ["ssh", "vmess", "vless", "trojan"], penuh: true, used: 100, limit: 100 },
@@ -149,7 +149,7 @@ const SERVERS = [
   { kode: "bizid",     nama: "BIZ-ID — PENUH",                serverId: "01a19595-9428-708c-9a4f-b2a1819d714e", protocols: ["ssh", "vmess", "vless", "trojan"], penuh: true, used: 100, limit: 100 },
   { kode: "nsid",      nama: "NS-ID",                         serverId: "01a1a34d-c2f2-7387-882c-137904de7cff", protocols: ["ssh", "vmess", "vless", "trojan"], used: 59, limit: 60 },
   { kode: "neo",       nama: "CLOUDFRONT NEOLITE PRO",        serverId: "01a1ca6a-b60e-73b9-a2fa-8684c0b25d62", protocols: ["ssh", "vmess", "vless", "trojan"], used: 89, limit: 300 },
-  { kode: "cfnusa",    nama: "CLOUDFRONT NUSA",               serverId: "01a1a348-d7fd-739c-916c-45c891ac2b4b", protocols: ["ssh", "vmess", "trojan"], used: 207, limit: 240 },
+  { kode: "cfnusa",    nama: "CLOUDFRONT NUSA (id)",               serverId: "01a1a348-d7fd-739c-916c-45c891ac2b4b", protocols: ["ssh", "vmess", "trojan"], used: 207, limit: 240 },
   { kode: "ikd",       nama: "CLOUDFRONT IKD",                serverId: "01a18b54-cbe9-712a-b8e0-bf418f203224", protocols: ["ssh", "vmess", "vless", "trojan"], used: 150, limit: 200 },
   { kode: "cfsepadan", nama: "CLOUDFRONT Sepadan Abadi",      serverId: "01a18a8a-63ad-7301-b8b9-a6d07492a952", protocols: ["ssh", "vmess", "vless", "trojan"], used: 177, limit: 200 },
   { kode: "media",     nama: "CLOUDFRONT MEDIA",              serverId: "019e15b0-f043-7170-a5c7-63719b4b8d45", protocols: ["ssh", "vmess", "vless", "trojan"], used: 170, limit: 200 },
@@ -680,7 +680,7 @@ function labelServer(s, live) {
   return nama;
 }
 
-// Langkah 1 beli: pilih server dulu (semua 24 server Nadia).
+// Langkah 1 beli: pilih server dulu (semua 22 server Nadia).
 // Server penuh tampil tapi TIDAK bisa diklik untuk lanjut —
 // tombolnya pakai callback "penuh:" yang cuma menampilkan
 // peringatan pop-up "server penuh, pilih server lain".
@@ -1018,7 +1018,7 @@ async function tampilkanCekNadia(env, chatId, messageId) {
     const id = x.server_id || x.id || x.uuid;
     if (id) liveById.set(String(id), x);
   }
-  const namaLive = (x) => String(x.name || x.nama || x.server_name || x.domain || "?").trim();
+  const namaLive = (x) => String(x.name || x.nama || x.server_name || x.domain || "?").replace(/\s+/g, " ").trim();
   const protoLive = (x) => {
     const p = x.protocols || x.protocol || x.supported_protocols || [];
     if (typeof p === "string") return p.split(",").map((v) => v.trim().toLowerCase()).filter(Boolean);
@@ -1029,7 +1029,7 @@ async function tampilkanCekNadia(env, chatId, messageId) {
   for (const [id, x] of liveById) {
     const b = SERVERS.find((s) => String(s.serverId) === id);
     if (!b) { baru.push(x); continue; }
-    const namaBot = b.nama.replace(" — PENUH", "").trim();
+    const namaBot = b.nama.replace(" — PENUH", "").replace(/\s+/g, " ").trim();
     if (namaLive(x) !== "?" && namaLive(x) !== namaBot) gantiNama.push({ bot: b, live: namaLive(x) });
     const pl = protoLive(x).slice().sort().join(",");
     const pb = (b.protocols || []).slice().sort().join(",");
