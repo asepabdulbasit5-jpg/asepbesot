@@ -589,8 +589,12 @@ export function ringkasanConfig(c) {
   if (host) baris.push("• Server: <code>" + escapeHtml(host) + "</code>" + (port ? ":<code>" + escapeHtml(String(port)) + "</code>" : ""));
   if (ssh?.username) baris.push("• Username: <code>" + escapeHtml(ssh.username) + "</code>");
   const sni = inj?.serverNameIndication || v2?.serverNameIndication || "";
-  if (sni) baris.push("• SNI/Bug: <code>" + escapeHtml(sni) + "</code>");
+  // Mode WC (v2.6): SNI inject = bug + "." + host server. Terdeteksi
+  // bila SNI inject diakhiri "." + host server config ini.
+  const adalahWc = !!(inj && inj.serverNameIndication && host && inj.serverNameIndication.endsWith("." + host));
+  if (sni) baris.push("• SNI/Bug: <code>" + escapeHtml(sni) + "</code>" + (adalahWc ? " (WC)" : ""));
   baris.push("• Inject: " + (inj ? "✅ ON (" + escapeHtml(inj.mode || "DIRECT_SNI") + ")" : "❌ OFF"));
+  if (adalahWc) baris.push("• Mode: WC (wildcard)");
   if (v2) {
     const trans = v2.transportNetwork ? String(v2.transportNetwork) : "";
     const tls = v2.tls === true ? "Aktif" : v2.tls === false ? "Mati" : "";
@@ -631,7 +635,7 @@ function keyboardMetodePayload() {
 // kategori lain / bug tidak dikenal -> ws (template standar aplikasi).
 export async function pilihMetodeOtomatis(env, teks) {
   try {
-    const hasil = parsePesan(teks);
+    const hasil = await parsePesan(teks, { env });
     if (!hasil.bug) return "ws";
     const info = await cariBugGabungan(env, hasil.bug);
     if (!info) return "ws";
@@ -649,7 +653,10 @@ export async function pilihMetodeOtomatis(env, teks) {
 // reverse / subdomain), payload otomatis, nama file berisi jenis config.
 // v2.5 = BUG_DB dibangun ulang dari daftar kiriman Asep (7 operator,
 // by.U baru) + metode payload per kategori (bukan asal pilih).
-const VERSI_BOT = "v2.5.1";
+// v2.5.1 = Telkomsel ilped jadi kategori sendiri (bukan edu).
+// v2.6 = mode WC (wildcard) otomatis: bug bertag wc -> SNI inject =
+// bug + "." + host server.
+const VERSI_BOT = "v2.6";
 
 const PESAN_START =
   "👋 <b>Generator Config Dark Tunnel</b>\n\n" +
@@ -1064,12 +1071,32 @@ export function parseSshTeks(teks) {
 
 const RE_LINK = /(?:vless|vmess|trojan|ss|darktunnel):\/\/[^\s"'<>]+/gi;
 
+// Mode WC (wildcard, v2.6 — dari bahan grup §2): host/SNI = bug + "." +
+// domain server (mis. bug api24-normal.tiktokv.com + server
+// sg1.server.com -> api24-normal.tiktokv.com.sg1.server.com).
+// True bila note/catatan bug mengandung kata "wc" utuh.
+export function dukungWildcard(note) {
+  return /\bwc\b/i.test(String(note || ""));
+}
+
+// Gabung bug + host server jadi host wildcard. Bila salah satu kosong,
+// kembalikan bug apa adanya.
+export function hostWildcard(bug, serverHost) {
+  const b = String(bug || "").trim();
+  const s = String(serverHost || "").trim();
+  if (!b || !s) return b;
+  return b + "." + s;
+}
+
 // Parse satu pesan teks jadi daftar TunnelConfig.
 // `opts.metodePayload` = kunci template payload untuk config SSH+bug
 // ("ws" default). Config Xray selalu pakai template WS standar.
+// `opts.env` (opsional) = env Worker; bila ada, info bug dicari lewat
+// cariBugGabungan (KV + bawaan) untuk deteksi WC; bila tidak ada,
+// pakai cariBug (bawaan saja). Async karena lookup KV.
 // Return {configs:[...], kurangSsh:[], adaIsi:boolean, adaLink:boolean,
 //         bug:string|null, adaInject:boolean}.
-export function parsePesan(teks, opts = {}) {
+export async function parsePesan(teks, opts = {}) {
   const teksAsli = String(teks || "");
   const configs = [];
   let adaLink = false;
@@ -1119,19 +1146,36 @@ export function parsePesan(teks, opts = {}) {
   }
   const proxy = ps.proxy === undefined ? null : ps.proxy;
 
+  // Info bug (untuk metode payload + mode WC). Bila env ada, cari via
+  // KV + bawaan; bila tidak, cari bawaan saja.
+  let infoBug = null;
+  if (bug) {
+    try {
+      infoBug = opts.env ? await cariBugGabungan(opts.env, bug) : cariBug(bug);
+    } catch { infoBug = cariBug(bug); }
+  }
+  const pakaiWc = !!(infoBug && dukungWildcard(infoBug.note));
+
   // 4) Terapkan inject ke config Xray bila ada bug (SNI link tetap
   //    jadi TLS SNI-nya; inject terpisah di injectConfig).
+  //    Mode WC: SNI inject = bug + "." + host server config itu.
   if (bug) {
     for (const c of configs) {
       const subKey = ["vmessTunnelConfig", "vlessTunnelConfig", "trojanTunnelConfig", "shadowsocksTunnelConfig"].find((k) => c[k]);
-      if (subKey && !c[subKey].injectConfig) c[subKey].injectConfig = injectConfigAktif(bug, c.type);
+      if (subKey && !c[subKey].injectConfig) {
+        const hostServer = c[subKey].v2rayConfig?.host || "";
+        const bugEfektif = pakaiWc ? hostWildcard(bug, hostServer) : bug;
+        c[subKey].injectConfig = injectConfigAktif(bugEfektif, c.type);
+      }
     }
   }
 
   // 5) Config SSH (nama = username; fallback host).
+  //    Mode WC: SNI/bug = bug + "." + host SSH akun itu.
   for (const a of ssh.akunList) {
     const bugSsh = ps.sniIsHost ? a.host : bug;
-    configs.push(bangunSsh(a.username, a, bugSsh, { metode: opts.metodePayload, proxy }));
+    const bugEfektif = (pakaiWc && bugSsh === bug) ? hostWildcard(bug, a.host) : bugSsh;
+    configs.push(bangunSsh(a.username, a, bugEfektif, { metode: opts.metodePayload, proxy }));
   }
 
   // Bersihkan penanda internal sebelum dipakai.
@@ -1440,7 +1484,7 @@ const pendingAdmin = new Map();
 async function handlePesanAkun(env, chatId, teks, opts = {}) {
   let hasil;
   try {
-    hasil = parsePesan(teks, opts);
+    hasil = await parsePesan(teks, { ...opts, env });
   } catch (e) {
     await kabariAdmin(env, "parse gagal: " + String(e && e.message || e).slice(0, 200));
     await sendTelegram(env, chatId,
@@ -1607,7 +1651,7 @@ async function handleTambahConfigAkun(env, chatId, teks) {
   const pending = pendingConfig.get(chatId);
   if (!pending) return false;
   let hasil;
-  try { hasil = parsePesan(teks); } catch { hasil = { configs: [], kurangSsh: [], adaSsh: false }; }
+  try { hasil = await parsePesan(teks, { env }); } catch { hasil = { configs: [], kurangSsh: [], adaSsh: false }; }
   if (!hasil.configs.length) {
     let alasan = "tidak ditemukan akun di pesan itu";
     if (hasil.adaSsh && hasil.kurangSsh.length) alasan = "akun SSH belum lengkap — tidak ketemu: " + hasil.kurangSsh.join(", ");
