@@ -222,6 +222,27 @@ export default {
       return new Response("ok");
     }
 
+    // ---- Relay data Nadia untuk auto-sync GitHub Actions ----
+    // GitHub Actions kena HTTP 403 kalau langsung memanggil API Nadia
+    // (20 Nov 2026: token valid — curl dari mesin lain dapat HTTP 200 —
+    // tapi runner GitHub ditolak, kemungkinan IP/Cloudflare-nya diblokir).
+    // Worker ini bisa memanggil Nadia dengan normal (satu jaringan
+    // Cloudflare), jadi GitHub memanggil endpoint ini sebagai perantara.
+    // Kunci: header X-Relay-Secret (atau ?k=) harus sama dengan secret
+    // RELAY_SECRET di Worker. Tanpa kunci yang benar -> 403.
+    // Balasan: { ok, servers: [...], balance: <angka|null> }.
+    // Saldo TIDAK PERNAH dikirim tanpa kunci yang benar.
+    if (url.pathname === "/relay-nadia" && req.method === "GET") {
+      const kunci = req.headers.get("X-Relay-Secret") || url.searchParams.get("k") || "";
+      if (!env.RELAY_SECRET || kunci !== env.RELAY_SECRET)
+        return new Response("no", { status: 403 });
+      const live = await ambilDaftarServerLive(env);
+      if (!live.list)
+        return new Response(JSON.stringify({ ok: false, error: live.debug || "gagal ambil daftar server" }), { status: 502, headers: { "Content-Type": "application/json" } });
+      const saldo = await ambilSaldoReseller(env);
+      return new Response(JSON.stringify({ ok: true, servers: live.list, balance: saldo }), { headers: { "Content-Type": "application/json" } });
+    }
+
     // ---- Webhook Telegram ----
     if (req.method === "POST") {
       let update;

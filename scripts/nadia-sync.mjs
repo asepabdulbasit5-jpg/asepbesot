@@ -26,13 +26,19 @@
 //  - hasil edit gagal validasi (jumlah < 10, default hilang,
 //    serverId/kode ganda)
 // Secrets yang dibutuhkan (repo GitHub > Settings > Secrets):
-//  NADIA_API_KEY, TELEGRAM_BOT_TOKEN, ADMIN_CHAT_ID.
+//  RELAY_SECRET, TELEGRAM_BOT_TOKEN, ADMIN_CHAT_ID.
 // ============================================================
 import { readFileSync, writeFileSync, appendFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
-const API = (process.env.NADIA_API_URL || "https://www.nadiavpn.web.id/api/v1").replace(/\/$/, "");
-const KEY = process.env.NADIA_API_KEY || "";
+// Relay: GitHub Actions kena HTTP 403 kalau langsung memanggil API Nadia
+// (20 Nov 2026: token valid, curl dari mesin lain dapat HTTP 200 —
+// runner GitHub yang diblokir). Jadi script ini memanggil endpoint
+// /relay-nadia di Worker bot sendiri (Worker bisa memanggil Nadia
+// dengan normal), pakai kunci RELAY_SECRET. NADIA_API_KEY sudah tidak
+// dipakai lagi di script ini.
+const RELAY_URL = (process.env.WORKER_URL || "https://sandekala.radencitraksih.workers.dev").replace(/\/$/, "") + "/relay-nadia";
+const RELAY_SECRET = process.env.RELAY_SECRET || "";
 const TG = process.env.TELEGRAM_BOT_TOKEN || "";
 const ADMIN = process.env.ADMIN_CHAT_ID || "";
 const BOT_FILE = "worker-reseller-bot.js";
@@ -58,32 +64,7 @@ function rupiah(n) {
 }
 const normalNama = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
 
-// --- parsing respons Nadia (cara sama kayak bot) ---
-function cariArray(x, dalam = 0) {
-  if (Array.isArray(x)) {
-    const mirip = x.filter((i) => i && typeof i === "object" && (i.server_id || i.id) && (i.name || i.nama));
-    if (x.length > 0 && mirip.length >= Math.max(1, Math.floor(x.length / 2))) return x;
-    return null;
-  }
-  if (x && typeof x === "object" && dalam < 4) {
-    for (const v of Object.values(x)) {
-      const r = cariArray(v, dalam + 1);
-      if (r) return r;
-    }
-  }
-  return null;
-}
-function cariSaldo(x, dalam = 0) {
-  if (x && typeof x === "object" && dalam < 4) {
-    for (const [k, v] of Object.entries(x)) {
-      if (/^(balance|saldo|amount|total)$/i.test(k) && typeof v === "number") return v;
-      if (typeof v === "string" && /^(balance|saldo|amount|total)$/i.test(k) && /^\d+(\.\d+)?$/.test(v.trim())) return Number(v);
-      const r = cariSaldo(v, dalam + 1);
-      if (typeof r === "number") return r;
-    }
-  }
-  return null;
-}
+// --- parsing daftar server (bentuk sama seperti respons Nadia) ---
 function parseLive(x) {
   const id = x.server_id || x.id || x.uuid;
   if (!id) return null;
@@ -218,8 +199,8 @@ function tulisStatus(obj) {
 // --- alur utama ---
 export async function main() {
   const SELALU_KABARI = process.env.ALWAYS_NOTIFY === "true";
-  if (!KEY || !TG || !ADMIN) {
-    console.error("Secrets belum lengkap (NADIA_API_KEY / TELEGRAM_BOT_TOKEN / ADMIN_CHAT_ID).");
+  if (!RELAY_SECRET || !TG || !ADMIN) {
+    console.error("Secrets belum lengkap (RELAY_SECRET / TELEGRAM_BOT_TOKEN / ADMIN_CHAT_ID).");
     process.exit(1);
   }
   const kepala = `🔍 Auto-cek Nadia — ${wib()}`;
@@ -229,18 +210,15 @@ export async function main() {
     tulisStatus({ checkedAt: new Date().toISOString(), live: null, bot: null, changed: false, error: alasan });
     setOutput("changed", "false");
   };
-  let liveRaw, saldoRaw;
+  let relay;
   try {
-    const r = await fetch(`${API}/servers`, { headers: { Authorization: `Bearer ${KEY}`, Accept: "application/json", "User-Agent": UA_BROWSER } });
+    const r = await fetch(RELAY_URL, { headers: { "X-Relay-Secret": RELAY_SECRET, Accept: "application/json", "User-Agent": UA_BROWSER } });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    liveRaw = await r.json();
-  } catch (e) { await gagal(`tidak bisa ambil daftar server (${e.message})`); return; }
-  try {
-    const r = await fetch(`${API}/user/balance`, { headers: { Authorization: `Bearer ${KEY}`, Accept: "application/json", "User-Agent": UA_BROWSER } });
-    if (r.ok) saldoRaw = await r.json();
-  } catch { /* saldo gagal dibaca — bukan alasan batal, cukup tidak dilaporkan */ }
-  const liveArr = cariArray(liveRaw);
-  if (!liveArr) { await gagal("respons daftar server tidak dikenali"); return; }
+    relay = await r.json();
+  } catch (e) { await gagal(`tidak bisa ambil data via relay Worker (${e.message})`); return; }
+  if (!relay || relay.ok !== true || !Array.isArray(relay.servers)) { await gagal("respons relay tidak dikenali"); return; }
+  const liveArr = relay.servers;
+  const saldo = typeof relay.balance === "number" ? relay.balance : null;
   const live = liveArr.map(parseLive).filter(Boolean);
   if (live.length < MIN_LIVE) { await gagal(`daftar live cuma ${live.length} server (diduga respons rusak)`); return; }
   if (!live.some((x) => String(x.serverId) === DEFAULT_ID)) { await gagal("server default (NEOLITE PRO) tidak ada di daftar live"); return; }
@@ -250,7 +228,6 @@ export async function main() {
   try { bot = ekstrakServers(teksBot); } catch (e) { await gagal(`SERVERS di file bot tidak bisa dibaca (${e.message})`); return; }
   const hasil = bandingkan(live, bot);
   hasil._live = live;
-  const saldo = cariSaldo(saldoRaw);
   const saldoBaris = typeof saldo === "number"
     ? `💰 Saldo: ${rupiah(saldo)}${saldo < SALDO_MINIMAL ? " ⚠️ (di bawah Rp15.000 — trial belum bisa)" : ""}`
     : "💰 Saldo: (gagal dibaca)";
