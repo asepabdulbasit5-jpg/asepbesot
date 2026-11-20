@@ -1,7 +1,7 @@
 {
-  "checkedAt": "2026-11-20T08:05:04.473Z",
+  "checkedAt": "2026-11-20T08:52:54.370Z",
   "live": null,
   "bot": null,
   "changed": false,
-  "error": "tidak bisa ambil data via relay Worker (HTTP 500)"
+  "error": "tidak bisa ambil data via relay Worker (HTTP 502)"
 }
