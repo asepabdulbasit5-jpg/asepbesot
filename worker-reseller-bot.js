@@ -253,6 +253,18 @@ export default {
 
     return new Response("Bot jualan SANDEKALA aktif");
   },
+
+  // ---- Cron Trigger: auto-cek Nadia tiap pagi (07:00 WIB) ----
+  // Dipasang di dashboard / wrangler.toml: crons = ["0 0 * * *"].
+  // Jalan di dalam jaringan Cloudflare (seperti /ceknadia yang
+  // terbukti bisa ambil data Nadia) — tidak lewat GitHub Actions,
+  // jadi tidak kena blokir IP seperti relay (20 Nov 2026: relay
+  // via GitHub gagal HTTP 502 dari colo ORD/LAX).
+  // Diam bila tidak ada perubahan; alert ke admin bila ada
+  // perubahan atau gagal ambil data.
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(jalankanCekNadiaOtomatis(env));
+  },
 };
 
 // ---- Toko buka/tutup ala warung (19 Nov 2026) ----
@@ -573,6 +585,14 @@ async function handleTelegram(env, update) {
     return;
   }
 
+  if (text === "/cekotomatis") {
+    if (!adalahAdmin(env, chatId)) return;
+    const lap = await susunLaporanAutoCek(env);
+    if (lap.status === "sama") await sendTelegram(env, chatId, "✅ Auto-cek Nadia: semua sama — tidak ada perubahan.");
+    else if (lap.teks) await sendTelegram(env, chatId, lap.teks);
+    return;
+  }
+
   if (text.startsWith("/broadcast")) {
     await kirimBroadcast(env, chatId, text.slice("/broadcast".length));
     return;
@@ -769,7 +789,7 @@ async function tampilkanMenuUtama(env, chatId, from, messageId) {
     "TOTAL VPN: " + daftar.length + " AKUN"];
   if (saldo !== null) baris.push("SALDO VPN: Rp" + saldo.toLocaleString("id-ID"));
   baris.push(GARIS_PANEL, "SERVER TERSEDIA: " + tersedia + " / " + SERVERS.length + " SERVERS", "TOKO: " + (buka ? "🟢 BUKA" : "🔴 TUTUP"), GARIS_PANEL, "OWNER: @Asepbesot", GARIS_PANEL);
-  if (isAdmin) baris.push("ADMIN: /semuaakun • /broadcast PESAN • /konfirmasi ORDER_ID • /buka • /tutup • /ceknadia", GARIS_PANEL);
+  if (isAdmin) baris.push("ADMIN: /semuaakun • /broadcast PESAN • /konfirmasi ORDER_ID • /buka • /tutup • /ceknadia • /cekotomatis", GARIS_PANEL);
   const html = baris.map((x) => (x === "MENU UTAMA" || x === "INFORMASI PELANGGAN") ? "<b>" + escapeHtml(x) + "</b>" : (x === "OWNER: @Asepbesot" ? 'OWNER: <a href="https://t.me/Asepbesot">@Asepbesot</a>' : escapeHtml(x))).join("\n");
   const tombol = [
     [{ text: "🛒 Beli VPN", callback_data: "menu:beli" }],
@@ -1022,18 +1042,10 @@ async function bersihkanOrderKedaluarsa(env) {
   return dihapus;
 }
 
-// /ceknadia (admin saja): bandingkan daftar server live dari
-// penyedia dengan daftar di bot. Lapor server baru, server hilang,
-// nama berubah, protokol berubah. Harga modal TIDAK bisa dicek lewat
-// API — harus manual di dashboard penyedia.
-async function tampilkanCekNadia(env, chatId, messageId) {
-  if (!adalahAdmin(env, chatId)) return;
-  const kirim = async (teks) => {
-    if (messageId) await editHtml(env, chatId, messageId, escapeHtml(teks), [[{ text: "🔙 Kembali ke Menu", callback_data: "menu:utama" }]]);
-    else await sendTelegram(env, chatId, teks);
-  };
-  const { list, debug } = await ambilDaftarServerLive(env);
-  if (!list) { await kirim("❌ Gagal ambil daftar server dari penyedia: " + debug); return; }
+// Bandingkan daftar server live dari penyedia dengan daftar di bot.
+// Dipakai /ceknadia dan auto-cek Cron Trigger. Kembalikan peta live
+// plus daftar perubahan (baru / hilang / ganti nama / ganti protokol).
+function bandingkanServerLive(list) {
   const liveById = new Map();
   for (const x of list) {
     const id = x.server_id || x.id || x.uuid;
@@ -1059,6 +1071,59 @@ async function tampilkanCekNadia(env, chatId, messageId) {
   for (const s of SERVERS) {
     if (!liveById.has(String(s.serverId))) hilang.push(s);
   }
+  return { liveById, baru, hilang, gantiNama, gantiProto, namaLive, protoLive };
+}
+
+// Auto-cek Nadia (Cron Trigger tiap pagi + perintah /cekotomatis).
+// Diam bila tidak ada perubahan; kirim alert ke admin bila ada
+// perubahan atau bila gagal ambil data. Perintah manual selalu
+// membalas (biar admin bisa memastikan auto-cek-nya jalan).
+async function susunLaporanAutoCek(env) {
+  const { list, debug } = await ambilDaftarServerLive(env);
+  if (!list) return { status: "gagal", teks: "⚠️ Auto-cek Nadia gagal: tidak bisa ambil daftar server dari penyedia.\n" + (debug || "") + "\nBot tetap jalan normal — cek manual /ceknadia nanti ya." };
+  const { liveById, baru, hilang, gantiNama, gantiProto, namaLive, protoLive } = bandingkanServerLive(list);
+  const ada = baru.length || hilang.length || gantiNama.length || gantiProto.length;
+  if (!ada) return { status: "sama", teks: null };
+  const baris = ["🔔 Perubahan di Nadia — cek bot ya", "Live: " + liveById.size + " server • Bot: " + SERVERS.length + " server", ""];
+  if (baru.length) {
+    baris.push("🆕 BARU di Nadia (belum ada di bot):");
+    for (const x of baru) baris.push("• " + namaLive(x) + " — protokol: " + (protoLive(x).join(", ") || "?") + " — ID: " + (x.server_id || x.id || "?"));
+  }
+  if (hilang.length) {
+    baris.push("🗑️ HILANG dari Nadia (masih ada di bot):");
+    for (const s of hilang) baris.push("• " + s.nama);
+  }
+  if (gantiNama.length) {
+    baris.push("✏️ NAMA BERUBAH:");
+    for (const g of gantiNama) baris.push("• Bot: " + g.bot.nama + " → Nadia: " + g.live);
+  }
+  if (gantiProto.length) {
+    baris.push("🔀 PROTOKOL BERUBAH:");
+    for (const g of gantiProto) baris.push("• " + g.bot.nama + ": bot [" + (g.bot.protocols || []).join(", ") + "] → Nadia [" + g.live.join(", ") + "]");
+  }
+  baris.push("", "Perubahan ini BELUM diterapkan ke bot — kabari Muse biar file bot di-update ya.", "Catatan: harga modal tidak bisa dicek lewat API — cek manual di dashboard Nadia.");
+  return { status: "berubah", teks: baris.join("\n") };
+}
+
+async function jalankanCekNadiaOtomatis(env) {
+  const lap = await susunLaporanAutoCek(env);
+  if (lap.teks && env.ADMIN_CHAT_ID) await sendTelegram(env, env.ADMIN_CHAT_ID, lap.teks);
+  return lap.status;
+}
+
+// /ceknadia (admin saja): bandingkan daftar server live dari
+// penyedia dengan daftar di bot. Lapor server baru, server hilang,
+// nama berubah, protokol berubah. Harga modal TIDAK bisa dicek lewat
+// API — harus manual di dashboard penyedia.
+async function tampilkanCekNadia(env, chatId, messageId) {
+  if (!adalahAdmin(env, chatId)) return;
+  const kirim = async (teks) => {
+    if (messageId) await editHtml(env, chatId, messageId, escapeHtml(teks), [[{ text: "🔙 Kembali ke Menu", callback_data: "menu:utama" }]]);
+    else await sendTelegram(env, chatId, teks);
+  };
+  const { list, debug } = await ambilDaftarServerLive(env);
+  if (!list) { await kirim("❌ Gagal ambil daftar server dari penyedia: " + debug); return; }
+  const { liveById, baru, hilang, gantiNama, gantiProto, namaLive, protoLive } = bandingkanServerLive(list);
   const baris = ["🔍 Cek Nadia — daftar server live vs bot", "Live: " + liveById.size + " server • Bot: " + SERVERS.length + " server", ""];
   if (!baru.length && !hilang.length && !gantiNama.length && !gantiProto.length) {
     baris.push("✅ Semua sama — tidak ada perubahan.");
