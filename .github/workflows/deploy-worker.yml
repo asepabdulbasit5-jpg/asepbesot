@@ -1,0 +1,70 @@
+# Deploy Worker ke Cloudflare (manual dari tab Actions).
+# Dipakai setelah file worker-reseller-bot.js di-update di GitHub.
+# Hanya deploy — tidak cek Nadia, tidak ubah file. Cron Trigger
+# auto-cek Nadia ikut terpasang lewat wrangler.toml di bawah.
+name: Deploy Worker
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Cek sintaks file bot
+        run: node --check worker-reseller-bot.js
+
+      - name: Deploy ke Cloudflare Workers
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
+        run: |
+          cat > wrangler.toml <<EOF
+          name = "sandekala"
+          main = "worker-reseller-bot.js"
+          compatibility_date = "2026-11-20"
+          [triggers]
+          crons = ["0 0 * * *"]
+          [[kv_namespaces]]
+          binding = "ORDERS"
+          id = "5ed5f1f0bc824dc6b1fd5ac3f9a6e03b"
+          [vars]
+          ADMIN_CHAT_ID = "$ADMIN_CHAT_ID"
+          RESELLER_API_URL = "https://www.nadiavpn.web.id/api/v1"
+          NADIA_SERVER_ID = "01a1ca6a-b60e-73b9-a2fa-8684c0b25d62"
+          NADIA_PROTOCOL = "vless"
+          QRIS_IMAGE_URL = "https://raw.githubusercontent.com/asepabdulbasit5-jpg/asepbesot/main/dana.jpg"
+          EOF
+          npx -y wrangler@latest deploy
+
+      - name: Kabari deploy berhasil
+        if: success()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+            -d "chat_id=$ADMIN_CHAT_ID" \
+            --data-urlencode "text=✅ Deploy berhasil — bot sudah pakai versi terbaru (auto-cek Nadia aktif)." > /dev/null
+
+      - name: Kabari deploy gagal
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+            -d "chat_id=$ADMIN_CHAT_ID" \
+            --data-urlencode "text=❌ Deploy GAGAL — bot masih pakai versi lama. Cek tab Actions buat detail errornya." > /dev/null
