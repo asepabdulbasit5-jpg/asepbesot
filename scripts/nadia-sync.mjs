@@ -40,6 +40,12 @@ const STATUS_FILE = "scripts/nadia-sync-status.json";
 const DEFAULT_ID = "01a1ca6a-b60e-73b9-a2fa-8684c0b25d62"; // CLOUDFRONT NEOLITE PRO
 const SALDO_MINIMAL = 15000;
 const MIN_LIVE = 10;
+// Header browser: API Nadia (di balik Cloudflare) menolak request
+// tanpa User-Agent browser — GitHub Actions kena HTTP 403 padahal
+// tokennya valid (terbukti 20 Nov 2026: curl dari mesin lain dengan
+// token yang sama dapat HTTP 200 + 22 server). User-Agent ini meniru
+// Chrome desktop supaya request tidak dianggap bot.
+const UA_BROWSER = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 const BULAN = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
 function wib(d = new Date()) {
@@ -225,12 +231,12 @@ export async function main() {
   };
   let liveRaw, saldoRaw;
   try {
-    const r = await fetch(`${API}/servers`, { headers: { Authorization: `Bearer ${KEY}`, Accept: "application/json" } });
+    const r = await fetch(`${API}/servers`, { headers: { Authorization: `Bearer ${KEY}`, Accept: "application/json", "User-Agent": UA_BROWSER } });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     liveRaw = await r.json();
   } catch (e) { await gagal(`tidak bisa ambil daftar server (${e.message})`); return; }
   try {
-    const r = await fetch(`${API}/user/balance`, { headers: { Authorization: `Bearer ${KEY}`, Accept: "application/json" } });
+    const r = await fetch(`${API}/user/balance`, { headers: { Authorization: `Bearer ${KEY}`, Accept: "application/json", "User-Agent": UA_BROWSER } });
     if (r.ok) saldoRaw = await r.json();
   } catch { /* saldo gagal dibaca — bukan alasan batal, cukup tidak dilaporkan */ }
   const liveArr = cariArray(liveRaw);
