@@ -179,7 +179,7 @@ export const BUG_DB = {
       "ir.huya.com", "dev.appsflyer.com") },
   } },
   telkomsel: { label: "Telkomsel", kategori: {
-    edu: { label: "Edu", metode: "sshpayload", hosts: daftarBug(
+    ilped: { label: "Ilped", metode: "sshpayload", hosts: daftarBug(
       "classroom.google.com|sni", "74.125.68.100", "practicesets.classroom.google.com|sni",
       "142.91.102.190", "104.18.17.214", "188.114.97.2", "162.159.134.42",
       "104.20.28.42", "helpdesk.kelaspintar.id", "pos.ayobelajar.id",
@@ -391,7 +391,7 @@ async function catatPengguna(env, chatId, nama) {
 
 // ---- Validasi operator / kategori untuk perintah admin ----
 const OPERATOR_ADMIN = { xl: "XL", axis: "Axis", telkomsel: "Telkomsel", indosat: "Indosat", smartfren: "Smartfren", tri: "Tri (3)", byu: "by.U" };
-const URUTAN_KATEGORI = ["edu", "opok", "wa", "game", "sosmed", "musik", "nonton", "conference", "appfun"];
+const URUTAN_KATEGORI = ["edu", "ilped", "opok", "wa", "game", "sosmed", "musik", "nonton", "conference", "appfun"];
 
 export function normalisasiOperator(op) {
   const k = String(op || "").toLowerCase();
@@ -400,6 +400,7 @@ export function normalisasiOperator(op) {
 
 export function normalisasiKategori(kat) {
   const k = String(kat || "").toLowerCase();
+  if (k === "ilmupedia") return "ilped";
   return URUTAN_KATEGORI.includes(k) ? k : null;
 }
 
@@ -648,7 +649,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // reverse / subdomain), payload otomatis, nama file berisi jenis config.
 // v2.5 = BUG_DB dibangun ulang dari daftar kiriman Asep (7 operator,
 // by.U baru) + metode payload per kategori (bukan asal pilih).
-const VERSI_BOT = "v2.5";
+const VERSI_BOT = "v2.5.1";
 
 const PESAN_START =
   "👋 <b>Generator Config Dark Tunnel</b>\n\n" +
@@ -1705,7 +1706,7 @@ async function handleAdminTertunda(env, chatId, teks) {
       await sendTelegram(env, chatId,
         "😕 Format belum lengkap.\n\n" +
         "Format: <code>operator | kategori | nama</code>\n" +
-        "Operator: xl, axis, telkomsel, indosat, smartfren, tri, byu. Kategori: edu, opok, wa, game, sosmed, musik, nonton, conference, appfun.\n" +
+        "Operator: xl, axis, telkomsel, indosat, smartfren, tri, byu. Kategori: edu, ilped, opok, wa, game, sosmed, musik, nonton, conference, appfun.\n" +
         "Contoh: <code>telkomsel | opok | Opok Tsel 1</code>");
       return true;
     }
@@ -2062,7 +2063,7 @@ async function handleTelegram(env, update) {
       await sendTelegram(env, chatId,
         "😕 Format belum lengkap.\n\n" +
         "Format: <code>/tambahconfig &lt;operator&gt; &lt;kategori&gt; &lt;nama&gt;</code>\n" +
-        "Operator: xl, axis, telkomsel, indosat, smartfren, tri, byu. Kategori: edu, opok, wa, game, sosmed, musik, nonton, conference, appfun.\n" +
+        "Operator: xl, axis, telkomsel, indosat, smartfren, tri, byu. Kategori: edu, ilped, opok, wa, game, sosmed, musik, nonton, conference, appfun.\n" +
         "Contoh: <code>/tambahconfig telkomsel opok Opok Tsel 1</code>\n" +
         "Setelah itu kirim akunnya.");
       return;
