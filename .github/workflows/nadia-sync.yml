@@ -35,6 +35,7 @@ jobs:
         id: sync
         env:
           NADIA_API_KEY: ${{ secrets.NADIA_API_KEY }}
+          RELAY_SECRET: ${{ secrets.RELAY_SECRET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
           ALWAYS_NOTIFY: ${{ github.event_name == 'workflow_dispatch' }}
