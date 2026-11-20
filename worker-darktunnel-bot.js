@@ -1117,13 +1117,14 @@ const TOMBOL_APK = [[{ text: "📥 Download APK Dark Tunnel", url: "https://sfil
 // /config, daftar bug, pilihan metode payload, pesan gagal parsing).
 const TOMBOL_KEMBALI = [[{ text: "⬅️ Kembali ke Menu", callback_data: "menu:utama" }]];
 
-// Tombol "▶️ Start" bawah permanen (reply keyboard Telegram).
-// Sekali dipasang, pengguna cukup ketuk Start di bawah — tanpa ketik
-// /start dan tanpa tombol Menu ☰ (daftar perintah BotFather sengaja
-// dikosongkan). Satu pesan hanya boleh punya SATU reply_markup, jadi
-// tombol bawah ini dikirim lewat pesan terpisah, bukan bersama
-// inline_keyboard menu utama.
-const KEYBOARD_START = { keyboard: [[{ text: "▶️ Start" }]], resize_keyboard: true, is_persistent: true };
+// Tombol "▶️ Start" bawah (reply keyboard Telegram, TIDAK permanen —
+// pengguna bisa menyembunyikannya lewat ikon keyboard; /start akan
+// memunculkannya lagi). Sekali muncul, pengguna cukup ketuk Start di
+// bawah — tanpa ketik /start dan tanpa tombol Menu ☰ (daftar perintah
+// BotFather sengaja dikosongkan). Satu pesan hanya boleh punya SATU
+// reply_markup, jadi tombol bawah ini dikirim lewat pesan terpisah,
+// bukan bersama inline_keyboard menu utama.
+const KEYBOARD_START = { keyboard: [[{ text: "▶️ Start" }]], resize_keyboard: true };
 
 // Kirim pesan dengan reply keyboard "▶️ Start" (tanpa inline keyboard).
 async function sendKeyboardBawah(env, chatId, text) {
@@ -1135,17 +1136,12 @@ async function sendKeyboardBawah(env, chatId, text) {
   });
 }
 
-// Menu utama: PESAN_START + keyboard inline, lalu pasang tombol bawah
-// permanen SEKALI saja per pengguna (dicatat di KV "KB:<chatId>").
-// Tanpa KV, pengecekan dilewati dan pesan keyboard dikirim setiap kali
-// (graceful degradation — tombol tetap terpasang).
+// Menu utama: PESAN_START + keyboard inline, lalu kirim pesan tombol
+// bawah "▶️ Start" setiap kali (tanpa pelacakan KV — supaya tombol yang
+// disembunyikan pengguna bisa dimunculkan lagi lewat /start).
 async function tampilkanMenuUtama(env, chatId) {
   await sendTelegram(env, chatId, PESAN_START, keyboardStart());
-  let sudah = null;
-  try { sudah = await kvGet(env, "KB:" + chatId); } catch { sudah = null; }
-  if (sudah) return;
   await sendKeyboardBawah(env, chatId, "▶️ Ketuk tombol Start di bawah kapan saja untuk buka menu.");
-  try { await kvPut(env, "KB:" + chatId, "1"); } catch { /* abaikan */ }
 }
 
 // ================= HANDLER TELEGRAM =================
