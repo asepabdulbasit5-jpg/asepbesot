@@ -212,6 +212,13 @@ export const BUG_DB = {
       "www.northlink.co.za") },
     nonton: { label: "Nonton", hosts: daftarBug("s.ytimg.com") },
   } },
+  // Tri (3) — hanya 2 host yang jelas dari bahan grup (§9.2 Opok,
+  // "MODE BOLAK BALIK"): bimatri.ioh.co.id (aplikasi BimaTri) dan
+  // three.co.uk (brand Three). Tambah lagi lewat /tambahbug bila ada.
+  tri: { label: "Tri (3)", kategori: {
+    opok: { label: "Opok", hosts: daftarBug(
+      "bimatri.ioh.co.id", "three.co.uk") },
+  } },
 };
 
 // Cari bug di database (cocok persis, case-insensitive).
@@ -237,8 +244,10 @@ export function daftarBugPesan(opKey, katKey) {
   const op = BUG_DB[opKey];
   const kat = op?.kategori?.[katKey];
   if (!op || !kat) return null;
-  const judul = "🐛 <b>Bug " + op.label + " — " + kat.label + "</b> (" + kat.hosts.length + " host)\n\n";
-  const baris = kat.hosts.map((e) => "• <code>" + e.h + "</code>" + (e.n ? " (" + e.n + ")" : ""));
+  // Entri berupa IP tidak ditampilkan (permintaan Asep).
+  const hosts = kat.hosts.filter((e) => !isIP(e.h));
+  const judul = "🐛 <b>Bug " + op.label + " — " + kat.label + "</b> (" + hosts.length + " host)\n\n";
+  const baris = hosts.map((e) => "• <code>" + e.h + "</code>" + (e.n ? " (" + e.n + ")" : ""));
   const pesan = [];
   for (let i = 0; i < baris.length; i += 30) {
     const akhir = i + 30 >= baris.length;
@@ -327,7 +336,7 @@ async function catatPengguna(env, chatId, nama) {
 }
 
 // ---- Validasi operator / kategori untuk perintah admin ----
-const OPERATOR_ADMIN = { xl: "XL / Axis", telkomsel: "Telkomsel", indosat: "Indosat", smartfren: "Smartfren" };
+const OPERATOR_ADMIN = { xl: "XL / Axis", telkomsel: "Telkomsel", indosat: "Indosat", smartfren: "Smartfren", tri: "Tri (3)" };
 const URUTAN_KATEGORI = ["edu", "opok", "wa", "game", "sosmed", "musik", "nonton", "conference"];
 
 export function normalisasiOperator(op) {
@@ -348,6 +357,22 @@ function labelOperator(opKey) {
 function labelKategori(opKey, katKey) {
   return BUG_DB[opKey]?.kategori?.[katKey]?.label ||
     (katKey ? katKey[0].toUpperCase() + katKey.slice(1) : katKey);
+}
+
+// True bila host berupa alamat IP (IPv4, atau IPv6 sederhana).
+// Dipakai untuk menyaring bug IP dari daftar dan menolak bug IP baru
+// (permintaan Asep — bug berupa IP tidak disimpan / tidak ditampilkan).
+export function isIP(host) {
+  let h = String(host || "").trim();
+  const mPort = h.match(/^(.+):(\d{1,5})$/);
+  if (mPort && mPort[1].includes(".")) h = mPort[1];
+  if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(h)) {
+    return h.split(".").every((o) => Number(o) <= 255);
+  }
+  if (h.includes(":")) {
+    return /^[0-9a-fA-F:.]+$/.test(h) && /[0-9a-fA-F]/.test(h) && h.split(":").length >= 2;
+  }
+  return false;
 }
 
 // Host bug valid: domain atau IP, boleh pakai :port.
@@ -413,7 +438,7 @@ export async function daftarBugPesanGabungan(env, opKey, katKey) {
   const op = BUG_DB[opKey];
   const kat = op?.kategori?.[katKey];
   const kv = await ambilBugsKv(env);
-  const kvList = (kv?.[opKey]?.[katKey] || []).filter((e) => e && e.host);
+  const kvList = (kv?.[opKey]?.[katKey] || []).filter((e) => e && e.host && !isIP(e.host));
   if (!kat && kvList.length === 0) return null;
   const ada = new Set(kvList.map((e) => String(e.host).toLowerCase()));
   const baru = (e) => e.ts && Date.now() - e.ts < 7 * 86400 * 1000;
@@ -422,7 +447,7 @@ export async function daftarBugPesanGabungan(env, opKey, katKey) {
     (e.catatan ? " (" + escapeHtml(e.catatan) + ")" : "") +
     (baru(e) ? " 🆕" : ""));
   const barisBawaan = kat
-    ? kat.hosts.filter((e) => !ada.has(e.h.toLowerCase())).map((e) =>
+    ? kat.hosts.filter((e) => !isIP(e.h) && !ada.has(e.h.toLowerCase())).map((e) =>
       "• <code>" + e.h + "</code>" + (e.n ? " (" + e.n + ")" : ""))
     : [];
   const semua = [...barisKv, ...barisBawaan];
@@ -528,20 +553,43 @@ const PAYLOAD_METODE = {
   sshpayload: { label: "SSH+payload", template: "GET / HTTP/1.1[crlf]Host: [host][crlf]Connection: Upgrade[crlf]User-Agent: [ua][crlf]Upgrade: websocket[crlf][crlf]" },
   enhanced: { label: "Enhanced", template: "HEAD / HTTP/1.1[crlf]Host: [bug]:80[crlf]Connection: Keep-Alive[crlf]User-Agent: [ua][crlf][crlf]BMOVE / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf][crlf]" },
   direct: { label: "Direct", template: "GET / HTTP/1.1[crlf]Host: [bug][crlf][crlf]PATCH / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf][crlf]" },
+  // Dari bahan grup: "PATCH /ssh-ws" (Host akun + Host bug) dan
+  // "GET /cdn-cgi/trace + CF-RAY" (trik Cloudflare trace).
+  patchws: { label: "PATCH /ssh-ws", template: "PATCH /ssh-ws HTTP/1.1[crlf]Host: [host][crlf]Host: [bug][crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf]User-Agent: [ua][crlf][crlf]" },
+  cftrace: { label: "CF Trace", template: "GET /cdn-cgi/trace HTTP/1.1[crlf]Host: [bug][crlf][crlf]CF-RAY / HTTP/1.1[crlf]Host: [host][crlf]Connection: Upgrade[crlf]User-Agent: [ua][crlf]Upgrade: websocket[crlf][crlf]" },
 };
 
 function keyboardMetodePayload() {
   return [
     [{ text: "WS standar", callback_data: "metode:ws" }, { text: "SSH+payload", callback_data: "metode:sshpayload" }],
     [{ text: "Enhanced", callback_data: "metode:enhanced" }, { text: "Direct", callback_data: "metode:direct" }],
+    [{ text: "PATCH /ssh-ws", callback_data: "metode:patchws" }, { text: "CF Trace", callback_data: "metode:cftrace" }],
+    [{ text: "✨ Otomatis", callback_data: "metode:auto" }],
     [{ text: "⬅️ Kembali ke Menu", callback_data: "menu:utama" }],
   ];
+}
+
+// Pilih metode payload otomatis dari kategori bug akun (aturan dari
+// bahan grup): bug kategori edu -> enhanced, opok -> direct,
+// kategori lain / bug tidak dikenal -> ws (template standar aplikasi).
+async function pilihMetodeOtomatis(env, teks) {
+  try {
+    const hasil = parsePesan(teks);
+    if (!hasil.bug) return "ws";
+    const info = await cariBugGabungan(env, hasil.bug);
+    if (!info) return "ws";
+    if (info.kategori === "edu") return "enhanced";
+    if (info.kategori === "opok") return "direct";
+    return "ws";
+  } catch { return "ws"; }
 }
 
 // Versi bot (tampil di /status). Naikkan tiap rilis fitur besar:
 // v2 = database bug + /bug + /cek + admin KV; v2.3 = navigasi (tombol
 // Kembali, menu 2 baris, tombol Start bawah) + rincian config + /status.
-const VERSI_BOT = "v2.3";
+// v2.4 = pilih jenis config dulu, panel admin, /cek diperkaya (IP /
+// reverse / subdomain), payload otomatis, nama file berisi jenis config.
+const VERSI_BOT = "v2.4";
 
 const PESAN_START =
   "👋 <b>Generator Config Dark Tunnel</b>\n\n" +
@@ -555,8 +603,8 @@ const PESAN_GRUP =
 const CARA_IMPOR =
   "📥 <b>Cara impor ke Dark Tunnel:</b>\n" +
   "1. Unduh file <code>.dark</code> di atas.\n" +
-  "2. Di aplikasi Dark Tunnel, pilih <b>Import / Restore</b> lalu pilih file itu.\n" +
-  "3. Pilih config-nya, tekan <b>Connect</b>.";
+  "2. Klik config di atas, buka dengan aplikasi Dark Tunnel.\n" +
+  "3. Tekan <b>Connect</b>.";
 
 // ================= UTIL BASE64 (jalan di Worker & Node) =================
 
@@ -590,14 +638,22 @@ function escapeHtml(s) {
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-// Nama file .dark dari nama config: huruf kecil, hanya [a-z0-9_-],
-// maks 40 karakter; bila nama kosong pakai "config". Ditambah sufiks
-// " by @autosetdark_bot" supaya branding bot kelihatan di nama file
-// (permintaan Asep 20 Nov 2026 — ganti caption, yang tidak dipakai).
-export function namaFileDark(namaConfig) {
+// Nama file .dark: "<type>-<nama> by @autosetdark_bot.dark" (type huruf
+// kecil, mis. "vless-opok-tsel-1 by @autosetdark_bot.dark"). Bila nama
+// sudah diawali type yang sama, jangan digandakan. Bila type kosong /
+// tidak dikenal, pakai nama saja seperti dulu. Nama disanitasi: huruf
+// kecil, hanya [a-z0-9_-], maks 40 karakter; bila kosong pakai "config".
+const JENIS_CONFIG_FILE = ["SSH", "VMESS", "VLESS", "TROJAN", "SHADOWSOCKS", "SSH_DNSTT", "OPENVPN"];
+export function namaFileDark(namaConfig, type) {
   let s = String(namaConfig || "").toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
   if (!s) s = "config";
-  return s + " by @autosetdark_bot.dark";
+  let prefix = "";
+  const t = String(type || "").toUpperCase();
+  if (JENIS_CONFIG_FILE.includes(t)) {
+    const tl = t.toLowerCase();
+    if (!s.startsWith(tl + "-") && s !== tl) prefix = tl + "-";
+  }
+  return prefix + s + " by @autosetdark_bot.dark";
 }
 
 // ================= GENERATOR TUNNELCONFIG =================
@@ -1097,9 +1153,13 @@ async function kabariAdmin(env, teks) {
 const pendingCek = new Map();
 
 // Bersihkan input jadi nama domain polos ("https://a.com/x?y=1" ->
-// "a.com"). Return "" bila bukan domain yang valid.
+// "a.com"). Alamat IP juga diterima (untuk reverse DNS). Return ""
+// bila bukan domain/IP yang valid.
 export function bersihkanDomain(input) {
   let s = String(input || "").trim().toLowerCase();
+  const mIpPort = s.match(/^((?:\d{1,3}\.){3}\d{1,3}):\d{1,5}$/);
+  if (mIpPort) return mIpPort[1];
+  if (isIP(s)) return s;
   s = s.replace(/^https?:\/\//, "");
   s = s.split("/")[0].split("?")[0].split("#")[0];
   s = s.split(":")[0];
@@ -1108,8 +1168,31 @@ export function bersihkanDomain(input) {
   return s;
 }
 
+// Subdomain umum yang dicek saat /cek (bukan crt.sh — pernah timeout).
+const SUBDOMAIN_CEK = ["www", "mail", "api", "blog", "app", "cdn", "static", "m", "ftp", "smtp", "dev", "staging"];
+
+// Query DNS-over-HTTPS Cloudflare. Return objek JSON atau null bila gagal.
+async function dohQuery(name, type) {
+  try {
+    const res = await fetch("https://cloudflare-dns.com/dns-query?name=" + encodeURIComponent(name) + "&type=" + type, {
+      headers: { Accept: "application/dns-json" },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res || !res.ok) return null;
+    return await res.json().catch(() => null);
+  } catch { return null; }
+}
+
+// Ambil jawaban A (IP) dari hasil DoH.
+function ipsDariDoh(j) {
+  if (!j || !Array.isArray(j.Answer)) return [];
+  return j.Answer.filter((a) => a && a.type === 1 && typeof a.data === "string").map((a) => a.data);
+}
+
 // Cek satu domain: HEAD dulu, fallback GET, timeout 8 detik per upaya.
-// Return {domain, ok, status, ms, cdn, server}.
+// Ditambah: resolve IP (A), reverse DNS bila input IP (PTR), dan cek
+// subdomain umum. Return {domain, ok, status, ms, cdn, server, ips,
+// hostname, subdomains} — subdomains = null bila DNS gagal total.
 export async function cekDomain(domain) {
   const t0 = Date.now();
   const ambil = (url, method) =>
@@ -1126,38 +1209,77 @@ export async function cekDomain(domain) {
     catch { try { res = await ambil("http://" + domain, "GET"); } catch { res = null; } }
   }
   const ms = Date.now() - t0;
-  if (!res) return { domain, ok: false, status: 0, ms, cdn: "", server: "" };
-  const h = res.headers;
-  const cfRay = h.get("cf-ray");
-  const amzCf = h.get("x-amz-cf-id") || h.get("x-amz-cf-pop");
-  const via = (h.get("via") || "").toLowerCase();
-  let cdn = "";
-  if (cfRay) cdn = "Cloudflare";
-  else if (amzCf || via.includes("cloudfront")) cdn = "CloudFront";
-  return { domain, ok: true, status: res.status, ms, cdn, server: h.get("server") || "" };
+  const hasil = { domain, ok: !!res, status: res ? res.status : 0, ms, cdn: "", server: "", ips: [], hostname: "", subdomains: null };
+  if (res) {
+    const h = res.headers;
+    const cfRay = h.get("cf-ray");
+    const amzCf = h.get("x-amz-cf-id") || h.get("x-amz-cf-pop");
+    const via = (h.get("via") || "").toLowerCase();
+    if (cfRay) hasil.cdn = "Cloudflare";
+    else if (amzCf || via.includes("cloudfront")) hasil.cdn = "CloudFront";
+    hasil.server = h.get("server") || "";
+  }
+  // DNS: resolve IP / reverse / subdomain — gagal dengan anggun
+  // (bagian yang gagal dihilangkan saja, bukan error mentah).
+  let dnsOk = false;
+  if (isIP(domain)) {
+    const parts = domain.split(".");
+    if (parts.length === 4) {
+      const ptr = await dohQuery(parts.reverse().join(".") + ".in-addr.arpa", "PTR");
+      if (ptr) {
+        dnsOk = true;
+        const nama = (ptr.Answer || []).find((a) => a && a.type === 12 && typeof a.data === "string");
+        if (nama) hasil.hostname = String(nama.data).replace(/\.+$/, "");
+      }
+    }
+  } else {
+    const a = await dohQuery(domain, "A");
+    if (a) { dnsOk = true; hasil.ips = ipsDariDoh(a).slice(0, 3); }
+    const cekSub = await Promise.all(SUBDOMAIN_CEK.map(async (sub) => {
+      const j = await dohQuery(sub + "." + domain, "A");
+      if (j) dnsOk = true;
+      const ips = ipsDariDoh(j);
+      return ips.length ? { nama: sub + "." + domain, ip: ips[0] } : null;
+    }));
+    if (dnsOk) hasil.subdomains = cekSub.filter(Boolean);
+  }
+  return hasil;
 }
 
 export function formatHasilCek(r) {
+  const barisIp = (r.ips && r.ips.length)
+    ? "\n🌐 IP: " + r.ips.map((ip) => escapeHtml(ip)).join(", ") : "";
+  const barisHost = r.hostname
+    ? "\n🔁 Hostname: <code>" + escapeHtml(r.hostname) + "</code>" : "";
+  const barisSub = r.subdomains
+    ? (r.subdomains.length
+      ? "\n🔎 Subdomain yang ditemukan: " + r.subdomains.map((s) => escapeHtml(s.nama) + " (" + escapeHtml(s.ip) + ")").join(", ")
+      : "\n🔎 Subdomain: tidak ditemukan")
+    : "";
   if (!r.ok) {
     return "🌐 <b>" + escapeHtml(r.domain) + "</b>\n\n" +
       "❌ Domain tidak merespons — tidak ditemukan atau tidak bisa dijangkau.\n" +
-      "Coba cek lagi ejaannya, atau coba lagi nanti ya.";
+      "Coba cek lagi ejaannya, atau coba lagi nanti ya." +
+      barisIp + barisHost + barisSub;
   }
   let teks = "🌐 <b>" + escapeHtml(r.domain) + "</b>\n\n" +
     "✅ Merespons — HTTP " + r.status + " (" + r.ms + " ms)";
   if (r.status >= 400) teks += "\n⚠️ Domain merespons, tapi mengembalikan status " + r.status + " (akses dibatasi / halaman tidak ada).";
+  teks += barisIp + barisHost + barisSub;
   if (r.cdn) teks += "\n📡 CDN: " + r.cdn;
   if (r.server) teks += "\n🖥️ Server: " + escapeHtml(r.server);
   return teks;
 }
 
-function keyboardStart() {
-  return [
+function keyboardStart(isAdmin) {
+  const kb = [
     [{ text: "⚡ Buat Config", callback_data: "buat:config" }],
     [{ text: "🔍 Cari Bug", callback_data: "bug:menu" }, { text: "🌐 Cek Domain", callback_data: "cek:mulai" }],
-    [{ text: "📥 Download APK Dark Tunnel", url: "https://sfile.co/H26JBeTBi1o" }, { text: "🆕 Update Terbaru", callback_data: "update:lihat" }],
+    [{ text: "dark tunnel", url: "https://sfile.co/H26JBeTBi1o" }, { text: "🆕 Update Terbaru", callback_data: "update:lihat" }],
     [{ text: "🛒 Beli Akun VPN", url: "https://t.me/sandekalavpn_bot" }, { text: "👥 Gabung Grup", url: "https://t.me/sand3kala" }],
   ];
+  if (isAdmin) kb.push([{ text: "⚙️ Admin", callback_data: "admin:panel" }]);
+  return kb;
 }
 
 const TOMBOL_APK = [[{ text: "📥 Download APK Dark Tunnel", url: "https://sfile.co/H26JBeTBi1o" }]];
@@ -1166,6 +1288,38 @@ const TOMBOL_APK = [[{ text: "📥 Download APK Dark Tunnel", url: "https://sfil
 // (operator/kategori bug, pemandu buat config & cek domain, /update,
 // /config, daftar bug, pilihan metode payload, pesan gagal parsing).
 const TOMBOL_KEMBALI = [[{ text: "⬅️ Kembali ke Menu", callback_data: "menu:utama" }]];
+
+// Tombol kembali ke daftar kategori operator + kembali ke menu utama
+// (dipakai di pesan terakhir daftar bug).
+function keyboardKembaliBug(opKey) {
+  return [
+    [{ text: "⬅️ Kembali", callback_data: "bug:op:" + opKey }],
+    ...TOMBOL_KEMBALI,
+  ];
+}
+
+// Pilihan jenis config di tombol "⚡ Buat Config": 5 jenis (2 per
+// baris, kecuali yang terakhir), lalu Otomatis, lalu Kembali.
+function keyboardPilihJenis() {
+  return [
+    [{ text: "SSH", callback_data: "pilih:SSH" }, { text: "VLESS", callback_data: "pilih:VLESS" }],
+    [{ text: "VMess", callback_data: "pilih:VMESS" }, { text: "Trojan", callback_data: "pilih:TROJAN" }],
+    [{ text: "Shadowsocks", callback_data: "pilih:SHADOWSOCKS" }],
+    [{ text: "🔄 Otomatis (deteksi sendiri)", callback_data: "pilih:AUTO" }],
+    ...TOMBOL_KEMBALI,
+  ];
+}
+
+// Panel admin (tombol "⚙️ Admin" di menu utama).
+function keyboardAdmin() {
+  return [
+    [{ text: "➕ Tambah Bug", callback_data: "admin:tambahbug" }, { text: "➕ Tambah Config", callback_data: "admin:tambahconfig" }],
+    [{ text: "📢 Broadcast", callback_data: "admin:broadcast" }, { text: "📊 Status", callback_data: "admin:status" }],
+    ...TOMBOL_KEMBALI,
+  ];
+}
+
+const TEKS_PANEL_ADMIN = "⚙️ <b>Menu Admin</b>\n\nPilih yang mau dilakukan:";
 
 // Tombol "▶️ Start" bawah (reply keyboard Telegram, TIDAK permanen —
 // pengguna bisa menyembunyikannya lewat ikon keyboard; /start akan
@@ -1188,10 +1342,11 @@ async function sendKeyboardBawah(env, chatId, text) {
 
 // Menu utama: PESAN_START + keyboard inline, lalu kirim pesan tombol
 // bawah "▶️ Start" setiap kali (tanpa pelacakan KV — supaya tombol yang
-// disembunyikan pengguna bisa dimunculkan lagi lewat /start).
+// disembunyikan pengguna bisa dimunculkan lagi lewat /start). Isi pesan
+// pembawa keyboard hanya "▶️" (Telegram butuh teks pada pesan).
 async function tampilkanMenuUtama(env, chatId) {
-  await sendTelegram(env, chatId, PESAN_START, keyboardStart());
-  await sendKeyboardBawah(env, chatId, "▶️ Ketuk tombol Start di bawah kapan saja untuk buka menu.");
+  await sendTelegram(env, chatId, PESAN_START, keyboardStart(cekAdmin(env, chatId) === "ya"));
+  await sendKeyboardBawah(env, chatId, "▶️");
 }
 
 // ================= HANDLER TELEGRAM =================
@@ -1203,6 +1358,24 @@ const pendingMetode = new Map();
 // Akun yang sedang ditunggu untuk /tambahconfig (per chat admin,
 // sementara di memori saja). Isi: {op, kat, nama, ts}.
 const pendingConfig = new Map();
+
+// Pilihan jenis config yang sedang menunggu (per chat, sementara di
+// memori saja — bukan KV). Isi: {type, ts}. Dipakai alur "⚡ Buat
+// Config": pengguna memilih jenis dulu, baru kirim akun.
+const pendingPilih = new Map();
+
+// Ambil pilihan yang masih berlaku (kedaluwarsa 15 menit) atau null.
+function ambilPilihan(chatId) {
+  const p = pendingPilih.get(chatId);
+  if (!p) return null;
+  if (Date.now() - p.ts > 15 * 60 * 1000) { pendingPilih.delete(chatId); return null; }
+  return p.type;
+}
+
+// State admin tertunda dari tombol panel admin (per chat admin,
+// sementara di memori saja). Isi: {jenis: "bug"|"config"|"broadcast",
+// tahap: "nama" (untuk config), ts}.
+const pendingAdmin = new Map();
 
 async function handlePesanAkun(env, chatId, teks, opts = {}) {
   let hasil;
@@ -1220,19 +1393,29 @@ async function handlePesanAkun(env, chatId, teks, opts = {}) {
     if (hasil.adaSsh && hasil.kurangSsh.length) {
       await sendTelegram(env, chatId,
         "🔎 Akun SSH-nya belum lengkap — yang tidak ketemu: <b>" + escapeHtml(hasil.kurangSsh.join(", ")) + "</b>.\n\n" +
-        "Kirim lagi dengan format seperti ini:\n" +
-        "<pre>Host: sg1.contoh.com\nPort: 22\nUsername: userku\nPassword: passku</pre>\n" +
-        "Boleh juga format <code>host:port@user:pass</code> atau <code>user:pass@host:port</code>.");
+        "Kirim lagi dengan format <code>host:port@user:pass</code> atau <code>user:pass@host:port</code>.");
       return;
     }
     // Pesan sampah / tidak ada akun sama sekali → panduan singkat.
     await sendTelegram(env, chatId,
       "🤔 Bot tidak menemukan akun di pesan itu.\n\n" +
       "Kirim akun <b>SSH</b> atau link <b>VLESS / VMess / Trojan / Shadowsocks</b> — boleh ditempel apa adanya, bot yang rapikan.\n\n" +
-      "Contoh SSH:\n" +
-      "<pre>Host: sg1.contoh.com\nPort: 22\nUsername: userku\nPassword: passku</pre>\n" +
       "Ketik /start untuk lihat panduan lengkap.");
     return;
+  }
+
+  // Pilihan jenis config (tombol "⚡ Buat Config"): jenis hasil parsing
+  // harus SAMA dengan pilihan. Bila tidak sama, JANGAN generate — beri
+  // tahu pengguna dan PERTAHANKAN pilihan (dia bisa kirim akun yang
+  // benar). Tanpa pilihan (tempel akun langsung) = deteksi otomatis.
+  const pilihan = ambilPilihan(chatId);
+  if (pilihan && pilihan !== "AUTO") {
+    const salah = [...new Set(hasil.configs.map((c) => c.type))].filter((t) => t !== pilihan);
+    if (salah.length) {
+      await sendTelegram(env, chatId,
+        "⚠️ Belum bisa buat config <b>" + pilihan + "</b> dari akun <b>" + escapeHtml(salah.join(", ")) + "</b> yang kamu kirim. Kirim akun <b>" + pilihan + "</b>, atau ketuk Kembali lalu pilih jenis lain.", TOMBOL_KEMBALI);
+      return;
+    }
   }
 
   // Akun SSH + bug: tanya dulu metode payload-nya (kecuali metode
@@ -1255,8 +1438,36 @@ async function handlePesanAkun(env, chatId, teks, opts = {}) {
     const rincian = ringkasanConfig(c);
     const caption = "✅ <b>Config Dark Tunnel jadi:</b> " + escapeHtml(c.type + " — " + c.name) +
       (rincian ? "\n\n" + rincian : "") + "\n\n" + CARA_IMPOR + catatanBug;
-    await sendDocument(env, chatId, namaFileDark(c.name), toDarktunnelLink(c) + "\n", caption, TOMBOL_APK);
+    await sendDocument(env, chatId, namaFileDark(c.name, c.type), toDarktunnelLink(c) + "\n", caption, TOMBOL_APK);
   }
+  // File terkirim — pilihan jenis config selesai dipakai.
+  pendingPilih.delete(chatId);
+}
+
+// Simpan bug admin ke KV (upsert): bila host sudah ada di kategori itu,
+// catatannya diperbarui dan ts-nya disegarkan. Lalu catat update +
+// siarkan ke pengguna. Dipakai /tambahbug dan tombol "➕ Tambah Bug".
+// Return {aksi: "ditambahkan"|"diupdate", terkirim} atau null bila gagal.
+async function simpanBug(env, op, kat, host, catatan) {
+  const bugs = await ambilBugsKv(env);
+  bugs[op] = bugs[op] || {};
+  bugs[op][kat] = bugs[op][kat] || [];
+  const sudah = bugs[op][kat].find((e) => String(e.host || "").toLowerCase() === host);
+  let aksi;
+  if (sudah) {
+    sudah.catatan = catatan;
+    sudah.tanggal = tanggalWib();
+    sudah.ts = Date.now();
+    aksi = "diupdate";
+  } else {
+    bugs[op][kat].unshift({ host, catatan, tanggal: tanggalWib(), ts: Date.now() });
+    aksi = "ditambahkan";
+  }
+  if (!await kvPut(env, "BUGS", bugs)) return null;
+  const label = labelOperator(op) + " — " + labelKategori(op, kat);
+  await catatUpdate(env, "Bug " + (aksi === "diupdate" ? "diupdate" : "baru") + ": " + host + " (" + label + ")");
+  const terkirim = await siarkanUpdate(env, "🆕 Update: bug " + (aksi === "diupdate" ? "diupdate" : "baru") + " — <code>" + escapeHtml(host) + "</code> (" + label + "). Ketik /bug buat lihat daftar terbaru.");
+  return { aksi, terkirim };
 }
 
 // ---- Perintah admin /tambahbug <operator> <kategori> <host> [catatan] ----
@@ -1266,7 +1477,7 @@ async function handleTambahBug(env, chatId, teks) {
   const op = normalisasiOperator(opRaw);
   if (!op) {
     await sendTelegram(env, chatId,
-      "😕 Operator tidak dikenal. Pakai salah satu: <b>xl, telkomsel, indosat, smartfren</b> (axis = xl).\n\n" +
+      "😕 Operator tidak dikenal. Pakai salah satu: <b>xl, telkomsel, indosat, smartfren, tri</b> (axis = xl).\n\n" +
       "Format: <code>/tambahbug &lt;operator&gt; &lt;kategori&gt; &lt;host&gt; [catatan]</code>\n" +
       "Contoh: <code>/tambahbug telkomsel opok tdwcontent.telkomsel.com</code>");
     return;
@@ -1279,34 +1490,63 @@ async function handleTambahBug(env, chatId, teks) {
   }
   if (!hostRaw || !validBugHost(hostRaw)) {
     await sendTelegram(env, chatId,
-      "😕 Host tidak valid. Isi host yang benar, mis. <code>edu.ruangguru.com</code> atau <code>104.18.17.214:443</code>.");
+      "😕 Host tidak valid. Isi host yang benar, mis. <code>edu.ruangguru.com</code>.");
+    return;
+  }
+  const host = hostRaw.trim().toLowerCase();
+  if (isIP(host)) {
+    await sendTelegram(env, chatId, "😕 Bug berupa IP tidak disimpan — kirim hostname/domain saja.");
     return;
   }
   if (!env.DATA) {
     await sendTelegram(env, chatId, "⚠️ Fitur admin belum aktif — KV belum dipasang di Worker.");
     return;
   }
-  const host = hostRaw.trim().toLowerCase();
   const catatan = catatanParts.join(" ").trim();
-  const bugs = await ambilBugsKv(env);
-  bugs[op] = bugs[op] || {};
-  bugs[op][kat] = bugs[op][kat] || [];
-  if (bugs[op][kat].some((e) => String(e.host || "").toLowerCase() === host)) {
-    await sendTelegram(env, chatId, "ℹ️ Bug <code>" + escapeHtml(host) + "</code> sudah ada di daftar " + labelOperator(op) + " — " + labelKategori(op, kat) + ".");
-    return;
-  }
-  bugs[op][kat].unshift({ host, catatan, tanggal: tanggalWib(), ts: Date.now() });
-  if (!await kvPut(env, "BUGS", bugs)) {
+  const hasil = await simpanBug(env, op, kat, host, catatan);
+  if (!hasil) {
     await sendTelegram(env, chatId, "⚠️ Gagal menyimpan bug — coba lagi nanti ya.");
     return;
   }
-  await sendTelegram(env, chatId, "✅ Bug ditambahkan: <code>" + escapeHtml(host) + "</code> (" + labelOperator(op) + " — " + labelKategori(op, kat) + ").");
-  await catatUpdate(env, "Bug baru: " + host + " (" + labelOperator(op) + " — " + labelKategori(op, kat) + ")");
-  const terkirim = await siarkanUpdate(env, "🆕 Update: bug baru — <code>" + escapeHtml(host) + "</code> (" + labelOperator(op) + " — " + labelKategori(op, kat) + "). Ketik /bug buat lihat daftar terbaru.");
+  await sendTelegram(env, chatId, "✅ Bug " + hasil.aksi + ": <code>" + escapeHtml(host) + "</code> (" + labelOperator(op) + " — " + labelKategori(op, kat) + ").");
+  await sendTelegram(env, chatId, "📣 Update terkirim ke " + hasil.terkirim + " pengguna.");
+}
+
+// Simpan satu TunnelConfig sebagai config contoh (upsert menurut nama):
+// bila nama sudah ada, isinya diganti (id lama dipertahankan). Lalu
+// kirim file .dark ke admin, catat update + siarkan. Dipakai
+// /tambahconfig (teks/link darktunnel://) dan dokumen .dark.
+// `hasil` (opsional) = hasil parsePesan, untuk catatan bug di caption.
+// Return true bila berhasil disimpan.
+async function simpanConfigContoh(env, chatId, pending, cfg, hasil) {
+  const link = toDarktunnelLink(cfg);
+  const configs = await ambilConfigsKv(env);
+  const namaLower = String(pending.nama || "").toLowerCase();
+  const idx = configs.findIndex((e) => String(e.nama || "").toLowerCase() === namaLower);
+  const aksi = idx >= 0 ? "diupdate" : "ditambahkan";
+  const entri = { id: idx >= 0 ? configs[idx].id : Date.now().toString(36) + Math.random().toString(36).slice(2, 6), nama: pending.nama, operator: pending.op, kategori: pending.kat, link, tanggal: tanggalWib(), ts: Date.now() };
+  if (idx >= 0) configs[idx] = entri; else configs.unshift(entri);
+  if (!await kvPut(env, "CONFIGS", configs.slice(0, 20))) {
+    await sendTelegram(env, chatId, "⚠️ Gagal menyimpan config — coba lagi nanti ya.");
+    return false;
+  }
+  pendingConfig.delete(chatId);
+  const sub = cfg.sshTunnelConfig || cfg.vmessTunnelConfig || cfg.vlessTunnelConfig || cfg.trojanTunnelConfig || cfg.shadowsocksTunnelConfig;
+  const hasilBug = hasil || { bug: sub?.injectConfig?.serverNameIndication || null, adaInject: !!sub?.injectConfig };
+  const catatanBug = await catatanBugUntuk(env, hasilBug);
+  const rincian = ringkasanConfig(cfg);
+  const caption = "✅ Config contoh " + aksi + ": <b>" + escapeHtml(pending.nama) + "</b> (" + labelOperator(pending.op) + " — " + labelKategori(pending.op, pending.kat) + ")." +
+    (rincian ? "\n\n" + rincian : "") + "\n\n" + CARA_IMPOR + catatanBug;
+  await sendDocument(env, chatId, namaFileDark(pending.nama, cfg.type), link + "\n", caption, TOMBOL_APK);
+  await catatUpdate(env, "Config " + (aksi === "diupdate" ? "diupdate" : "baru") + ": " + pending.nama + " (" + labelOperator(pending.op) + " — " + labelKategori(pending.op, pending.kat) + ")");
+  const terkirim = await siarkanUpdate(env, "🆕 Config " + (aksi === "diupdate" ? "diupdate" : "baru") + ": <b>" + escapeHtml(pending.nama) + "</b> (" + labelOperator(pending.op) + " — " + labelKategori(pending.op, pending.kat) + "). Ketik /config buat ambil.");
   await sendTelegram(env, chatId, "📣 Update terkirim ke " + terkirim + " pengguna.");
+  return true;
 }
 
 // ---- Perintah admin /tambahconfig (dua langkah: perintah, lalu akun) ----
+// Akun bisa berupa teks biasa, link darktunnel://, atau file .dark
+// (dokumen ditangani handleDokumenConfig).
 async function handleTambahConfigAkun(env, chatId, teks) {
   const pending = pendingConfig.get(chatId);
   if (!pending) return false;
@@ -1318,24 +1558,122 @@ async function handleTambahConfigAkun(env, chatId, teks) {
     await sendTelegram(env, chatId, "😕 Config tidak bisa diproses: <b>" + escapeHtml(alasan) + "</b>. Kirim ulang akunnya.");
     return true; // tetap menunggu
   }
-  const cfg = hasil.configs[0];
-  const link = toDarktunnelLink(cfg);
-  const configs = await ambilConfigsKv(env);
-  configs.unshift({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), nama: pending.nama, operator: pending.op, kategori: pending.kat, link, tanggal: tanggalWib(), ts: Date.now() });
-  if (!await kvPut(env, "CONFIGS", configs.slice(0, 20))) {
-    await sendTelegram(env, chatId, "⚠️ Gagal menyimpan config — coba lagi nanti ya.");
-    return true; // tetap menunggu
-  }
-  pendingConfig.delete(chatId);
-  const catatanBug = await catatanBugUntuk(env, hasil);
-  const rincian = ringkasanConfig(cfg);
-  const caption = "✅ Config contoh disimpan: <b>" + escapeHtml(pending.nama) + "</b> (" + labelOperator(pending.op) + " — " + labelKategori(pending.op, pending.kat) + ")." +
-    (rincian ? "\n\n" + rincian : "") + "\n\n" + CARA_IMPOR + catatanBug;
-  await sendDocument(env, chatId, namaFileDark(pending.nama), link + "\n", caption, TOMBOL_APK);
-  await catatUpdate(env, "Config baru: " + pending.nama + " (" + labelOperator(pending.op) + " — " + labelKategori(pending.op, pending.kat) + ")");
-  const terkirim = await siarkanUpdate(env, "🆕 Config baru: <b>" + escapeHtml(pending.nama) + "</b> (" + labelOperator(pending.op) + " — " + labelKategori(pending.op, pending.kat) + "). Ketik /config buat ambil.");
-  await sendTelegram(env, chatId, "📣 Update terkirim ke " + terkirim + " pengguna.");
+  await simpanConfigContoh(env, chatId, pending, hasil.configs[0], hasil);
   return true;
+}
+
+// ---- Dokumen .dark dari admin yang sedang ditunggu akunnya ----
+// Unduh file (getFile + download), ambil baris darktunnel:// pertama,
+// decode, simpan sebagai config contoh. Bila file bukan .dark / tidak
+// bisa di-decode, balas ramah dan JANGAN hapus state (admin bisa kirim
+// ulang). Dokumen dari non-admin atau tanpa state ditunggu diabaikan.
+async function handleDokumenConfig(env, msg) {
+  const chatId = msg.chat.id;
+  if (cekAdmin(env, chatId) !== "ya") return;
+  const pending = pendingConfig.get(chatId);
+  if (!pending) return;
+  const doc = msg.document || {};
+  const namaFile = String(doc.file_name || "");
+  const gagal = "😕 File tidak bisa dibaca — kirim file .dark hasil ekspor Dark Tunnel.";
+  if (!/\.dark(\.backup)?$/i.test(namaFile) || !doc.file_id) {
+    await sendTelegram(env, chatId, gagal);
+    return;
+  }
+  let isi = "";
+  try {
+    const info = await telegramApi(env, "getFile", { file_id: doc.file_id });
+    const path = info?.result?.file_path;
+    if (!path) throw new Error("tanpa file_path");
+    const res = await fetch("https://api.telegram.org/file/bot" + env.BOT_TOKEN + "/" + path, { signal: AbortSignal.timeout(15000) });
+    if (!res || !res.ok) throw new Error("unduh gagal");
+    isi = await res.text();
+  } catch {
+    await sendTelegram(env, chatId, gagal);
+    return;
+  }
+  const baris = String(isi).split("\n").map((s) => s.trim()).find((s) => s.startsWith("darktunnel://"));
+  const cfg = baris ? fromDarktunnelLink(baris) : null;
+  if (!cfg) {
+    await sendTelegram(env, chatId, gagal);
+    return;
+  }
+  await simpanConfigContoh(env, chatId, pending, cfg);
+}
+
+// Pesan teks admin saat ada state tertunda dari tombol panel admin.
+// Return true bila pesan ditangani di sini (router tidak lanjut ke
+// handlePesanAkun). State kedaluwarsa (>15 menit) diabaikan.
+async function handleAdminTertunda(env, chatId, teks) {
+  const st = pendingAdmin.get(chatId);
+  if (!st) return false;
+  if (Date.now() - st.ts > 15 * 60 * 1000) { pendingAdmin.delete(chatId); return false; }
+  if (st.jenis === "bug") {
+    const bagian = teks.split("|").map((s) => s.trim());
+    const [opRaw, katRaw, hostRaw, ...catatanParts] = bagian;
+    const op = normalisasiOperator(opRaw);
+    if (!op) {
+      await sendTelegram(env, chatId, "😕 Operator tidak dikenal. Pakai salah satu: <b>xl, telkomsel, indosat, smartfren, tri</b> (axis = xl).");
+      return true;
+    }
+    const kat = normalisasiKategori(katRaw);
+    if (!kat) {
+      await sendTelegram(env, chatId, "😕 Kategori tidak dikenal. Pakai salah satu: <b>edu, opok, wa, game, sosmed, musik, nonton, conference</b>.");
+      return true;
+    }
+    if (!hostRaw || !validBugHost(hostRaw)) {
+      await sendTelegram(env, chatId, "😕 Host tidak valid. Isi host yang benar, mis. <code>edu.ruangguru.com</code>.");
+      return true;
+    }
+    const host = hostRaw.toLowerCase();
+    if (isIP(host)) {
+      await sendTelegram(env, chatId, "😕 Bug berupa IP tidak disimpan — kirim hostname/domain saja.");
+      return true;
+    }
+    if (!env.DATA) {
+      await sendTelegram(env, chatId, "⚠️ Fitur admin belum aktif — KV belum dipasang di Worker.");
+      return true;
+    }
+    const catatan = catatanParts.join(" | ").trim();
+    const hasil = await simpanBug(env, op, kat, host, catatan);
+    if (!hasil) {
+      await sendTelegram(env, chatId, "⚠️ Gagal menyimpan bug — coba lagi nanti ya.");
+      return true;
+    }
+    pendingAdmin.delete(chatId);
+    await sendTelegram(env, chatId, "✅ Bug " + hasil.aksi + ": <code>" + escapeHtml(host) + "</code> (" + labelOperator(op) + " — " + labelKategori(op, kat) + ").");
+    await sendTelegram(env, chatId, "📣 Update terkirim ke " + hasil.terkirim + " pengguna.");
+    return true;
+  }
+  if (st.jenis === "config" && st.tahap === "nama") {
+    const bagian = teks.split("|").map((s) => s.trim());
+    const [opRaw, katRaw, ...namaParts] = bagian;
+    const op = normalisasiOperator(opRaw);
+    const kat = normalisasiKategori(katRaw);
+    const nama = namaParts.join(" | ").trim();
+    if (!op || !kat || !nama) {
+      await sendTelegram(env, chatId,
+        "😕 Format belum lengkap.\n\n" +
+        "Format: <code>operator | kategori | nama</code>\n" +
+        "Operator: xl, telkomsel, indosat, smartfren, tri. Kategori: edu, opok, wa, game, sosmed, musik, nonton, conference.\n" +
+        "Contoh: <code>telkomsel | opok | Opok Tsel 1</code>");
+      return true;
+    }
+    if (!env.DATA) {
+      await sendTelegram(env, chatId, "⚠️ Fitur admin belum aktif — KV belum dipasang di Worker.");
+      return true;
+    }
+    pendingAdmin.delete(chatId);
+    pendingConfig.set(chatId, { op, kat, nama, ts: Date.now() });
+    await sendTelegram(env, chatId, "📋 Config <b>" + escapeHtml(nama) + "</b> (" + labelOperator(op) + " — " + labelKategori(op, kat) + ").\n\nKirim akunnya — teks, link darktunnel://, atau file .dark.", [[{ text: "❌ Batal", callback_data: "admin:batal" }]]);
+    return true;
+  }
+  if (st.jenis === "broadcast") {
+    pendingAdmin.delete(chatId);
+    const terkirim = await siarkanUpdate(env, teks);
+    await sendTelegram(env, chatId, "📣 Broadcast terkirim ke " + terkirim + " pengguna.");
+    return true;
+  }
+  return false;
 }
 
 // ---- /status: kondisi bot (DM saja; di grup diabaikan) ----
@@ -1408,20 +1746,37 @@ async function handleTelegram(env, update) {
       return;
     }
     if (!chatIdCb) { await jawabCallback(env, cb.id); return; }
+    // Ketuk tombol menu apa pun membatalkan pilihan jenis config yang
+    // tertunda — kecuali memilih metode payload (pilihan harus tetap
+    // hidup sampai file config terkirim).
+    if (!data.startsWith("metode:")) pendingPilih.delete(chatIdCb);
     // Tombol "⬅️ Kembali ke Menu" — edit pesan ini jadi menu utama.
     if (data === "menu:utama") {
       await jawabCallback(env, cb.id);
       try {
-        await editTelegram(env, chatIdCb, cb.message.message_id, PESAN_START, keyboardStart());
+        await editTelegram(env, chatIdCb, cb.message.message_id, PESAN_START, keyboardStart(cekAdmin(env, chatIdCb) === "ya"));
       } catch {
-        await sendTelegram(env, chatIdCb, PESAN_START, keyboardStart());
+        await sendTelegram(env, chatIdCb, PESAN_START, keyboardStart(cekAdmin(env, chatIdCb) === "ya"));
       }
       return;
     }
-    // Tombol "⚡ Buat Config" di /start — pemandu kirim akun.
+    // Tombol "⚡ Buat Config" di /start — pilih dulu jenis config.
     if (data === "buat:config") {
       await jawabCallback(env, cb.id);
-      await sendTelegram(env, chatIdCb, "Kirim akun SSH atau Xray kamu di sini — link atau teks, bebas format apa pun. Bot akan buatkan config Dark Tunnel-nya.", TOMBOL_KEMBALI);
+      await sendTelegram(env, chatIdCb, "⚡ <b>Buat Config</b>\n\nPilih jenis config yang mau dibuat:", keyboardPilihJenis());
+      return;
+    }
+    // Pilih jenis config — simpan pilihan, lalu minta akunnya.
+    if (data.startsWith("pilih:")) {
+      const type = data.slice("pilih:".length);
+      const label = { SSH: "SSH", VLESS: "VLESS", VMESS: "VMess", TROJAN: "Trojan", SHADOWSOCKS: "Shadowsocks" }[type];
+      if (!label && type !== "AUTO") { await jawabCallback(env, cb.id); return; }
+      pendingPilih.set(chatIdCb, { type, ts: Date.now() });
+      await jawabCallback(env, cb.id);
+      const prompt = type === "AUTO"
+        ? "Kirim akun kamu — bot deteksi jenisnya otomatis."
+        : "Kirim akun " + label + " kamu — link atau teks, bebas format apa pun.";
+      await sendTelegram(env, chatIdCb, prompt, TOMBOL_KEMBALI);
       return;
     }
     // Tombol "🔍 Cari Bug" di /start — pintu masuk kedua alur /bug.
@@ -1438,13 +1793,16 @@ async function handleTelegram(env, update) {
       return;
     }
     // Pilih metode payload untuk akun SSH+bug yang sedang menunggu.
+    // "auto" dipilih otomatis dari kategori bug (edu -> enhanced,
+    // opok -> direct, lainnya -> ws).
     if (data.startsWith("metode:")) {
-      const key = data.slice("metode:".length);
+      let key = data.slice("metode:".length);
       const pending = pendingMetode.get(chatIdCb);
-      if (!pending || !PAYLOAD_METODE[key]) {
+      if (!pending || (key !== "auto" && !PAYLOAD_METODE[key])) {
         await jawabAlert(env, cb.id, "Pilihan sudah kedaluwarsa — kirim lagi akunnya ya.");
         return;
       }
+      if (key === "auto") key = await pilihMetodeOtomatis(env, pending.teks);
       pendingMetode.delete(chatIdCb);
       await jawabCallback(env, cb.id);
       await handlePesanAkun(env, chatIdCb, pending.teks, { metodePayload: key });
@@ -1454,6 +1812,52 @@ async function handleTelegram(env, update) {
     if (data === "update:lihat") {
       await jawabCallback(env, cb.id);
       await handleUpdate(env, chatIdCb);
+      return;
+    }
+    // Panel admin (tombol "⚙️ Admin" di menu utama) — admin saja.
+    if (data === "admin:panel") {
+      if (cekAdmin(env, chatIdCb) !== "ya") { await jawabAlert(env, cb.id, "⛔ Perintah ini khusus admin."); return; }
+      await jawabCallback(env, cb.id);
+      await sendTelegram(env, chatIdCb, TEKS_PANEL_ADMIN, keyboardAdmin());
+      return;
+    }
+    if (data === "admin:tambahbug") {
+      if (cekAdmin(env, chatIdCb) !== "ya") { await jawabAlert(env, cb.id, "⛔ Perintah ini khusus admin."); return; }
+      await jawabCallback(env, cb.id);
+      pendingAdmin.set(chatIdCb, { jenis: "bug", ts: Date.now() });
+      await sendTelegram(env, chatIdCb, "➕ <b>Tambah Bug</b>\n\nKirim bug dengan format:\n<code>operator | kategori | host | catatan</code>\n\nCatatan boleh kosong. Contoh: <code>telkomsel | opok | bug.contoh.com | opok tsel</code>", [[{ text: "❌ Batal", callback_data: "admin:batal" }]]);
+      return;
+    }
+    if (data === "admin:tambahconfig") {
+      if (cekAdmin(env, chatIdCb) !== "ya") { await jawabAlert(env, cb.id, "⛔ Perintah ini khusus admin."); return; }
+      await jawabCallback(env, cb.id);
+      pendingAdmin.set(chatIdCb, { jenis: "config", tahap: "nama", ts: Date.now() });
+      await sendTelegram(env, chatIdCb, "➕ <b>Tambah Config</b>\n\nKirim dengan format:\n<code>operator | kategori | nama</code>\n\nContoh: <code>telkomsel | opok | Opok Tsel 1</code>", [[{ text: "❌ Batal", callback_data: "admin:batal" }]]);
+      return;
+    }
+    if (data === "admin:broadcast") {
+      if (cekAdmin(env, chatIdCb) !== "ya") { await jawabAlert(env, cb.id, "⛔ Perintah ini khusus admin."); return; }
+      await jawabCallback(env, cb.id);
+      pendingAdmin.set(chatIdCb, { jenis: "broadcast", ts: Date.now() });
+      await sendTelegram(env, chatIdCb, "📢 <b>Broadcast</b>\n\nKirim pesan broadcast-nya — akan dikirim ke semua pengguna tercatat.", [[{ text: "❌ Batal", callback_data: "admin:batal" }]]);
+      return;
+    }
+    if (data === "admin:status") {
+      if (cekAdmin(env, chatIdCb) !== "ya") { await jawabAlert(env, cb.id, "⛔ Perintah ini khusus admin."); return; }
+      await jawabCallback(env, cb.id);
+      await handleStatus(env, chatIdCb);
+      return;
+    }
+    if (data === "admin:batal") {
+      if (cekAdmin(env, chatIdCb) !== "ya") { await jawabAlert(env, cb.id, "⛔ Perintah ini khusus admin."); return; }
+      pendingAdmin.delete(chatIdCb);
+      pendingConfig.delete(chatIdCb);
+      await jawabCallback(env, cb.id);
+      try {
+        await editTelegram(env, chatIdCb, cb.message.message_id, TEKS_PANEL_ADMIN, keyboardAdmin());
+      } catch {
+        await sendTelegram(env, chatIdCb, TEKS_PANEL_ADMIN, keyboardAdmin());
+      }
       return;
     }
     // Ketuk satu config contoh dari /config -> kirim file .dark-nya.
@@ -1470,7 +1874,7 @@ async function handleTelegram(env, update) {
       const rincian = dec ? ringkasanConfig(dec) : "";
       const caption = "📁 <b>" + escapeHtml(cfg.nama) + "</b> (" + labelOperator(cfg.operator) + " — " + labelKategori(cfg.operator, cfg.kategori) + ")" +
         (rincian ? "\n\n" + rincian : "") + "\n\n" + CARA_IMPOR;
-      await sendDocument(env, chatIdCb, namaFileDark(cfg.nama), cfg.link + "\n", caption, TOMBOL_APK);
+      await sendDocument(env, chatIdCb, namaFileDark(cfg.nama, dec ? dec.type : ""), cfg.link + "\n", caption, TOMBOL_APK);
       return;
     }
     // Alur /bug: pilih operator -> pilih kategori -> daftar bug (KV + bawaan).
@@ -1499,14 +1903,20 @@ async function handleTelegram(env, update) {
         return;
       }
       for (let i = 0; i < daftar.length; i++) {
-        await sendTelegram(env, chatIdCb, daftar[i], i === daftar.length - 1 ? TOMBOL_KEMBALI : undefined);
+        await sendTelegram(env, chatIdCb, daftar[i], i === daftar.length - 1 ? keyboardKembaliBug(parts[0]) : undefined);
       }
       return;
     }
     await jawabCallback(env, cb.id);
     return;
   }
-  if (!msg || !msg.text) return; // foto/stiker/dokumen diabaikan diam-diam
+  // Dokumen .dark dari admin yang sedang ditunggu akunnya (/tambahconfig
+  // atau tombol "➕ Tambah Config"). Dokumen lain diabaikan diam-diam.
+  if (msg && msg.document) {
+    await handleDokumenConfig(env, msg);
+    return;
+  }
+  if (!msg || !msg.text) return; // foto/stiker diabaikan diam-diam
   const chatId = msg.chat.id;
   const teks = msg.text.trim();
   const diGrup = msg.chat.type === "group" || msg.chat.type === "supergroup";
@@ -1529,6 +1939,13 @@ async function handleTelegram(env, update) {
         "🐛 Daftar bug host cuma bisa dilihat di chat pribadi ya — biar enak milih operator & kategorinya.", tombol);
     }
     return;
+  }
+
+  // Perintah apa pun (atau ketuk "▶️ Start") membatalkan pilihan jenis
+  // config & state admin yang tertunda — pengguna pindah alur.
+  if (teks.startsWith("/") || teks === "▶️ Start") {
+    pendingAdmin.delete(chatId);
+    pendingPilih.delete(chatId);
   }
 
   if (teks === "/start" || teks === "/menu" || teks === "/help" || teks === "▶️ Start" ||
@@ -1594,7 +2011,7 @@ async function handleTelegram(env, update) {
       await sendTelegram(env, chatId,
         "😕 Format belum lengkap.\n\n" +
         "Format: <code>/tambahconfig &lt;operator&gt; &lt;kategori&gt; &lt;nama&gt;</code>\n" +
-        "Operator: xl, telkomsel, indosat, smartfren. Kategori: edu, opok, wa, game, sosmed, musik, nonton, conference.\n" +
+        "Operator: xl, telkomsel, indosat, smartfren, tri. Kategori: edu, opok, wa, game, sosmed, musik, nonton, conference.\n" +
         "Contoh: <code>/tambahconfig telkomsel opok Opok Tsel 1</code>\n" +
         "Setelah itu kirim akunnya.");
       return;
@@ -1604,6 +2021,13 @@ async function handleTelegram(env, update) {
     return;
   }
   if (teks.startsWith("/")) { pendingCek.delete(chatId); pendingConfig.delete(chatId); return; } // perintah tak dikenal diabaikan diam-diam
+
+  // State admin tertunda (tombol panel admin): dicek sebelum
+  // handlePesanAkun, hanya untuk admin. Perintah sudah ditangani di
+  // atas (state dihapus); state kedaluwarsa diabaikan di dalam handler.
+  if (cekAdmin(env, chatId) === "ya" && pendingAdmin.has(chatId)) {
+    if (await handleAdminTertunda(env, chatId, teks)) return;
+  }
 
   // Akun yang ditunggu untuk /tambahconfig (admin).
   if (pendingConfig.has(chatId)) {
@@ -1621,8 +2045,11 @@ async function handleTelegram(env, update) {
     }
     let hasilCek;
     try { hasilCek = await cekDomain(domain); }
-    catch { hasilCek = { domain, ok: false, status: 0, ms: 0, cdn: "", server: "" }; }
-    await sendTelegram(env, chatId, formatHasilCek(hasilCek));
+    catch { hasilCek = { domain, ok: false, status: 0, ms: 0, cdn: "", server: "", ips: [], hostname: "", subdomains: null }; }
+    await sendTelegram(env, chatId, formatHasilCek(hasilCek), [
+      [{ text: "🔄 Cek Lagi", callback_data: "cek:mulai" }],
+      ...TOMBOL_KEMBALI,
+    ]);
     return;
   }
 
