@@ -948,7 +948,7 @@ async function tampilkanDaftarServer(env, chatId, mode, halaman, messageId) {
   halaman = Math.min(Math.max(0, halaman || 0), totalHalaman - 1);
   const daftar = semua.slice(halaman * SERVER_PER_HALAMAN, (halaman + 1) * SERVER_PER_HALAMAN);
   const judul = mode === "trial"
-    ? "🎁 Trial gratis 30 menit (kuota 1 GB, 1 IP).\nSyarat: saldo reseller minimal Rp15.000 (tidak dipotong)."
+    ? "🎁 Trial gratis 30 menit (kuota 1 GB, 1 IP)."
     : "Pilih servernya:\n🟢 Tersedia  •  🟡 Hampir penuh (sisa ≤ 10 slot)  •  ❌ PENUH tidak bisa dipilih\nAngka = slot kosong" + (live.map ? " (status terbaru)." : " (status per 19 Nov — gagal ambil status terbaru).");
   // Teks biasa (bukan <pre>) supaya tidak muncul tombol SALIN KODE
   // bawaan Telegram — sama seperti menu (permintaan Asep 19 Nov 2026).
