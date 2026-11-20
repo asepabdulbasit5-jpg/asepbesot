@@ -1,0 +1,100 @@
+# Auto-sync Nadia + deploy ke Cloudflare Workers
+# Jalan tiap pagi 07:00 WIB + bisa dijalankan manual dari tab Actions.
+# Alur: cek Nadia -> update worker-reseller-bot.js (kalau ada perubahan
+# aman) -> cek sintaks -> deploy via wrangler -> commit -> kabari admin
+# lewat Telegram. Kalau tidak ada perubahan, diam (jadwal harian).
+# Kalau dijalankan manual, selalu kirim laporan ke Telegram.
+# Secrets yang dibutuhkan (repo > Settings > Secrets and variables >
+# Actions): NADIA_API_KEY, TELEGRAM_BOT_TOKEN, ADMIN_CHAT_ID,
+# CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID.
+# API token Cloudflare: dash.cloudflare.com > profil > API Tokens >
+# Create Token > template "Edit Cloudflare Workers".
+name: Auto-sync Nadia + deploy
+
+on:
+  schedule:
+    - cron: "0 0 * * *" # 07:00 WIB
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Cek Nadia & update file bot
+        id: sync
+        env:
+          NADIA_API_KEY: ${{ secrets.NADIA_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
+          ALWAYS_NOTIFY: ${{ github.event_name == 'workflow_dispatch' }}
+        run: node scripts/nadia-sync.mjs
+
+      - name: Cek sintaks file bot
+        id: check
+        if: steps.sync.outputs.changed == 'true'
+        run: node --check worker-reseller-bot.js
+
+      - name: Deploy ke Cloudflare Workers
+        id: deploy
+        if: steps.sync.outputs.changed == 'true' && steps.check.outcome == 'success'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
+        run: |
+          cat > wrangler.toml <<EOF
+          name = "sandekala"
+          main = "worker-reseller-bot.js"
+          compatibility_date = "2026-11-20"
+          [[kv_namespaces]]
+          binding = "ORDERS"
+          id = "5ed5f1f0bc824dc6b1fd5ac3f9a6e03b"
+          [vars]
+          ADMIN_CHAT_ID = "$ADMIN_CHAT_ID"
+          RESELLER_API_URL = "https://www.nadiavpn.web.id/api/v1"
+          NADIA_SERVER_ID = "01a1ca6a-b60e-73b9-a2fa-8684c0b25d62"
+          NADIA_PROTOCOL = "vless"
+          QRIS_IMAGE_URL = "https://raw.githubusercontent.com/asepabdulbasit5-jpg/asepbesot/main/dana.jpg"
+          EOF
+          npx -y wrangler@latest deploy
+
+      - name: Kabari deploy berhasil
+        if: steps.sync.outputs.changed == 'true' && steps.deploy.outcome == 'success'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+            -d "chat_id=$ADMIN_CHAT_ID" \
+            --data-urlencode "text=✅ Deploy berhasil — bot sudah pakai daftar server terbaru." > /dev/null
+
+      - name: Kabari deploy gagal
+        if: steps.sync.outputs.changed == 'true' && steps.deploy.outcome == 'failure'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+            -d "chat_id=$ADMIN_CHAT_ID" \
+            --data-urlencode "text=❌ Deploy GAGAL — bot masih pakai versi lama. File update sudah tersimpan di GitHub, deploy manual dari file itu ya. Cek tab Actions buat detail errornya." > /dev/null
+
+      - name: Commit file bot + status
+        if: always() && (steps.check.outcome == 'success' || steps.check.outcome == 'skipped')
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add scripts/nadia-sync-status.json 2>/dev/null || true
+          if [ "${{ steps.deploy.outcome }}" = "success" ]; then git add worker-reseller-bot.js 2>/dev/null || true; fi
+          git diff --cached --quiet && echo "tidak ada perubahan untuk commit" || git commit -m "Auto-sync Nadia: $(date -u +%Y-%m-%d)"
+          git push || echo "push gagal — akan dicoba lagi besok"
