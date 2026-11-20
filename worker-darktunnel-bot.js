@@ -255,6 +255,7 @@ function keyboardOperatorBug() {
     const row = ops.slice(i, i + 2).map(([k, v]) => ({ text: v.label, callback_data: "bug:op:" + k }));
     rows.push(row);
   }
+  rows.push(...TOMBOL_KEMBALI);
   return rows;
 }
 
@@ -267,6 +268,7 @@ function keyboardKategoriBug(opKey, kvKats) {
   });
   const rows = semua.map((k) => ([{ text: labelKategori(opKey, k), callback_data: "bug:kat:" + opKey + ":" + k }]));
   rows.push([{ text: "⬅️ Ganti operator", callback_data: "bug:back" }]);
+  rows.push(...TOMBOL_KEMBALI);
   return rows;
 }
 
@@ -487,6 +489,7 @@ function keyboardMetodePayload() {
   return [
     [{ text: "WS standar", callback_data: "metode:ws" }, { text: "SSH+payload", callback_data: "metode:sshpayload" }],
     [{ text: "Enhanced", callback_data: "metode:enhanced" }, { text: "Direct", callback_data: "metode:direct" }],
+    [{ text: "⬅️ Kembali ke Menu", callback_data: "menu:utama" }],
   ];
 }
 
@@ -1101,16 +1104,49 @@ export function formatHasilCek(r) {
 function keyboardStart() {
   return [
     [{ text: "⚡ Buat Config", callback_data: "buat:config" }],
-    [{ text: "🔍 Cari Bug", callback_data: "bug:menu" }],
-    [{ text: "🌐 Cek Domain", callback_data: "cek:mulai" }],
-    [{ text: "📥 Download APK Dark Tunnel", url: "https://sfile.co/H26JBeTBi1o" }],
-    [{ text: "🆕 Update Terbaru", callback_data: "update:lihat" }],
-    [{ text: "🛒 Beli Akun VPN", url: "https://t.me/sandekalavpn_bot" }],
-    [{ text: "👥 Gabung Grup", url: "https://t.me/sand3kala" }],
+    [{ text: "🔍 Cari Bug", callback_data: "bug:menu" }, { text: "🌐 Cek Domain", callback_data: "cek:mulai" }],
+    [{ text: "📥 Download APK Dark Tunnel", url: "https://sfile.co/H26JBeTBi1o" }, { text: "🆕 Update Terbaru", callback_data: "update:lihat" }],
+    [{ text: "🛒 Beli Akun VPN", url: "https://t.me/sandekalavpn_bot" }, { text: "👥 Gabung Grup", url: "https://t.me/sand3kala" }],
   ];
 }
 
 const TOMBOL_APK = [[{ text: "📥 Download APK Dark Tunnel", url: "https://sfile.co/H26JBeTBi1o" }]];
+
+// Tombol kembali ke menu utama — dipasang di akhir hampir semua alur
+// (operator/kategori bug, pemandu buat config & cek domain, /update,
+// /config, daftar bug, pilihan metode payload, pesan gagal parsing).
+const TOMBOL_KEMBALI = [[{ text: "⬅️ Kembali ke Menu", callback_data: "menu:utama" }]];
+
+// Tombol "▶️ Start" bawah permanen (reply keyboard Telegram).
+// Sekali dipasang, pengguna cukup ketuk Start di bawah — tanpa ketik
+// /start dan tanpa tombol Menu ☰ (daftar perintah BotFather sengaja
+// dikosongkan). Satu pesan hanya boleh punya SATU reply_markup, jadi
+// tombol bawah ini dikirim lewat pesan terpisah, bukan bersama
+// inline_keyboard menu utama.
+const KEYBOARD_START = { keyboard: [[{ text: "▶️ Start" }]], resize_keyboard: true, is_persistent: true };
+
+// Kirim pesan dengan reply keyboard "▶️ Start" (tanpa inline keyboard).
+async function sendKeyboardBawah(env, chatId, text) {
+  return await telegramApi(env, "sendMessage", {
+    chat_id: chatId,
+    text: String(text),
+    parse_mode: "HTML",
+    reply_markup: KEYBOARD_START,
+  });
+}
+
+// Menu utama: PESAN_START + keyboard inline, lalu pasang tombol bawah
+// permanen SEKALI saja per pengguna (dicatat di KV "KB:<chatId>").
+// Tanpa KV, pengecekan dilewati dan pesan keyboard dikirim setiap kali
+// (graceful degradation — tombol tetap terpasang).
+async function tampilkanMenuUtama(env, chatId) {
+  await sendTelegram(env, chatId, PESAN_START, keyboardStart());
+  let sudah = null;
+  try { sudah = await kvGet(env, "KB:" + chatId); } catch { sudah = null; }
+  if (sudah) return;
+  await sendKeyboardBawah(env, chatId, "▶️ Ketuk tombol Start di bawah kapan saja untuk buka menu.");
+  try { await kvPut(env, "KB:" + chatId, "1"); } catch { /* abaikan */ }
+}
 
 // ================= HANDLER TELEGRAM =================
 
@@ -1129,7 +1165,7 @@ async function handlePesanAkun(env, chatId, teks, opts = {}) {
   } catch (e) {
     await kabariAdmin(env, "parse gagal: " + String(e && e.message || e).slice(0, 200));
     await sendTelegram(env, chatId,
-      "😕 Maaf, bot gagal membaca pesan itu. Coba kirim lagi akunnya — link VLESS / VMess / Trojan / Shadowsocks, atau akun SSH (host, port, username, password).");
+      "😕 Maaf, bot gagal membaca pesan itu. Coba kirim lagi akunnya — link VLESS / VMess / Trojan / Shadowsocks, atau akun SSH (host, port, username, password).", TOMBOL_KEMBALI);
     return;
   }
 
@@ -1257,18 +1293,18 @@ async function handleTambahConfigAkun(env, chatId, teks) {
 async function handleUpdate(env, chatId) {
   const arr = await ambilUpdatesKv(env);
   if (!arr.length) {
-    await sendTelegram(env, chatId, "🆕 <b>Update Terbaru</b>\n\nBelum ada update.");
+    await sendTelegram(env, chatId, "🆕 <b>Update Terbaru</b>\n\nBelum ada update.", TOMBOL_KEMBALI);
     return;
   }
   const baris = arr.slice(0, 5).map((e) => "• " + escapeHtml(e.teks) + " — " + e.tanggal);
-  await sendTelegram(env, chatId, "🆕 <b>Update Terbaru</b>\n\n" + baris.join("\n"));
+  await sendTelegram(env, chatId, "🆕 <b>Update Terbaru</b>\n\n" + baris.join("\n"), TOMBOL_KEMBALI);
 }
 
 // ---- /config: daftar config contoh ----
 async function handleConfig(env, chatId) {
   const arr = await ambilConfigsKv(env);
   if (!arr.length) {
-    await sendTelegram(env, chatId, "📋 <b>Config Contoh</b>\n\nBelum ada config contoh.");
+    await sendTelegram(env, chatId, "📋 <b>Config Contoh</b>\n\nBelum ada config contoh.", TOMBOL_KEMBALI);
     return;
   }
   const daftar = arr.slice(0, 10);
@@ -1276,6 +1312,7 @@ async function handleConfig(env, chatId) {
     daftar.map((e, i) => (i + 1) + ". <b>" + escapeHtml(e.nama) + "</b> (" + labelOperator(e.operator) + " — " + labelKategori(e.operator, e.kategori) + ") — " + e.tanggal).join("\n") +
     "\n\nKetuk satu config buat ambil file-nya.";
   const keyboard = daftar.map((e) => ([{ text: String(e.nama).slice(0, 40), callback_data: "cfg:" + e.id }]));
+  keyboard.push(...TOMBOL_KEMBALI);
   await sendTelegram(env, chatId, teks, keyboard);
 }
 
@@ -1300,10 +1337,20 @@ async function handleTelegram(env, update) {
       return;
     }
     if (!chatIdCb) { await jawabCallback(env, cb.id); return; }
+    // Tombol "⬅️ Kembali ke Menu" — edit pesan ini jadi menu utama.
+    if (data === "menu:utama") {
+      await jawabCallback(env, cb.id);
+      try {
+        await editTelegram(env, chatIdCb, cb.message.message_id, PESAN_START, keyboardStart());
+      } catch {
+        await sendTelegram(env, chatIdCb, PESAN_START, keyboardStart());
+      }
+      return;
+    }
     // Tombol "⚡ Buat Config" di /start — pemandu kirim akun.
     if (data === "buat:config") {
       await jawabCallback(env, cb.id);
-      await sendTelegram(env, chatIdCb, "Kirim akun SSH atau Xray kamu di sini — link atau teks, bebas format apa pun. Bot akan buatkan config Dark Tunnel-nya.");
+      await sendTelegram(env, chatIdCb, "Kirim akun SSH atau Xray kamu di sini — link atau teks, bebas format apa pun. Bot akan buatkan config Dark Tunnel-nya.", TOMBOL_KEMBALI);
       return;
     }
     // Tombol "🔍 Cari Bug" di /start — pintu masuk kedua alur /bug.
@@ -1316,7 +1363,7 @@ async function handleTelegram(env, update) {
     if (data === "cek:mulai") {
       await jawabCallback(env, cb.id);
       pendingCek.set(chatIdCb, { ts: Date.now() });
-      await sendTelegram(env, chatIdCb, "🌐 <b>Cek Domain</b>\n\nKirim domain yang mau dicek — mis. <code>edu.ruangguru.com</code>.");
+      await sendTelegram(env, chatIdCb, "🌐 <b>Cek Domain</b>\n\nKirim domain yang mau dicek — mis. <code>edu.ruangguru.com</code>.", TOMBOL_KEMBALI);
       return;
     }
     // Pilih metode payload untuk akun SSH+bug yang sedang menunggu.
@@ -1377,7 +1424,9 @@ async function handleTelegram(env, update) {
         await sendTelegram(env, chatIdCb, "😕 Kategori itu tidak ada. Ketik /bug buat mulai lagi.");
         return;
       }
-      for (const p of daftar) await sendTelegram(env, chatIdCb, p);
+      for (let i = 0; i < daftar.length; i++) {
+        await sendTelegram(env, chatIdCb, daftar[i], i === daftar.length - 1 ? TOMBOL_KEMBALI : undefined);
+      }
       return;
     }
     await jawabCallback(env, cb.id);
@@ -1408,10 +1457,12 @@ async function handleTelegram(env, update) {
     return;
   }
 
-  if (teks === "/start" || teks === "/help" || teks.startsWith("/start ") || teks.startsWith("/start@")) {
+  if (teks === "/start" || teks === "/menu" || teks === "/help" || teks === "▶️ Start" ||
+      teks.startsWith("/start ") || teks.startsWith("/start@") ||
+      teks.startsWith("/menu ") || teks.startsWith("/menu@")) {
     pendingCek.delete(chatId);
     pendingConfig.delete(chatId);
-    await sendTelegram(env, chatId, PESAN_START, keyboardStart());
+    await tampilkanMenuUtama(env, chatId);
     return;
   }
   if (teks === "/bug" || teks.startsWith("/bug ") || teks.startsWith("/bug@")) {
@@ -1424,7 +1475,7 @@ async function handleTelegram(env, update) {
   if (teks === "/cek" || teks.startsWith("/cek ") || teks.startsWith("/cek@")) {
     pendingConfig.delete(chatId);
     pendingCek.set(chatId, { ts: Date.now() });
-    await sendTelegram(env, chatId, "🌐 <b>Cek Domain</b>\n\nKirim domain yang mau dicek — mis. <code>edu.ruangguru.com</code>.");
+    await sendTelegram(env, chatId, "🌐 <b>Cek Domain</b>\n\nKirim domain yang mau dicek — mis. <code>edu.ruangguru.com</code>.", TOMBOL_KEMBALI);
     return;
   }
   if (teks === "/update" || teks.startsWith("/update ") || teks.startsWith("/update@")) {
