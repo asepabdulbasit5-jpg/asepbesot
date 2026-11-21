@@ -644,14 +644,14 @@ async function ambilTemplatesKv(env) {
   return out;
 }
 
-async function simpanTemplate(env, tpl) {
+async function simpanTemplate(env, tpl, idTetap) {
   const semua = await ambilTemplatesKv(env);
   const namaLower = String(tpl.nama || "").toLowerCase();
   const ada = semua.find((e) => String(e.nama || "").toLowerCase() === namaLower);
-  const id = ada ? ada.id : (Date.now().toString(36) + Math.random().toString(36).slice(2, 6));
+  const id = idTetap || (ada ? ada.id : (Date.now().toString(36) + Math.random().toString(36).slice(2, 6)));
   const entri = { ...tpl, id, tanggal: tanggalWib(), ts: Date.now() };
   if (!await kvPut(env, "TEMPLATE:" + id, entri)) return null;
-  return { entri, aksi: ada ? "diupdate" : "ditambahkan" };
+  return { entri, aksi: (idTetap || ada) ? "diupdate" : "ditambahkan" };
 }
 
 async function hapusTemplateKv(env, id) {
@@ -983,14 +983,14 @@ export function tahapPertamaTemplate(st) {
 export function tahapBerikutTemplate(st, dari) {
   const daftar = daftarTahapMetode(st);
   const i = daftar.indexOf(dari);
-  if (i < 0) return "ringkasan";
+  if (i < 0) return st?.mode === "manual" ? "nama" : "ringkasan";
   for (let j = i + 1; j < daftar.length; j++) {
     const s = daftar[j];
     if (s === "ssh_proxyport" && (!st.ssh?.proxyHost || st.ssh.proxyPort != null)) continue;
     if (s === "xray_proxyport" && (!st.xray?.proxyHost || st.xray.proxyPort != null)) continue;
     return s;
   }
-  return "ringkasan";
+  return st?.mode === "manual" ? "nama" : "ringkasan";
 }
 
 // SlowDNS Xray aktif bila name server + public key sama-sama terisi.
@@ -1542,7 +1542,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.8";
+const VERSI_BOT = "v2.9.9";
 
 const PESAN_START =
   "👋 <b>Generator Config Dark Tunnel</b>\n\n" +
@@ -2438,7 +2438,7 @@ export function formatHasilCek(r) {
 
 function keyboardStart(isAdmin) {
   const kb = [
-    [{ text: "⚡ Buat Config", callback_data: "buat:config" }],
+    [{ text: "⚡ Buat Config", callback_data: "buat:config" }, { text: "✏️ Buat Manual", callback_data: "buat:manual" }],
     [{ text: "🔍 Cari Bug", callback_data: "bug:menu" }, { text: "🌐 Cek Domain", callback_data: "cek:mulai" }],
     [{ text: "📥 dark tunnel", url: "https://sfile.co/H26JBeTBi1o" }, { text: "🆕 Update Terbaru", callback_data: "update:lihat" }],
     [{ text: "🛒 Beli Akun VPN", url: "https://t.me/sandekalavpn_bot" }, { text: "👥 Gabung Grup", url: "https://t.me/sand3kala" }],
@@ -2482,9 +2482,15 @@ function keyboardTemplateTipe() {
   ];
 }
 
-function keyboardTemplateMetode(tipe) {
+function keyboardTemplateMetode(tipe, manual) {
   const daftar = METODE_TEMPLATE[tipe] || [];
   const rows = baris2(daftar.map((m) => ({ text: m.label, callback_data: "tw:metode:" + m.id })));
+  if (manual) {
+    // (v2.9.9) Buat Manual: tanpa "Kembali ke Tipe" (tipe sudah dari
+    // akun) dan Batal = "mn:batal" (bukan admin:batal).
+    rows.push([{ text: "❌ Batal", callback_data: "mn:batal" }]);
+    return rows;
+  }
   rows.push([{ text: "⬅️ Kembali ke Tipe", callback_data: "tw:kembali:tipe" }]);
   rows.push([{ text: "❌ Batal", callback_data: "admin:batal" }]);
   return rows;
@@ -2649,10 +2655,10 @@ async function kirimPilihBug(env, chatId, st) {
   }
 }
 
-function keyboardTemplateYaTidak(prefix) {
+function keyboardTemplateYaTidak(prefix, batal) {
   return [
     [{ text: "Ya", callback_data: prefix + ":ya" }, { text: "Tidak", callback_data: prefix + ":tidak" }],
-    [{ text: "❌ Batal", callback_data: "admin:batal" }],
+    [{ text: "❌ Batal", callback_data: batal || "admin:batal" }],
   ];
 }
 
@@ -3081,6 +3087,23 @@ const TOMBOL_PILIH_BUG_WAJIB_TEMPLATE = [
   [{ text: "❌ Batal", callback_data: "admin:batal" }],
 ];
 
+// ---- Keyboard tahap mode MANUAL (v2.9.9, pengguna biasa) ----
+// Sama seperti keyboard template, tapi tombol Batal pakai "mn:batal"
+// (bukan "admin:batal" yang khusus admin). Lewati / Pilih Bug tetap
+// "tw:*" — handler tw: sudah mode-aware (izinkan state manual).
+const TOMBOL_BATAL_MANUAL = [[{ text: "❌ Batal", callback_data: "mn:batal" }]];
+const TOMBOL_LEWATI_MANUAL = [
+  [{ text: "⏭️ Lewati", callback_data: "tw:lewati" }, { text: "❌ Batal", callback_data: "mn:batal" }],
+];
+const TOMBOL_PILIH_BUG_MANUAL = [
+  [{ text: "📋 Pilih dari Daftar Bug", callback_data: "tw:bug" }],
+  [{ text: "⏭️ Lewati", callback_data: "tw:lewati" }, { text: "❌ Batal", callback_data: "mn:batal" }],
+];
+const TOMBOL_PILIH_BUG_WAJIB_MANUAL = [
+  [{ text: "📋 Pilih dari Daftar Bug", callback_data: "tw:bug" }],
+  [{ text: "❌ Batal", callback_data: "mn:batal" }],
+];
+
 // Tahap teks wizard yang bisa dikosongkan (tombol Lewati tampil).
 const TAHAP_LEWATI = new Set([
   "ssh_port", "ssh_payload", "ssh_proxy", "ssh_proxyport", "ssh_sni", "ssh_udphost", "ssh_udpport",
@@ -3095,23 +3118,84 @@ const TAHAP_PILIH_BUG = new Set(["ssh_proxy", "ssh_sni", "xray_target", "xray_sn
 // Keyboard tahap wizard template: tahap host/bug dapat tombol Pilih dari
 // Daftar Bug (+ Lewati bila bisa dikosongkan); tahap lain yang bisa
 // dikosongkan dapat Lewati; tahap wajib cuma Batal.
-function keyboardTahapTemplate(t) {
+// (v2.9.9) Mode edit: semua tahap teks bisa dilewati (= pakai nilai
+// lama). Mode manual: keyboard sama tapi Batal = "mn:batal".
+function keyboardTahapTemplate(t, st) {
+  if (st?.mode === "manual") {
+    if (TAHAP_PILIH_BUG.has(t)) return TAHAP_LEWATI.has(t) ? TOMBOL_PILIH_BUG_MANUAL : TOMBOL_PILIH_BUG_WAJIB_MANUAL;
+    if (TAHAP_LEWATI.has(t) || t === "nama") return TOMBOL_LEWATI_MANUAL;
+    return TOMBOL_BATAL_MANUAL;
+  }
+  if (st?.editId) {
+    if (TAHAP_PILIH_BUG.has(t)) return TOMBOL_PILIH_BUG_TEMPLATE;
+    return TOMBOL_LEWATI_TEMPLATE;
+  }
   if (TAHAP_PILIH_BUG.has(t)) return TAHAP_LEWATI.has(t) ? TOMBOL_PILIH_BUG_TEMPLATE : TOMBOL_PILIH_BUG_WAJIB_TEMPLATE;
   if (TAHAP_LEWATI.has(t)) return TOMBOL_LEWATI_TEMPLATE;
   return TOMBOL_BATAL_TEMPLATE;
+}
+
+// Nilai field saat ini untuk tahap ini (mode EDIT template, v2.9.9) —
+// tampil di prompt supaya admin tahu apa yang dipertahankan bila
+// ketuk ⏭️ Lewati. null = field kosong; undefined = tahap tombol
+// (enhanced/slowdns/ringkasan) — tanpa baris nilai.
+function nilaiTahapEdit(st, t) {
+  if (t === "nama") return st.nama ?? null;
+  const s = st.tipe === "SSH" ? (st.ssh || {}) : (st.xray || {});
+  const hostPort = (h, p) => (h ? h + (p ? ":" + p : "") : null);
+  switch (t) {
+    case "ssh_port": return s.port ?? null;
+    case "ssh_bug": return hostPort(s.host, s.port);
+    case "ssh_payload": return s.payload ?? null;
+    case "ssh_proxy": return hostPort(s.proxyHost, s.proxyPort);
+    case "ssh_proxyport": return s.proxyPort ?? null;
+    case "ssh_sni": return s.sni ?? null;
+    case "ssh_ns": return s.dnsNameServer ?? null;
+    case "ssh_pubkey": return s.dnsPublicKey ?? null;
+    case "ssh_udphost": return s.dnsUdpHost ?? null;
+    case "ssh_udpport": return s.dnsUdpPort ?? null;
+    case "xray_target": return hostPort(s.targetHost, s.targetPort);
+    case "xray_domain": return s.sni ?? null;
+    case "xray_server": return hostPort(s.targetHost, s.targetPort);
+    case "xray_bug": return s.targetHost ?? null;
+    case "xray_bugserver": return hostPort(s.targetHost, s.targetPort);
+    case "xray_host": return s.headerHost ?? null;
+    case "xray_sni": return s.sni ?? null;
+    case "xray_header": return s.headerHost ?? null;
+    case "xray_payload": return s.payload ?? null;
+    case "xray_proxy": return hostPort(s.proxyHost, s.proxyPort);
+    case "xray_proxyport": return s.proxyPort ?? null;
+    case "xray_ssh": return s.sshHost ? (s.sshHost + (s.sshPort ? ":" + s.sshPort : "") + "@" + (s.sshUser || "") + ":***") : null;
+    case "xray_ns": return s.nameServer ?? null;
+    case "xray_pubkey": return s.publicKey ?? null;
+    case "xray_udphost": return s.udpDnsHost ?? null;
+    case "xray_udpport": return s.udpDnsPort ?? null;
+    default: return undefined;
+  }
 }
 
 // Kirim prompt untuk tahap wizard template saat ini.
 async function kirimLangkahTemplate(env, chatId, st) {
   // Satu pesan wizard yang diedit tiap langkah (v2.9.2): bila st.msgId
   // ada, edit pesan itu; bila tidak, kirim baru dan simpan msgId-nya.
-  const tampil = async (teks, kb) => { st.msgId = await editAtauKirim(env, chatId, st.msgId, teks, kb); };
+  // (v2.9.9) Mode edit: tempel baris nilai saat ini di tiap tahap teks.
+  const tampil = async (teks, kb) => {
+    if (st.editId) {
+      const lama = nilaiTahapEdit(st, st.tahap);
+      if (lama !== undefined) {
+        const tampilLama = (lama === null || lama === "") ? "<i>kosong</i>" : "<code>" + escapeHtml(String(lama).slice(0, 120)) + (String(lama).length > 120 ? "…" : "") + "</code>";
+        teks += "\n\nNilai saat ini: " + tampilLama + " — ketuk ⏭️ Lewati untuk tetap pakai ini, atau kirim nilai baru (ketik <code>-</code> untuk mengosongkan).";
+      }
+    }
+    st.msgId = await editAtauKirim(env, chatId, st.msgId, teks, kb);
+  };
   const t = st.tahap;
-  const batal = keyboardTahapTemplate(t);
+  const batal = keyboardTahapTemplate(t, st);
   if (t === "tipe") {
     await tampil("🧩 <b>Template Config Baru</b>\n\nPilih tipe config:", keyboardTemplateTipe());
   } else if (t === "metode") {
-    await tampil("🧩 <b>Template Config Baru</b> (" + (st.tipe === "SSH" ? "SSH" : "Xray / V2Ray") + ")\n\nPilih metode:", keyboardTemplateMetode(st.tipe));
+    const judul = st.mode === "manual" ? "✏️ <b>Buat Config Manual</b>" : "🧩 <b>Template Config Baru</b>";
+    await tampil(judul + " (" + (st.tipe === "SSH" ? "SSH" : "Xray / V2Ray") + ")\n\nPilih metode:", keyboardTemplateMetode(st.tipe, st.mode === "manual"));
   } else if (t === "operator") {
     await tampil("🧩 <b>Template Config Baru</b> (" + (st.tipe === "SSH" ? "SSH" : "Xray / V2Ray") + ")\n\nPilih operator:", keyboardTemplateOperator());
   } else if (t === "kategori") {
@@ -3119,7 +3203,13 @@ async function kirimLangkahTemplate(env, chatId, st) {
   } else if (t === "kategori_baru") {
     await tampil("🆕 <b>Kategori Baru</b>\n\nKirim nama kategori baru — mis. <code>belajar</code>.\n\nHuruf kecil, tanpa spasi (boleh angka / tanda <code>-</code>). Kategori ini cuma dipakai di template ini.", batal);
   } else if (t === "nama") {
-    await tampil("🧩 <b>Template Config Baru</b>\n\nKirim <b>nama template</b> — mis. <code>Opok Tsel SSH 1</code>.", batal);
+    if (st.mode === "manual") {
+      await tampil("✏️ <b>Buat Config Manual</b>\n\nKirim <b>nama config</b> — bebas, mis. <code>Opok Ku</code>. File jadinya <code>&lt;nama&gt; by @autosetdark_bot.dark</code>.\n\nKetuk ⏭️ Lewati untuk pakai nama akun.", batal);
+    } else if (st.editId) {
+      await tampil("✏️ <b>Edit Template</b>\n\nKirim <b>nama template</b> baru — mis. <code>Opok Tsel SSH 1</code>.", batal);
+    } else {
+      await tampil("🧩 <b>Template Config Baru</b>\n\nKirim <b>nama template</b> — mis. <code>Opok Tsel SSH 1</code>.", batal);
+    }
   } else if (t === "ssh_port") {
     await tampil("🔌 <b>Port SSH</b>\n\nKirim port (angka 1-65535, mis. <code>80</code> atau <code>443</code>).\n\nKosong = pakai port dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "ssh_payload") {
@@ -3133,9 +3223,9 @@ async function kirimLangkahTemplate(env, chatId, st) {
   } else if (t === "ssh_sni") {
     await tampil("🎯 <b>SNI</b>\n\nKetik SNI manual (host, contoh: <code>edu.ruangguru.com</code>) — atau ketuk 📋 Pilih dari Daftar Bug.\n\nKetik <code>[host]</code> supaya SNI ngikutin host akun pengguna.\n\nKosong = pakai bug/SNI dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "ssh_enhanced") {
-    await tampil("⚡ <b>Enhanced</b>\n\nAktifkan payload Enhanced?", keyboardTemplateYaTidak("tw:enhanced"));
+    await tampil("⚡ <b>Enhanced</b>\n\nAktifkan payload Enhanced?", keyboardTemplateYaTidak("tw:enhanced", st.mode === "manual" ? "mn:batal" : undefined));
   } else if (t === "ssh_slowdns") {
-    await tampil("🐢 <b>SlowDNS / DNSTT</b>\n\nPakai SlowDNS (UDP Custom + DNSTT)?", keyboardTemplateYaTidak("tw:slowdns"));
+    await tampil("🐢 <b>SlowDNS / DNSTT</b>\n\nPakai SlowDNS (UDP Custom + DNSTT)?", keyboardTemplateYaTidak("tw:slowdns", st.mode === "manual" ? "mn:batal" : undefined));
   } else if (t === "ssh_ns") {
     await tampil("🐢 <b>SlowDNS — Name Server</b>\n\nKirim name server SlowDNS (host/IP, mis. <code>id1.dnsx.my.id</code>).\n\nWajib diisi untuk SlowDNS.", batal);
   } else if (t === "ssh_pubkey") {
@@ -3179,7 +3269,8 @@ async function kirimLangkahTemplate(env, chatId, st) {
     await tampil("🐢 <b>SlowDNS — UDP DNS Port</b> (opsional)\n\nKirim UDP DNS port (angka 1-65535, mis. <code>53</code>).\n\nKosong = default <code>53</code>. Ketuk ⏭️ Lewati untuk default.", batal);
   } else if (t === "ringkasan") {
     const tpl = { nama: st.nama, operator: st.op, kategori: st.kat, tipe: st.tipe, metode: st.metode, ssh: st.ssh, xray: st.xray };
-    await tampil("🧩 <b>Cek Template</b>\n\n" + ringkasanTemplate(tpl) + "\n\nSimpan template ini?", keyboardTemplateSimpan());
+    const judul = st.editId ? "✏️ <b>Cek Edit Template</b>" : "🧩 <b>Cek Template</b>";
+    await tampil(judul + "\n\n" + ringkasanTemplate(tpl) + "\n\nSimpan template ini?", keyboardTemplateSimpan());
   }
 }
 
@@ -3191,8 +3282,20 @@ async function handleTemplateTeks(env, chatId, st, teks) {
   // Pesan error validasi memakai keyboard tahap yang sama (tahap host
   // tetap bisa pilih bug / lewati dari pesan error). Error mengedit
   // prompt wizard yang sama (v2.9.2) — bukan kirim pesan error baru.
-  const kbSalah = keyboardTahapTemplate(t);
+  const kbSalah = keyboardTahapTemplate(t, st);
   const salah = async (pesan) => { st.msgId = await editAtauKirim(env, chatId, st.msgId, pesan, kbSalah); return true; };
+  // (v2.9.9) Mode edit: ketuk ⏭️ Lewati = pakai nilai lama (bukan
+  // kosongkan). Berlaku di semua tahap teks; tahap "nama" lanjut ke
+  // tahap field pertama, tahap lain ke tahap berikutnya. Ketik "-"
+  // tetap mengosongkan field (kosongkan("-") -> null).
+  if (st.editId && String(teks || "").trim().toLowerCase() === "lewati") {
+    if (t === "nama") st.tahap = tahapPertamaTemplate(st);
+    else if (t === "kategori_baru") return false;
+    else st.tahap = tahapBerikutTemplate(st, t);
+    st.ts = Date.now();
+    await kirimLangkahTemplate(env, chatId, st);
+    return true;
+  }
   if (t === "kategori_baru") {
     const kat = String(teks || "").trim().toLowerCase();
     if (!/^[a-z][a-z0-9_-]{0,19}$/.test(kat)) return salah("😕 Nama kategori tidak valid. Pakai huruf kecil tanpa spasi, mis. <code>belajar</code> — huruf pertama harus huruf.");
@@ -3202,6 +3305,15 @@ async function handleTemplateTeks(env, chatId, st, teks) {
     return true;
   }
   if (t === "nama") {
+    // (v2.9.9) Buat Manual: nama adalah tahap TERAKHIR — setelah
+    // nama (atau Lewati = pakai nama akun) config langsung dibuat,
+    // tidak disimpan sebagai template.
+    if (st.mode === "manual") {
+      st.nama = kosongkan(teks);
+      st.ts = Date.now();
+      await selesaikanManual(env, chatId, st);
+      return true;
+    }
     const nama = String(teks || "").trim();
     if (!nama) return salah("😕 Nama template belum diisi. Kirim nama template — mis. <code>Opok Tsel SSH 1</code>.");
     st.nama = nama;
@@ -3459,6 +3571,67 @@ async function handleTemplateTeks(env, chatId, st, teks) {
   return false;
 }
 
+// ================= BUAT CONFIG MANUAL (v2.9.9, pengguna biasa) =================
+// Alur: tombol "✏️ Buat Manual" -> kirim akun dulu (pendingManualAkun)
+// -> pilih metode (wizard yang sama, mode "manual") -> isi field ->
+// nama bebas -> generate file .dark. Config TIDAK disimpan sebagai
+// template. State wizard-nya numpang di pendingAdmin dengan
+// mode "manual" supaya semua langkah wizard (metode, field, pemilih
+// bug, enhanced, slowdns) bisa dipakai ulang; handler tw: mengizinkan
+// state manual milik pengguna itu sendiri (bukan admin).
+const pendingManualAkun = new Map(); // chatId -> {ts}
+
+// Akun yang ditunggu untuk Buat Manual. Return true bila pesan
+// ditangani (state akun aktif). Akun tidak valid -> tetap menunggu.
+async function handleManualAkun(env, chatId, teks) {
+  const st = pendingManualAkun.get(chatId);
+  if (!st) return false;
+  if (Date.now() - st.ts > 15 * 60 * 1000) { pendingManualAkun.delete(chatId); return false; }
+  let hasil;
+  try { hasil = await parsePesan(teks, { env }); } catch { hasil = { configs: [], kurangSsh: [], adaSsh: false }; }
+  if (!hasil.configs.length) {
+    let alasan = "tidak ditemukan akun di pesan itu";
+    if (hasil.adaSsh && hasil.kurangSsh.length) alasan = "akun SSH belum lengkap — tidak ketemu: " + hasil.kurangSsh.join(", ");
+    await sendTelegram(env, chatId, "😕 Buat Manual: <b>" + escapeHtml(alasan) + "</b>. Kirim ulang akunnya (SSH atau link Xray).", [[{ text: "❌ Batal", callback_data: "mn:batal" }], ...TOMBOL_KEMBALI]);
+    return true; // tetap menunggu
+  }
+  pendingManualAkun.delete(chatId);
+  // Tipe metode mengikuti akun pertama (SSH -> metode SSH, Xray ->
+  // metode Xray). Akun lain dalam pesan yang sama ikut digenerate
+  // bila tipenya cocok (terapkanTemplate menyaring per tipe).
+  const tipe = hasil.configs[0].type === "SSH" ? "SSH" : "XRAY";
+  pendingAdmin.set(chatId, {
+    jenis: "template", mode: "manual", tahap: "metode", tipe, metode: null, op: null, kat: null, nama: "",
+    ssh: { host: null, port: null, payload: null, proxyHost: null, proxyPort: null, sni: null, enhanced: false, slowdns: false, dnsNameServer: null, dnsPublicKey: null, dnsUdpHost: null, dnsUdpPort: null },
+    xray: { targetHost: null, targetPort: null, sni: null, headerHost: null, payload: null, sshHost: null, sshPort: null, sshUser: null, sshPass: null, nameServer: null, publicKey: null, udpDnsHost: null, udpDnsPort: null, proxyHost: null, proxyPort: null },
+    akun: hasil, ts: Date.now(),
+  });
+  await kirimLangkahTemplate(env, chatId, pendingAdmin.get(chatId));
+  return true;
+}
+
+// Tahap akhir Buat Manual: generate file .dark dari akun + setting
+// manual, tanpa menyimpan template. Nama bebas dari pengguna jadi
+// nama file ("<nama> by @autosetdark_bot.dark"); Lewati nama = pakai
+// nama akun (seperti Buat Config otomatis).
+async function selesaikanManual(env, chatId, st) {
+  pendingAdmin.delete(chatId);
+  const tpl = { nama: st.nama || null, operator: null, kategori: null, tipe: st.tipe, metode: st.metode, ssh: st.tipe === "SSH" ? st.ssh : null, xray: st.tipe === "XRAY" ? st.xray : null };
+  let configs = [];
+  try { configs = await terapkanTemplate(env, st.akun, tpl); } catch { configs = []; }
+  if (!configs.length) {
+    await sendTelegram(env, chatId, "😕 Config manual tidak bisa dibuat dari akun itu — coba lagi dari /start ya.", TOMBOL_KEMBALI);
+    return;
+  }
+  const catatanBug = await catatanBugUntuk(env, st.akun);
+  for (const c of configs) {
+    const rincian = ringkasanConfig(c);
+    const caption = "✅ <b>Config Dark Tunnel jadi (manual" + (st.nama ? ": " + escapeHtml(st.nama) : "") + "):</b> " + escapeHtml(c.type + " — " + c.name) +
+      (rincian ? "\n\n" + rincian : "") + "\n\n" + CARA_IMPOR + catatanBug;
+    await sendDocument(env, chatId, namaFileDark(c.name, c.type, st.nama), toDarktunnelLink(c) + "\n", caption, TOMBOL_APK);
+  }
+}
+
 // Pesan teks admin saat ada state tertunda dari tombol panel admin.
 // Return true bila pesan ditangani di sini (router tidak lanjut ke
 // handlePesanAkun). State kedaluwarsa (>15 menit) diabaikan.
@@ -3612,6 +3785,9 @@ async function handleTemplateTipe(env, chatId, tipe, notice, messageId) {
   const keyboard = [];
   for (const e of daftarTampil) {
     const row = [{ text: "🧩 " + String(e.nama).slice(0, 36), callback_data: "tpl:pakai:" + e.id }];
+    // (v2.9.9) Admin: ✏️ edit template (wizard terisi nilai lama),
+    // 🗑️ hapus template.
+    if (isAdmin) row.push({ text: "✏️", callback_data: "tpl:edit:" + e.id });
     if (isAdmin) row.push({ text: "🗑️", callback_data: "tpl:del:" + e.id });
     keyboard.push(row);
   }
@@ -3682,8 +3858,10 @@ async function handleTelegram(env, update) {
     if (!chatIdCb) { await jawabCallback(env, cb.id); return; }
     // Ketuk tombol menu apa pun membatalkan template yang sedang
     // dipakai bila pengguna ketuk tombol lain (kecuali alur template
-    // itu sendiri).
+    // itu sendiri). Menunggu akun Buat Manual ikut dibatalkan bila
+    // pengguna ketuk tombol lain (v2.9.9).
     if (!data.startsWith("tpl:")) pendingTemplate.delete(chatIdCb);
+    pendingManualAkun.delete(chatIdCb);
     // Tombol "⬅️ Kembali ke Menu" — edit pesan ini jadi menu utama.
     // (v2.9.2: lewat tampilkanMenuUtama + hapus state wizard yang
     // tertunda, supaya ketikan berikutnya tidak masuk ke wizard lama.)
@@ -3691,6 +3869,7 @@ async function handleTelegram(env, update) {
       await jawabCallback(env, cb.id);
       pendingAdmin.delete(chatIdCb);
       pendingConfig.delete(chatIdCb);
+      pendingManualAkun.delete(chatIdCb);
       await tampilkanMenuUtama(env, chatIdCb, cb.message.message_id);
       return;
     }
@@ -3700,8 +3879,22 @@ async function handleTelegram(env, update) {
     // di pesan lama diabaikan diam-diam — tidak ada handlernya lagi.)
     if (data === "buat:config") {
       await jawabCallback(env, cb.id);
+      pendingManualAkun.delete(chatIdCb);
       await sendTelegram(env, chatIdCb, "⚡ <b>Buat Config</b>\n\nKirim akun kamu — bot deteksi jenisnya otomatis.",
-        [[{ text: "🧩 Template Config", callback_data: "buat:template" }], ...TOMBOL_KEMBALI]);
+        [[{ text: "🧩 Template Config", callback_data: "buat:template" }, { text: "✏️ Buat Manual", callback_data: "buat:manual" }], ...TOMBOL_KEMBALI]);
+      return;
+    }
+    // Tombol "✏️ Buat Manual" di /start (v2.9.9, pengguna biasa) —
+    // satu-satunya tombol tambahan untuk alur manual: kirim akun
+    // dulu, lalu pilih metode + isi field sendiri, kasih nama bebas,
+    // config langsung jadi file .dark (tidak disimpan sebagai template).
+    if (data === "buat:manual") {
+      await jawabCallback(env, cb.id);
+      pendingAdmin.delete(chatIdCb);
+      pendingTemplate.delete(chatIdCb);
+      pendingManualAkun.set(chatIdCb, { ts: Date.now() });
+      await sendTelegram(env, chatIdCb, "✏️ <b>Buat Config Manual</b>\n\nKirim akun kamu dulu — SSH (<code>host:port@user:pass</code>) atau link Xray (VLESS / VMess / Trojan / Shadowsocks).\n\nSetelah itu kamu pilih sendiri metodenya, isi bug / SNI / payload / proxy-nya, lalu kasih nama bebas. File jadinya <code>&lt;nama&gt; by @autosetdark_bot.dark</code> — config tidak disimpan sebagai template.",
+        [[{ text: "❌ Batal", callback_data: "mn:batal" }], ...TOMBOL_KEMBALI]);
       return;
     }
     // Tombol "🧩 Template Config" di alur Buat Config — buka daftar
@@ -3808,10 +4001,24 @@ async function handleTelegram(env, update) {
       await hapusTelegram(env, chatIdCb, cb.message.message_id);
       return;
     }
+    // Batal Buat Manual (mn:batal, v2.9.9) — pengguna biasa: hapus
+    // state manual (akun yang ditunggu / wizard) + hapus pesannya.
+    // Tanpa cek admin: yang dibatalkan cuma alur milik pengguna itu.
+    if (data === "mn:batal") {
+      pendingAdmin.delete(chatIdCb);
+      pendingManualAkun.delete(chatIdCb);
+      await jawabCallback(env, cb.id);
+      await hapusTelegram(env, chatIdCb, cb.message.message_id);
+      return;
+    }
     // ---- Wizard Template Config (v2.7): langkah tombol ----
+    // (v2.9.9) State manual (mode "manual", pengguna biasa) diizinkan
+    // di sini: state dibuat server-side dari tombol "✏️ Buat Manual",
+    // jadi pengguna cuma bisa menjalankan wizard miliknya sendiri.
     if (data.startsWith("tw:")) {
-      if (cekAdmin(env, chatIdCb) !== "ya") { await jawabAlert(env, cb.id, "⛔ Perintah ini khusus admin."); return; }
       const st = pendingAdmin.get(chatIdCb);
+      const manual = !!(st && st.mode === "manual");
+      if (cekAdmin(env, chatIdCb) !== "ya" && !manual) { await jawabAlert(env, cb.id, "⛔ Perintah ini khusus admin."); return; }
       if (!st || st.jenis !== "template" || Date.now() - st.ts > 15 * 60 * 1000) {
         pendingAdmin.delete(chatIdCb);
         await jawabAlert(env, cb.id, "Wizard sudah kedaluwarsa — buka lagi dari panel admin ya.");
@@ -3820,6 +4027,7 @@ async function handleTelegram(env, update) {
       await jawabCallback(env, cb.id);
       const aksi = data.slice("tw:".length);
       if (aksi.startsWith("tipe:")) {
+        if (manual) return;
         const tipe = aksi.slice("tipe:".length);
         if (tipe !== "SSH" && tipe !== "XRAY") return;
         st.tipe = tipe; st.tahap = "metode"; st.ts = Date.now();
@@ -3828,26 +4036,32 @@ async function handleTelegram(env, update) {
       }
       // Pemilih METODE (v2.9.0): metode hanya berlaku untuk tipenya —
       // metode Xray tidak bisa dipilih saat tipe SSH, dan sebaliknya.
+      // (v2.9.9) Mode manual: tipe sudah dari akun, habis pilih metode
+      // langsung ke tahap field pertama (tanpa operator/kategori).
       if (aksi.startsWith("metode:")) {
         const id = aksi.slice("metode:".length);
         const daftar = METODE_TEMPLATE[st.tipe] || [];
         if (!daftar.some((m) => m.id === id)) return;
-        st.metode = id; st.tahap = "operator"; st.ts = Date.now();
+        st.metode = id;
         if (id === "SSH_SLOWDNS") st.ssh.slowdns = true;
+        st.tahap = manual ? tahapPertamaTemplate(st) : "operator"; st.ts = Date.now();
         await kirimLangkahTemplate(env, chatIdCb, st);
         return;
       }
       if (aksi === "kembali:tipe") {
+        if (manual) return;
         st.tahap = "tipe"; st.ts = Date.now();
         await kirimLangkahTemplate(env, chatIdCb, st);
         return;
       }
       if (aksi === "kembali:metode") {
+        if (manual) return;
         st.tahap = "metode"; st.ts = Date.now();
         await kirimLangkahTemplate(env, chatIdCb, st);
         return;
       }
       if (aksi.startsWith("op:")) {
+        if (manual) return;
         const op = normalisasiOperator(aksi.slice("op:".length));
         if (!op) return;
         st.op = op; st.tahap = "kategori"; st.ts = Date.now();
@@ -3855,11 +4069,13 @@ async function handleTelegram(env, update) {
         return;
       }
       if (aksi === "kembali:op") {
+        if (manual) return;
         st.tahap = "operator"; st.ts = Date.now();
         await kirimLangkahTemplate(env, chatIdCb, st);
         return;
       }
       if (aksi.startsWith("kat:")) {
+        if (manual) return;
         // "kat:baru" harus dicek dulu — diawali "kat:" juga.
         if (aksi === "kat:baru") {
           st.tahap = "kategori_baru"; st.ts = Date.now();
@@ -3877,7 +4093,10 @@ async function handleTelegram(env, update) {
       // callback nyasar (mis. tombol pesan lama) diabaikan diam-diam.
       // Pemilih bug yang sedang terbuka ikut dibatalkan.
       if (aksi === "lewati") {
-        if (!TAHAP_LEWATI.has(st.tahap)) return;
+        // (v2.9.9) Lewati juga berlaku di tahap wajib bila mode edit
+        // (= pakai nilai lama) dan di tahap "nama" mode manual
+        // (= pakai nama akun) — keyboard-nya menampilkan tombolnya.
+        if (!TAHAP_LEWATI.has(st.tahap) && !st.editId && !(st.mode === "manual" && st.tahap === "nama")) return;
         delete st.pilihBug;
         st.ts = Date.now();
         await handleTemplateTeks(env, chatIdCb, st, "lewati");
@@ -3970,18 +4189,36 @@ async function handleTelegram(env, update) {
       if (aksi.startsWith("slowdns:")) {
         const ya = aksi.slice("slowdns:".length) === "ya";
         st.ssh.slowdns = ya;
-        st.tahap = ya ? "ssh_ns" : "ringkasan"; st.ts = Date.now();
+        // (v2.9.9) Mode manual tidak punya ringkasan — "Tidak" lanjut
+        // ke tahap nama (generate), bukan ringkasan.
+        st.tahap = ya ? "ssh_ns" : (manual ? "nama" : "ringkasan"); st.ts = Date.now();
         await kirimLangkahTemplate(env, chatIdCb, st);
         return;
       }
       if (aksi === "simpan") {
-        if (!st.nama || !st.op || !st.kat || !st.tipe || !st.metode) {
+        // (v2.9.9) Mode manual tidak pernah sampai sini (nama adalah
+        // tahap terakhir manual, langsung generate) — tolak defensif.
+        if (manual) return;
+        // Mode edit: metode boleh null (template legacy tanpa metode);
+        // nama/operator/kategori/tipe tetap wajib (sudah terisi dari
+        // template lama).
+        if (!st.nama || !st.op || !st.kat || !st.tipe || (!st.metode && !st.editId)) {
           // (v2.9.2: error mengedit pesan wizard yang sama.)
           st.msgId = await editAtauKirim(env, chatIdCb, st.msgId, "😕 Template belum lengkap — mulai lagi dari panel admin ya.", TOMBOL_KEMBALI);
           return;
         }
+        // (v2.9.9) Mode edit: nama baru tidak boleh bentrok dengan
+        // template LAIN (nama lama sendiri boleh dipakai lagi).
+        if (st.editId) {
+          const semua = await ambilTemplatesKv(env);
+          const bentrok = semua.find((e) => e.id !== st.editId && String(e.nama || "").toLowerCase() === String(st.nama).toLowerCase());
+          if (bentrok) {
+            st.msgId = await editAtauKirim(env, chatIdCb, st.msgId, "😕 Nama <b>" + escapeHtml(st.nama) + "</b> sudah dipakai template lain. Ganti nama atau ketuk ❌ Batal.", keyboardTemplateSimpan());
+            return;
+          }
+        }
         const tpl = { nama: st.nama, operator: st.op, kategori: st.kat, tipe: st.tipe, metode: st.metode, ssh: st.tipe === "SSH" ? st.ssh : null, xray: st.tipe === "XRAY" ? st.xray : null };
-        const hasil = await simpanTemplate(env, tpl);
+        const hasil = await simpanTemplate(env, tpl, st.editId || undefined);
         if (!hasil) {
           st.msgId = await editAtauKirim(env, chatIdCb, st.msgId, "⚠️ Gagal menyimpan template — coba lagi nanti ya.", keyboardTemplateSimpan());
           return;
@@ -3989,9 +4226,14 @@ async function handleTelegram(env, update) {
         pendingAdmin.delete(chatIdCb);
         // (v2.9.2: sukses mengedit pesan wizard jadi pesan sukses —
         // tombol Tambah Lagi / Kembali ke Panel, tanpa pesan baru.)
+        // (v2.9.9) Mode edit: tombol kembali ke daftar tipe itu.
+        const tombolSukses = st.editId
+          ? [[{ text: "⬅️ Kembali ke Daftar " + (st.tipe === "SSH" ? "SSH" : "Xray"), callback_data: "tpl:tipe:" + (st.tipe === "SSH" ? "ssh" : "xray") }],
+             [{ text: "⬅️ Kembali ke Panel Admin", callback_data: "admin:panel" }]]
+          : [[{ text: "➕ Tambah Template Lagi", callback_data: "admin:tambahconfig" }],
+             [{ text: "⬅️ Kembali ke Panel Admin", callback_data: "admin:panel" }]];
         await editAtauKirim(env, chatIdCb, st.msgId, "✅ Template " + hasil.aksi + ": <b>" + escapeHtml(hasil.entri.nama) + "</b>.\n\n" + ringkasanTemplate(hasil.entri) + "\n\nPengguna bisa pakai lewat /config.",
-          [[{ text: "➕ Tambah Template Lagi", callback_data: "admin:tambahconfig" }],
-           [{ text: "⬅️ Kembali ke Panel Admin", callback_data: "admin:panel" }]]);
+          tombolSukses);
         await catatUpdate(env, "Template " + (hasil.aksi === "diupdate" ? "diupdate" : "baru") + ": " + hasil.entri.nama + " (" + labelOperator(hasil.entri.operator) + " — " + labelKategori(hasil.entri.operator, hasil.entri.kategori) + ")");
         return;
       }
@@ -4083,6 +4325,27 @@ async function handleTelegram(env, update) {
            [{ text: "⬅️ Kembali ke Panel Admin", callback_data: "admin:panel" }]]);
         return;
       }
+      return;
+    }
+    // ---- Edit template (tpl:edit:<id>, v2.9.9, admin saja) ----
+    // Buka wizard template dengan semua field terisi nilai lama;
+    // wizard mulai di tahap "nama" (tipe/metode/operator/kategori
+    // tetap). Ketuk ⏭️ Lewati di tiap tahap = pakai nilai lama.
+    if (data.startsWith("tpl:edit:")) {
+      if (cekAdmin(env, chatIdCb) !== "ya") { await jawabAlert(env, cb.id, "⛔ Perintah ini khusus admin."); return; }
+      const id = data.slice("tpl:edit:".length);
+      const templates = await ambilTemplatesKv(env);
+      const t = templates.find((e) => e.id === id);
+      await jawabCallback(env, cb.id);
+      if (!t) { await sendTelegram(env, chatIdCb, "😕 Template itu sudah tidak tersedia."); return; }
+      const sshDef = { host: null, port: null, payload: null, proxyHost: null, proxyPort: null, sni: null, enhanced: false, slowdns: false, dnsNameServer: null, dnsPublicKey: null, dnsUdpHost: null, dnsUdpPort: null };
+      const xrayDef = { targetHost: null, targetPort: null, sni: null, headerHost: null, payload: null, sshHost: null, sshPort: null, sshUser: null, sshPass: null, nameServer: null, publicKey: null, udpDnsHost: null, udpDnsPort: null, proxyHost: null, proxyPort: null };
+      pendingAdmin.set(chatIdCb, {
+        jenis: "template", tahap: "nama", tipe: t.tipe, metode: t.metode || null, op: t.operator, kat: t.kategori, nama: t.nama,
+        ssh: { ...sshDef, ...(t.ssh || {}) }, xray: { ...xrayDef, ...(t.xray || {}) },
+        editId: t.id, editNamaLama: t.nama, ts: Date.now(), msgId: cb.message.message_id,
+      });
+      await kirimLangkahTemplate(env, chatIdCb, pendingAdmin.get(chatIdCb));
       return;
     }
     // ---- Hapus template (tpl:del:ya:<id>) ----
@@ -4325,6 +4588,7 @@ async function handleTelegram(env, update) {
   if (teks.startsWith("/") || teks === "▶️ Start") {
     pendingAdmin.delete(chatId);
     pendingTemplate.delete(chatId);
+    pendingManualAkun.delete(chatId);
   }
 
   if (teks === "/start" || teks === "/menu" || teks === "/help" || teks === "▶️ Start" ||
@@ -4432,10 +4696,15 @@ async function handleTelegram(env, update) {
   if (teks.startsWith("/")) { pendingCek.delete(chatId); pendingConfig.delete(chatId); return; } // perintah tak dikenal diabaikan diam-diam
 
   // State admin tertunda (tombol panel admin): dicek sebelum
-  // handlePesanAkun, hanya untuk admin. Perintah sudah ditangani di
-  // atas (state dihapus); state kedaluwarsa diabaikan di dalam handler.
-  if (cekAdmin(env, chatId) === "ya" && pendingAdmin.has(chatId)) {
-    if (await handleAdminTertunda(env, chatId, teks)) return;
+  // handlePesanAkun, hanya untuk admin — KECUALI state manual
+  // (v2.9.9, pengguna biasa menjalankan wizard Buat Manual miliknya).
+  // Perintah sudah ditangani di atas (state dihapus); state kedaluwarsa
+  // diabaikan di dalam handler.
+  if (pendingAdmin.has(chatId)) {
+    const st0 = pendingAdmin.get(chatId);
+    if (cekAdmin(env, chatId) === "ya" || st0.mode === "manual") {
+      if (await handleAdminTertunda(env, chatId, teks)) return;
+    }
   }
 
   // Akun yang ditunggu untuk /tambahconfig (admin).
@@ -4447,6 +4716,11 @@ async function handleTelegram(env, update) {
   // Akun yang ditunggu untuk template yang dipilih di /config.
   if (pendingTemplate.has(chatId)) {
     if (await handlePakaiTemplate(env, chatId, teks)) return;
+  }
+
+  // Akun yang ditunggu untuk Buat Manual (v2.9.9).
+  if (pendingManualAkun.has(chatId)) {
+    if (await handleManualAkun(env, chatId, teks)) return;
   }
 
   // Cek domain yang tertunda (setelah /cek atau tombol "🌐 Cek Domain").
