@@ -892,7 +892,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.7.5";
+const VERSI_BOT = "v2.7.6";
 
 const PESAN_START =
   "👋 <b>Generator Config Dark Tunnel</b>\n\n" +
@@ -1647,18 +1647,6 @@ function keyboardKembaliBug(opKey) {
   ];
 }
 
-// Pilihan jenis config di tombol "⚡ Buat Config": 5 jenis (2 per
-// baris, kecuali yang terakhir), lalu Otomatis, lalu Kembali.
-function keyboardPilihJenis() {
-  return [
-    [{ text: "SSH", callback_data: "pilih:SSH" }, { text: "VLESS", callback_data: "pilih:VLESS" }],
-    [{ text: "VMess", callback_data: "pilih:VMESS" }, { text: "Trojan", callback_data: "pilih:TROJAN" }],
-    [{ text: "Shadowsocks", callback_data: "pilih:SHADOWSOCKS" }],
-    [{ text: "🔄 Otomatis (deteksi sendiri)", callback_data: "pilih:AUTO" }],
-    ...TOMBOL_KEMBALI,
-  ];
-}
-
 // Panel admin (tombol "⚙️ Admin" di menu utama).
 function keyboardAdmin() {
   return [
@@ -1833,19 +1821,6 @@ const pendingConfig = new Map();
 // /config -> ketuk template -> kirim akun -> generate pakai template.
 const pendingTemplate = new Map();
 
-// Pilihan jenis config yang sedang menunggu (per chat, sementara di
-// memori saja — bukan KV). Isi: {type, ts}. Dipakai alur "⚡ Buat
-// Config": pengguna memilih jenis dulu, baru kirim akun.
-const pendingPilih = new Map();
-
-// Ambil pilihan yang masih berlaku (kedaluwarsa 15 menit) atau null.
-function ambilPilihan(chatId) {
-  const p = pendingPilih.get(chatId);
-  if (!p) return null;
-  if (Date.now() - p.ts > 15 * 60 * 1000) { pendingPilih.delete(chatId); return null; }
-  return p.type;
-}
-
 // State admin tertunda dari tombol panel admin (per chat admin,
 // sementara di memori saja). Isi: {jenis: "bug"|"config"|"broadcast"|
 // "template", tahap, ...}. Untuk "template": wizard Template Config
@@ -1879,20 +1854,6 @@ async function handlePesanAkun(env, chatId, teks, opts = {}) {
     return;
   }
 
-  // Pilihan jenis config (tombol "⚡ Buat Config"): jenis hasil parsing
-  // harus SAMA dengan pilihan. Bila tidak sama, JANGAN generate — beri
-  // tahu pengguna dan PERTAHANKAN pilihan (dia bisa kirim akun yang
-  // benar). Tanpa pilihan (tempel akun langsung) = deteksi otomatis.
-  const pilihan = ambilPilihan(chatId);
-  if (pilihan && pilihan !== "AUTO") {
-    const salah = [...new Set(hasil.configs.map((c) => c.type))].filter((t) => t !== pilihan);
-    if (salah.length) {
-      await sendTelegram(env, chatId,
-        "⚠️ Belum bisa buat config <b>" + pilihan + "</b> dari akun <b>" + escapeHtml(salah.join(", ")) + "</b> yang kamu kirim. Kirim akun <b>" + pilihan + "</b>, atau ketuk Kembali lalu pilih jenis lain.", TOMBOL_KEMBALI);
-      return;
-    }
-  }
-
   // Akun SSH + bug: tanya dulu metode payload-nya (kecuali metode
   // sudah dipilih lewat tombol). Akun Xray langsung generate.
   if (!opts.metodePayload) {
@@ -1915,8 +1876,6 @@ async function handlePesanAkun(env, chatId, teks, opts = {}) {
       (rincian ? "\n\n" + rincian : "") + "\n\n" + CARA_IMPOR + catatanBug;
     await sendDocument(env, chatId, namaFileDark(c.name, c.type), toDarktunnelLink(c) + "\n", caption, TOMBOL_APK);
   }
-  // File terkirim — pilihan jenis config selesai dipakai.
-  pendingPilih.delete(chatId);
 }
 
 // Simpan bug admin ke KV (upsert): bila host sudah ada di kategori itu,
@@ -2597,12 +2556,9 @@ async function handleTelegram(env, update) {
       return;
     }
     if (!chatIdCb) { await jawabCallback(env, cb.id); return; }
-    // Ketuk tombol menu apa pun membatalkan pilihan jenis config yang
-    // tertunda — kecuali memilih metode payload (pilihan harus tetap
-    // hidup sampai file config terkirim). Template yang sedang dipakai
-    // juga dibatalkan bila pengguna ketuk tombol lain (kecuali alur
-    // template itu sendiri).
-    if (!data.startsWith("metode:")) pendingPilih.delete(chatIdCb);
+    // Ketuk tombol menu apa pun membatalkan template yang sedang
+    // dipakai bila pengguna ketuk tombol lain (kecuali alur template
+    // itu sendiri).
     if (!data.startsWith("tpl:")) pendingTemplate.delete(chatIdCb);
     // Tombol "⬅️ Kembali ke Menu" — edit pesan ini jadi menu utama.
     if (data === "menu:utama") {
@@ -2614,23 +2570,21 @@ async function handleTelegram(env, update) {
       }
       return;
     }
-    // Tombol "⚡ Buat Config" di /start — pilih dulu jenis config.
+    // Tombol "⚡ Buat Config" di /start — langsung auto-detect, tanpa
+    // pemilih jenis. (Pemilih jenis config v2.4 dihapus 21 Nov 2026
+    // atas permintaan Asep; tombol "pilih:..." lama yang masih nempel
+    // di pesan lama diabaikan diam-diam — tidak ada handlernya lagi.)
     if (data === "buat:config") {
       await jawabCallback(env, cb.id);
-      await sendTelegram(env, chatIdCb, "⚡ <b>Buat Config</b>\n\nPilih jenis config yang mau dibuat:", keyboardPilihJenis());
+      await sendTelegram(env, chatIdCb, "⚡ <b>Buat Config</b>\n\nKirim akun kamu — bot deteksi jenisnya otomatis.",
+        [[{ text: "🧩 Template Config", callback_data: "buat:template" }], ...TOMBOL_KEMBALI]);
       return;
     }
-    // Pilih jenis config — simpan pilihan, lalu minta akunnya.
-    if (data.startsWith("pilih:")) {
-      const type = data.slice("pilih:".length);
-      const label = { SSH: "SSH", VLESS: "VLESS", VMESS: "VMess", TROJAN: "Trojan", SHADOWSOCKS: "Shadowsocks" }[type];
-      if (!label && type !== "AUTO") { await jawabCallback(env, cb.id); return; }
-      pendingPilih.set(chatIdCb, { type, ts: Date.now() });
+    // Tombol "🧩 Template Config" di alur Buat Config — buka daftar
+    // config contoh + template yang sudah ada (sama seperti /config).
+    if (data === "buat:template") {
       await jawabCallback(env, cb.id);
-      const prompt = type === "AUTO"
-        ? "Kirim akun kamu — bot deteksi jenisnya otomatis."
-        : "Kirim akun " + label + " kamu — link atau teks, bebas format apa pun.";
-      await sendTelegram(env, chatIdCb, prompt, TOMBOL_KEMBALI);
+      await handleConfig(env, chatIdCb);
       return;
     }
     // Tombol "🔍 Cari Bug" di /start — pintu masuk kedua alur /bug.
@@ -3030,11 +2984,9 @@ async function handleTelegram(env, update) {
   }
 
   // Perintah apa pun (atau ketuk "▶️ Start" dari keyboard lama yang masih
-  // nempel) membatalkan pilihan jenis config & state admin yang tertunda —
-  // pengguna pindah alur.
+  // nempel) membatalkan state admin yang tertunda — pengguna pindah alur.
   if (teks.startsWith("/") || teks === "▶️ Start") {
     pendingAdmin.delete(chatId);
-    pendingPilih.delete(chatId);
     pendingTemplate.delete(chatId);
   }
 
