@@ -791,6 +791,12 @@ async function terapkanTemplateSsh(env, cfg, template, bugAkun) {
       inj.payload = isiPlaceholderPayload(t.payload, ssh.host, sniEfektif);
     } else if (t.enhanced) {
       inj.payload = isiPlaceholderPayload(PAYLOAD_METODE.enhanced.template, ssh.host, sniEfektif);
+    } else {
+      // Template tanpa payload & tanpa enhanced: tanpa payload (hapus
+      // payload auto). String kosong eksplisit, bukan `delete` —
+      // InjectConfig.payload punya nilai default di aplikasi, jadi
+      // field yang hilang akan diisi template bawaan aplikasi.
+      inj.payload = "";
     }
     if (t.proxyHost) {
       inj.proxyHost = t.proxyHost;
@@ -831,13 +837,18 @@ async function terapkanTemplateXray(env, cfg, template, bugAkun) {
   const v2 = cfg[subKey].v2rayConfig;
   if (!v2) return cfg;
   const t = template.xray || {};
+  const hostAkun = v2.host; // Host server akun sebelum target template
+  // menimpanya — basis WC (jalur auto pakai v2rayConfig.host).
   if (t.targetHost) v2.host = t.targetHost;
   if (t.targetPort) v2.port = t.targetPort;
   if (t.sni) v2.serverNameIndication = t.sni;
   if (t.headerHost) v2.wsHeaderHost = t.headerHost;
-  // SNI efektif untuk inject: SNI template > SNI v2ray > bug akun.
-  const bugAsli = t.sni || v2.serverNameIndication || bugAkun || null;
-  const sniEfektif = await sniEfektifTemplate(env, bugAsli, v2.host);
+  // SNI inject = BUG, bukan SNI template (v2.8.2): TLS SNI
+  // (v2.serverNameIndication) = server; inject SNI = bug — target
+  // template (front/bug) > bug akun. Bila tidak ada bug sama sekali,
+  // inject SNI jatuh ke SNI template supaya inject tidak kehilangan SNI.
+  const bugAsli = t.targetHost || bugAkun || v2.serverNameIndication || null;
+  const sniEfektif = await sniEfektifTemplate(env, bugAsli, t.sni || v2.serverNameIndication || hostAkun);
   const slowdns = xraySlowdnsAktif(template);
   const butuhInject = !!(sniEfektif || t.payload || slowdns);
   let inj = cfg[subKey].injectConfig;
@@ -849,7 +860,13 @@ async function terapkanTemplateXray(env, cfg, template, bugAkun) {
   }
   if (inj) {
     if (sniEfektif) inj.serverNameIndication = sniEfektif;
+    // Template dipakai: payload kosong = tanpa payload — hapus payload
+    // auto dari parsePesan / injectConfigAktif. Pakai string kosong
+    // eksplisit, BUKAN `delete`: InjectConfig.payload punya nilai
+    // default di aplikasi (lihat analisis-format-config.md), jadi field
+    // yang hilang akan diisi template bawaan aplikasi.
     if (t.payload) inj.payload = isiPlaceholderPayload(t.payload, v2.host, sniEfektif);
+    else inj.payload = "";
     if (slowdns) {
       inj.mode = "DNSTT";
       inj.dnsttUdpDnsHost = t.udpDnsHost || "1.1.1.1";
@@ -966,7 +983,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.8.1";
+const VERSI_BOT = "v2.8.2";
 
 const PESAN_START =
   "👋 <b>Generator Config Dark Tunnel</b>\n\n" +
@@ -1020,8 +1037,16 @@ function escapeHtml(s) {
 // sudah diawali type yang sama, jangan digandakan. Bila type kosong /
 // tidak dikenal, pakai nama saja seperti dulu. Nama disanitasi: huruf
 // kecil, hanya [a-z0-9_-], maks 40 karakter; bila kosong pakai "config".
+// Generate DARI TEMPLATE (param ketiga terisi): nama file = nama template
+// apa adanya ("<nama-template> by @autosetdark_bot.dark", tanpa prefix
+// tipe) — spasi di tengah boleh, hanya karakter yang tidak aman di nama
+// file (/ \ : * ? " < > | dan kontrol) yang dibuang dan spasi berlebih
+// dirapikan; kosong setelah sanitasi -> fallback format lama.
+const BRANDING_FILE_DARK = " by @autosetdark_bot.dark";
 const JENIS_CONFIG_FILE = ["SSH", "VMESS", "VLESS", "TROJAN", "SHADOWSOCKS", "SSH_DNSTT", "OPENVPN"];
-export function namaFileDark(namaConfig, type) {
+export function namaFileDark(namaConfig, type, namaTemplate) {
+  const tpl = String(namaTemplate || "").replace(/[/\\:*?"<>|\x00-\x1f\x7f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 60);
+  if (tpl) return tpl + BRANDING_FILE_DARK;
   let s = String(namaConfig || "").toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
   if (!s) s = "config";
   let prefix = "";
@@ -1030,7 +1055,7 @@ export function namaFileDark(namaConfig, type) {
     const tl = t.toLowerCase();
     if (!s.startsWith(tl + "-") && s !== tl) prefix = tl + "-";
   }
-  return prefix + s + " by @autosetdark_bot.dark";
+  return prefix + s + BRANDING_FILE_DARK;
 }
 
 // ================= GENERATOR TUNNELCONFIG =================
@@ -2433,7 +2458,7 @@ const TOMBOL_PILIH_BUG_TEMPLATE = [
 
 // Tahap teks wizard yang bisa dikosongkan (tombol Lewati tampil).
 const TAHAP_LEWATI = new Set([
-  "ssh_port", "ssh_payload", "ssh_proxy", "ssh_sni", "ssh_udphost", "ssh_udpport",
+  "ssh_port", "ssh_payload", "ssh_proxy", "ssh_proxyport", "ssh_sni", "ssh_udphost", "ssh_udpport",
   "xray_target", "xray_sni", "xray_header", "xray_payload", "xray_ssh",
   "xray_ns", "xray_pubkey", "xray_udphost", "xray_udpport",
 ]);
@@ -2462,11 +2487,13 @@ async function kirimLangkahTemplate(env, chatId, st) {
   } else if (t === "ssh_port") {
     await sendTelegram(env, chatId, "🔌 <b>Port SSH</b>\n\nKirim port (angka 1-65535, mis. <code>80</code> atau <code>443</code>).\n\nKosong = pakai port dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "ssh_payload") {
-    await sendTelegram(env, chatId, "📝 <b>Payload</b>\n\nKirim teks payload lengkap (boleh pakai <code>[host]</code> / <code>[bug]</code> / <code>[ua]</code>).\n\nKosong = pakai metode payload kategori otomatis. Ketuk ⏭️ Lewati untuk kosong.", batal);
+    await sendTelegram(env, chatId, "📝 <b>Payload</b>\n\nKirim teks payload lengkap (boleh pakai <code>[host]</code> / <code>[bug]</code> / <code>[ua]</code>).\n\nKosong = tanpa payload. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "ssh_proxy") {
-    await sendTelegram(env, chatId, "🔀 <b>Proxy</b>\n\nKirim proxy format <code>host:port</code> (boleh dari daftar bug — atau ketuk 📋 Pilih dari Daftar Bug).\n\nKosong = tanpa proxy. Ketuk ⏭️ Lewati untuk kosong.", batal);
+    await sendTelegram(env, chatId, "🔀 <b>Proxy</b>\n\nKirim proxy — host saja (mis. <code>proxy.contoh.com</code>, port ditanya setelahnya) atau langsung format <code>host:port</code> (boleh dari daftar bug — atau ketuk 📋 Pilih dari Daftar Bug).\n\nKosong = tanpa proxy. Ketuk ⏭️ Lewati untuk kosong.", batal);
+  } else if (t === "ssh_proxyport") {
+    await sendTelegram(env, chatId, "🔀 <b>Port Proxy</b>\n\nPort proxy untuk <code>" + escapeHtml(st.ssh?.proxyHost || "") + "</code>:\n\nKirim angka 1-65535 (mis. <code>80</code>, <code>443</code>, atau <code>8080</code>).\n\nKosong = default <code>8080</code>. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "ssh_sni") {
-    await sendTelegram(env, chatId, "🎯 <b>SNI</b>\n\nKirim SNI (host, boleh dari daftar bug — atau ketuk 📋 Pilih dari Daftar Bug).\n\nKosong = pakai bug/SNI dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
+    await sendTelegram(env, chatId, "🎯 <b>SNI</b>\n\nKetik SNI manual (host, contoh: <code>edu.ruangguru.com</code>) — atau ketuk 📋 Pilih dari Daftar Bug.\n\nKosong = pakai bug/SNI dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "ssh_enhanced") {
     await sendTelegram(env, chatId, "⚡ <b>Enhanced</b>\n\nAktifkan payload Enhanced?", keyboardTemplateYaTidak("tw:enhanced"));
   } else if (t === "ssh_slowdns") {
@@ -2482,11 +2509,11 @@ async function kirimLangkahTemplate(env, chatId, st) {
   } else if (t === "xray_target") {
     await sendTelegram(env, chatId, "🎯 <b>Target Server</b>\n\nKirim target server format <code>host:port</code> (boleh dari daftar bug — atau ketuk 📋 Pilih dari Daftar Bug).\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_sni") {
-    await sendTelegram(env, chatId, "🎯 <b>Server Name / SNI</b>\n\nKirim SNI (host, boleh dari daftar bug — atau ketuk 📋 Pilih dari Daftar Bug).\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
+    await sendTelegram(env, chatId, "🎯 <b>Server Name / SNI</b>\n\nKetik SNI manual (host, contoh: <code>sg1.contoh.com</code>) — atau ketuk 📋 Pilih dari Daftar Bug.\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_header") {
     await sendTelegram(env, chatId, "🎯 <b>Header Host</b>\n\nKirim header host (host, boleh dari daftar bug — atau ketuk 📋 Pilih dari Daftar Bug).\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_payload") {
-    await sendTelegram(env, chatId, "📝 <b>Payload</b> (opsional)\n\nKirim teks payload (boleh pakai <code>[host]</code> / <code>[bug]</code> / <code>[ua]</code>).\n\nKosong = tanpa payload khusus. Ketuk ⏭️ Lewati untuk kosong.", batal);
+    await sendTelegram(env, chatId, "📝 <b>Payload</b> (opsional)\n\nKirim teks payload (boleh pakai <code>[host]</code> / <code>[bug]</code> / <code>[ua]</code>).\n\nKosong = tanpa payload. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_ssh") {
     await sendTelegram(env, chatId, "🔑 <b>Akun SSH</b> (opsional)\n\nKirim akun SSH format <code>host:port@user:pass</code>.\n\nDisimpan di template tapi tidak dipakai di config Xray. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_ns") {
@@ -2546,11 +2573,31 @@ async function handleTemplateTeks(env, chatId, st, teks) {
   }
   if (t === "ssh_proxy") {
     const v = kosongkan(teks);
-    if (v !== null) {
+    if (v === null) {
+      st.ssh.proxyHost = null; st.ssh.proxyPort = null;
+      st.tahap = "ssh_sni";
+    } else {
       const hp = parseHostPort(v);
-      if (!hp) return salah("😕 Format proxy salah. Pakai <code>host:port</code>, mis. <code>proxy.contoh.com:8080</code> —  atau ketuk ⏭️ Lewati untuk kosong.");
-      st.ssh.proxyHost = hp.host; st.ssh.proxyPort = hp.port;
-    } else { st.ssh.proxyHost = null; st.ssh.proxyPort = null; }
+      if (hp) {
+        // host:port lengkap -> langsung ke SNI.
+        st.ssh.proxyHost = hp.host; st.ssh.proxyPort = hp.port;
+        st.tahap = "ssh_sni";
+      } else if (validHost(v.toLowerCase())) {
+        // Host saja (tanpa port): port ditanya di tahap berikutnya.
+        st.ssh.proxyHost = v.toLowerCase(); st.ssh.proxyPort = null;
+        st.tahap = "ssh_proxyport";
+      } else {
+        return salah("😕 Format proxy salah. Pakai <code>host:port</code>, mis. <code>proxy.contoh.com:8080</code> —  atau ketuk ⏭️ Lewati untuk kosong.");
+      }
+    }
+    st.ts = Date.now();
+    await kirimLangkahTemplate(env, chatId, st);
+    return true;
+  }
+  if (t === "ssh_proxyport") {
+    const v = kosongkan(teks);
+    if (v !== null && !validPortNum(v)) return salah("😕 Port proxy tidak valid. Kirim angka 1-65535, mis. <code>8080</code> —  atau ketuk ⏭️ Lewati untuk default.");
+    st.ssh.proxyPort = v === null ? null : Number(v);
     st.tahap = "ssh_sni"; st.ts = Date.now();
     await kirimLangkahTemplate(env, chatId, st);
     return true;
@@ -2868,7 +2915,7 @@ async function handlePakaiTemplate(env, chatId, teks) {
     const rincian = ringkasanConfig(c);
     const caption = "✅ <b>Config Dark Tunnel jadi (template: " + escapeHtml(template.nama) + "):</b> " + escapeHtml(c.type + " — " + c.name) +
       (rincian ? "\n\n" + rincian : "") + "\n\n" + CARA_IMPOR + catatanBug;
-    await sendDocument(env, chatId, namaFileDark(c.name, c.type), toDarktunnelLink(c) + "\n", caption, TOMBOL_APK);
+    await sendDocument(env, chatId, namaFileDark(c.name, c.type, template.nama), toDarktunnelLink(c) + "\n", caption, TOMBOL_APK);
   }
   return true;
 }
@@ -3126,12 +3173,12 @@ async function handleTelegram(env, update) {
         const host = pb.hosts[idx];
         delete st.pilihBug;
         // Isi field sesuai tahap asal lalu lanjut ke tahap berikutnya.
-        // host:port diisi host saja (port null): proxy pakai default
-        // 8080 saat generate, target pakai port akun pengguna.
+        // host:port diisi host saja (port null): proxy lanjut ke tahap
+        // port (ssh_proxyport), target pakai port akun pengguna.
         if (st.tahap === "ssh_sni") { st.ssh.sni = host; st.tahap = "ssh_enhanced"; }
         else if (st.tahap === "xray_sni") { st.xray.sni = host; st.tahap = "xray_header"; }
         else if (st.tahap === "xray_header") { st.xray.headerHost = host; st.tahap = "xray_payload"; }
-        else if (st.tahap === "ssh_proxy") { st.ssh.proxyHost = host; st.ssh.proxyPort = null; st.tahap = "ssh_sni"; }
+        else if (st.tahap === "ssh_proxy") { st.ssh.proxyHost = host; st.ssh.proxyPort = null; st.tahap = "ssh_proxyport"; }
         else if (st.tahap === "xray_target") { st.xray.targetHost = host; st.xray.targetPort = null; st.tahap = "xray_sni"; }
         else return;
         st.ts = Date.now();
