@@ -1544,7 +1544,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.11";
+const VERSI_BOT = "v2.9.12";
 
 const PESAN_START =
   "👋 <b>Selamat datang di Generator Config Dark Tunnel</b>\n\n" +
@@ -1590,7 +1590,7 @@ const PESAN_GRUP =
 const CARA_IMPOR =
   "📥 <b>Cara impor ke Dark Tunnel:</b>\n" +
   "1. Unduh file <code>.dark</code> di atas.\n" +
-  "2. Klik config di atas, buka dengan aplikasi Dark Tunnel.\n" +
+  "2. Ketuk file-nya, lalu pilih buka dengan aplikasi Dark Tunnel.\n" +
   "3. Tekan <b>Connect</b>.";
 
 // ================= UTIL BASE64 (jalan di Worker & Node) =================
@@ -2782,7 +2782,7 @@ async function handlePesanAkun(env, chatId, teks, opts = {}) {
     await sendTelegram(env, chatId,
       "🤔 Bot tidak menemukan akun di pesan itu.\n\n" +
       "Kirim akun <b>SSH</b> atau link <b>VLESS / VMess / Trojan / Shadowsocks</b> — boleh ditempel apa adanya, bot yang rapikan.\n\n" +
-      "Ketik /start untuk lihat panduan lengkap.");
+      "Ketik /help untuk panduan lengkap.");
     return;
   }
 
@@ -3648,13 +3648,13 @@ async function handleManualAkun(env, chatId, teks) {
 // manual, tanpa menyimpan template. Nama bebas dari pengguna jadi
 // nama file ("<nama> by @autosetdark_bot.dark"); Lewati nama = pakai
 // nama akun (seperti Buat Config otomatis).
-async function selesaikanManual(env, chatId, st) {
+export async function selesaikanManual(env, chatId, st) {
   pendingAdmin.delete(chatId);
   const tpl = { nama: st.nama || null, operator: null, kategori: null, tipe: st.tipe, metode: st.metode, ssh: st.tipe === "SSH" ? st.ssh : null, xray: st.tipe === "XRAY" ? st.xray : null };
   let configs = [];
   try { configs = await terapkanTemplate(env, st.akun, tpl); } catch { configs = []; }
   if (!configs.length) {
-    await sendTelegram(env, chatId, "😕 Config manual tidak bisa dibuat dari akun itu — coba lagi dari /start ya.", TOMBOL_KEMBALI);
+    await sendTelegram(env, chatId, "😕 Config manual tidak bisa dibuat dari akun itu. Kirim akun lain, atau ketuk ⬅️ Kembali ke Menu untuk keluar.", TOMBOL_KEMBALI);
     return;
   }
   const catatanBug = await catatanBugUntuk(env, st.akun);
