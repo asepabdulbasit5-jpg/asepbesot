@@ -1602,7 +1602,7 @@ function keyboardStart(isAdmin) {
   const kb = [
     [{ text: "⚡ Buat Config", callback_data: "buat:config" }],
     [{ text: "🔍 Cari Bug", callback_data: "bug:menu" }, { text: "🌐 Cek Domain", callback_data: "cek:mulai" }],
-    [{ text: "dark tunnel", url: "https://sfile.co/H26JBeTBi1o" }, { text: "🆕 Update Terbaru", callback_data: "update:lihat" }],
+    [{ text: "📥 dark tunnel", url: "https://sfile.co/H26JBeTBi1o" }, { text: "🆕 Update Terbaru", callback_data: "update:lihat" }],
     [{ text: "🛒 Beli Akun VPN", url: "https://t.me/sandekalavpn_bot" }, { text: "👥 Gabung Grup", url: "https://t.me/sand3kala" }],
   ];
   if (isAdmin) kb.push([{ text: "⚙️ Admin", callback_data: "admin:panel" }]);
@@ -1689,32 +1689,10 @@ function keyboardTemplateSimpan() {
 
 const TEKS_PANEL_ADMIN = "⚙️ <b>Menu Admin</b>\n\nPilih yang mau dilakukan:";
 
-// Tombol "▶️ Start" bawah (reply keyboard Telegram, TIDAK permanen —
-// pengguna bisa menyembunyikannya lewat ikon keyboard; /start akan
-// memunculkannya lagi). Sekali muncul, pengguna cukup ketuk Start di
-// bawah — tanpa ketik /start dan tanpa tombol Menu ☰ (daftar perintah
-// BotFather sengaja dikosongkan). Satu pesan hanya boleh punya SATU
-// reply_markup, jadi tombol bawah ini dikirim lewat pesan terpisah,
-// bukan bersama inline_keyboard menu utama.
-const KEYBOARD_START = { keyboard: [[{ text: "▶️ Start" }]], resize_keyboard: true };
-
-// Kirim pesan dengan reply keyboard "▶️ Start" (tanpa inline keyboard).
-async function sendKeyboardBawah(env, chatId, text) {
-  return await telegramApi(env, "sendMessage", {
-    chat_id: chatId,
-    text: String(text),
-    parse_mode: "HTML",
-    reply_markup: KEYBOARD_START,
-  });
-}
-
-// Menu utama: PESAN_START + keyboard inline, lalu kirim pesan tombol
-// bawah "▶️ Start" setiap kali (tanpa pelacakan KV — supaya tombol yang
-// disembunyikan pengguna bisa dimunculkan lagi lewat /start). Isi pesan
-// pembawa keyboard hanya "▶️" (Telegram butuh teks pada pesan).
+// Menu utama: PESAN_START + keyboard inline saja. (Tombol reply keyboard
+// "▶️ Start" bawah dihapus 21 Nov 2026 atas permintaan Asep — tidak berguna.)
 async function tampilkanMenuUtama(env, chatId) {
   await sendTelegram(env, chatId, PESAN_START, keyboardStart(cekAdmin(env, chatId) === "ya"));
-  await sendKeyboardBawah(env, chatId, "▶️");
 }
 
 // ================= HANDLER TELEGRAM =================
@@ -2804,15 +2782,15 @@ async function handleTelegram(env, update) {
     return;
   }
 
-  // Perintah apa pun (atau ketuk "▶️ Start") membatalkan pilihan jenis
-  // config & state admin yang tertunda — pengguna pindah alur.
-  if (teks.startsWith("/") || teks === "▶️ Start") {
+  // Perintah apa pun membatalkan pilihan jenis config & state admin
+  // yang tertunda — pengguna pindah alur.
+  if (teks.startsWith("/")) {
     pendingAdmin.delete(chatId);
     pendingPilih.delete(chatId);
     pendingTemplate.delete(chatId);
   }
 
-  if (teks === "/start" || teks === "/menu" || teks === "/help" || teks === "▶️ Start" ||
+  if (teks === "/start" || teks === "/menu" || teks === "/help" ||
       teks.startsWith("/start ") || teks.startsWith("/start@") ||
       teks.startsWith("/menu ") || teks.startsWith("/menu@")) {
     pendingCek.delete(chatId);
