@@ -278,12 +278,21 @@ export const BUG_DB = {
 // Return {operator, operatorLabel, kategori, kategoriLabel, note, metode} atau null.
 // metode = metode payload kategori itu (v2.5), atau undefined bila tidak ada.
 export function cariBug(host) {
+  return cariBugKecuali(host, null);
+}
+
+// Cari bug di BUG_DB, lewati entri yang ada di deleted-set (objek
+// { "op|kat|hostLower": 1 }, dari KV BUG_DELETED). Dipakai
+// cariBugGabungan supaya bug yang sudah dihapus admin tidak terdeteksi
+// lagi saat generate — tapi bug yang sama di kategori lain (yang tidak
+// dihapus) tetap ketemu.
+function cariBugKecuali(host, dihapus) {
   const h = String(host || "").toLowerCase();
   if (!h) return null;
   for (const [opKey, op] of Object.entries(BUG_DB)) {
     for (const [katKey, kat] of Object.entries(op.kategori)) {
       for (const e of kat.hosts) {
-        if (e.h.toLowerCase() === h) {
+        if (e.h.toLowerCase() === h && !(dihapus && dihapus[kunciBugDihapus(opKey, katKey, h)])) {
           return { operator: opKey, operatorLabel: op.label, kategori: katKey, kategoriLabel: kat.label, note: e.n || "", metode: kat.metode };
         }
       }
@@ -491,6 +500,67 @@ async function hitungBugKv(env) {
   return n;
 }
 
+// ---- Bug yang dihapus admin (v2.8.0, KV key BUG_DELETED) ----
+// Bug bawaan (BUG_DB) tidak bisa dihapus dari kode saat runtime, jadi
+// penghapusannya dicatat di sini sebagai SET: { "op|kat|hostLower": 1 }.
+// Pemisah "|" aman: host di BUG_DB tidak pernah mengandung "|" (di
+// daftarBug, "|" memisahkan host dari catatan) dan op/kat adalah kunci
+// enum. Kunci memuat op+kat: host yang sama bisa ada di beberapa
+// kategori, hapus hanya berlaku untuk kategori yang dilihat admin.
+// Bug KV (BUGS) dihapus langsung dari arraynya — bersih, tanpa jejak.
+function kunciBugDihapus(opKey, katKey, host) {
+  return String(opKey || "") + "|" + String(katKey || "") + "|" + String(host || "").toLowerCase();
+}
+
+async function ambilBugDihapusKv(env) {
+  const d = await kvGet(env, "BUG_DELETED");
+  return d && typeof d === "object" ? d : {};
+}
+
+// Hapus bug dari daftar: hapus dari KV BUGS bila ada, dan/atau catat
+// ke BUG_DELETED bila host ada di BUG_DB (kategori itu). Return host
+// (lowercase) yang dihapus, atau null bila tidak ketemu di mana pun.
+export async function hapusBugKv(env, opKey, katKey, host) {
+  const h = String(host || "").toLowerCase();
+  if (!h || !env.DATA) return null;
+  let ketemu = false;
+  // (1) Bug KV: hapus dari array BUGS.
+  const bugs = await ambilBugsKv(env);
+  const arr = bugs?.[opKey]?.[katKey];
+  if (Array.isArray(arr)) {
+    const idx = arr.findIndex((e) => String(e.host || "").toLowerCase() === h);
+    if (idx >= 0) {
+      arr.splice(idx, 1);
+      ketemu = true;
+      if (!await kvPut(env, "BUGS", bugs)) return null;
+    }
+  }
+  // (2) Bug bawaan: catat di deleted-set.
+  const bawaan = BUG_DB[opKey]?.kategori?.[katKey]?.hosts || [];
+  if (bawaan.some((e) => String(e.h || "").toLowerCase() === h)) {
+    const dihapus = await ambilBugDihapusKv(env);
+    dihapus[kunciBugDihapus(opKey, katKey, h)] = 1;
+    if (!await kvPut(env, "BUG_DELETED", dihapus)) return null;
+    ketemu = true;
+  }
+  return ketemu ? h : null;
+}
+
+// Jumlah bug bawaan yang sudah dihapus (hanya entri deleted-set yang
+// benar-benar ada di BUG_DB — entri basi tidak dihitung). Dipakai
+// /status supaya angka bug bawaan akurat.
+export async function hitungBugDihapus(env) {
+  const dihapus = await ambilBugDihapusKv(env);
+  let n = 0;
+  for (const kunci of Object.keys(dihapus)) {
+    const [op, kat, host] = kunci.split("|");
+    if (!op || !kat || !host) continue;
+    const bawaan = BUG_DB[op]?.kategori?.[kat]?.hosts || [];
+    if (bawaan.some((e) => String(e.h || "").toLowerCase() === host)) n++;
+  }
+  return n;
+}
+
 // Cari bug di KV dulu, lalu database bawaan. Return seperti cariBug().
 export async function cariBugGabungan(env, host) {
   const h = String(host || "").toLowerCase();
@@ -506,7 +576,9 @@ export async function cariBugGabungan(env, host) {
       }
     }
   }
-  return cariBug(host);
+  // Fallback database bawaan — lewati bug yang sudah dihapus admin.
+  const dihapus = await ambilBugDihapusKv(env);
+  return cariBugKecuali(host, dihapus);
 }
 
 // Daftar bug satu kategori: KV (didahulukan, 🆕 bila <7 hari) + bawaan,
@@ -518,13 +590,15 @@ export async function daftarBugPesanGabungan(env, opKey, katKey) {
   const kvList = (kv?.[opKey]?.[katKey] || []).filter((e) => e && e.host);
   if (!kat && kvList.length === 0) return null;
   const ada = new Set(kvList.map((e) => String(e.host).toLowerCase()));
+  // Bug bawaan yang sudah dihapus admin tidak ditampilkan.
+  const dihapus = await ambilBugDihapusKv(env);
   const baru = (e) => e.ts && Date.now() - e.ts < 7 * 86400 * 1000;
   const barisKv = kvList.map((e) =>
     "• <code>" + escapeHtml(e.host) + "</code>" +
     (e.catatan ? " (" + escapeHtml(e.catatan) + ")" : "") +
     (baru(e) ? " 🆕" : ""));
   const barisBawaan = kat
-    ? kat.hosts.filter((e) => !ada.has(e.h.toLowerCase())).map((e) =>
+    ? kat.hosts.filter((e) => !ada.has(e.h.toLowerCase()) && !dihapus[kunciBugDihapus(opKey, katKey, e.h)]).map((e) =>
       "• <code>" + e.h + "</code>" + (e.n ? " (" + e.n + ")" : ""))
     : [];
   const semua = [...barisKv, ...barisBawaan];
@@ -892,7 +966,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.7.9";
+const VERSI_BOT = "v2.8.0";
 
 const PESAN_START =
   "👋 <b>Generator Config Dark Tunnel</b>\n\n" +
@@ -1762,12 +1836,14 @@ const TOMBOL_APK = [[{ text: "📥 Download APK Dark Tunnel", url: "https://sfil
 const TOMBOL_KEMBALI = [[{ text: "⬅️ Kembali ke Menu", callback_data: "menu:utama" }]];
 
 // Tombol kembali ke daftar kategori operator + kembali ke menu utama
-// (dipakai di pesan terakhir daftar bug).
-function keyboardKembaliBug(opKey) {
-  return [
-    [{ text: "⬅️ Kembali", callback_data: "bug:op:" + opKey }],
-    ...TOMBOL_KEMBALI,
-  ];
+// (dipakai di pesan terakhir daftar bug). Admin juga dapat tombol
+// "🗑️ Hapus Bug" untuk masuk mode hapus bug kategori itu (v2.8.0).
+function keyboardKembaliBug(opKey, katKey, isAdmin) {
+  const rows = [];
+  if (isAdmin) rows.push([{ text: "🗑️ Hapus Bug", callback_data: "bug:hapus:" + opKey + ":" + katKey }]);
+  rows.push([{ text: "⬅️ Kembali", callback_data: "bug:op:" + opKey }]);
+  rows.push(...TOMBOL_KEMBALI);
+  return rows;
 }
 
 // Panel admin (tombol "⚙️ Admin" di menu utama).
@@ -1811,14 +1887,16 @@ function keyboardTemplateKategori(opKey) {
 // Daftar host satu kategori (BUG_DB + KV BUGS, KV dulu, dedup).
 // Pola sama seperti daftarBugPesanGabungan, tapi return array host
 // mentah (bukan pesan teks). Kategori yang cuma ada di KV tetap jalan.
-async function daftarHostKategori(env, opKey, katKey) {
+// Bug bawaan yang sudah dihapus admin tidak ikut (v2.8.0).
+export async function daftarHostKategori(env, opKey, katKey) {
   const kat = BUG_DB[opKey]?.kategori?.[katKey];
   const kv = await ambilBugsKv(env);
   const kvList = (kv?.[opKey]?.[katKey] || []).filter((e) => e && e.host);
   const ada = new Set(kvList.map((e) => String(e.host).toLowerCase()));
+  const dihapus = await ambilBugDihapusKv(env);
   return [
     ...kvList.map((e) => String(e.host)),
-    ...(kat ? kat.hosts.filter((e) => !ada.has(e.h.toLowerCase())).map((e) => e.h) : []),
+    ...(kat ? kat.hosts.filter((e) => !ada.has(e.h.toLowerCase()) && !dihapus[kunciBugDihapus(opKey, katKey, e.h)]).map((e) => e.h) : []),
   ];
 }
 
@@ -1868,6 +1946,59 @@ function keyboardPilihBugHost(st) {
   rows.push([{ text: "⬅️ Ganti kategori", callback_data: "tw:bug:op:" + pb.op }]);
   rows.push([{ text: "⬅️ Kembali", callback_data: "tw:bug:kembali" }]);
   return rows;
+}
+
+// ---- Mode hapus bug (v2.8.0, admin saja) ----
+// Daftar host satu kategori sebagai tombol (20/halaman), pakai indeks
+// di callback (bukan host mentah — batas 64 byte Telegram). Daftar
+// dibaca ulang dari daftarHostKategori di tiap interaksi, jadi tombol
+// usang tidak bisa salah hapus host lain.
+// Hash pendek (djb2 -> base36) ikut di callback host & konfirmasi:
+// memastikan host di indeks itu masih host yang sama seperti saat
+// tombol dibuat — daftar yang bergeser (mis. admin sempat /tambahbug
+// di tengah alur) tidak bisa salah hapus.
+function hashHostSingkat(host) {
+  let h = 5381;
+  for (const c of String(host || "")) h = ((h << 5) + h + c.charCodeAt(0)) >>> 0;
+  return h.toString(36);
+}
+
+function keyboardHapusBug(hosts, opKey, katKey, hal) {
+  const per = PICKER_HOST_PER_HALAMAN;
+  const totalHal = Math.max(1, Math.ceil(hosts.length / per));
+  const h = Math.min(Math.max(hal || 0, 0), totalHal - 1);
+  const awal = h * per;
+  const rows = hosts.slice(awal, awal + per).map((host, i) =>
+    ([{ text: host, callback_data: "bug:hapus:host:" + opKey + ":" + katKey + ":" + (awal + i) + ":" + hashHostSingkat(host) }]));
+  const nav = [];
+  if (h > 0) nav.push({ text: "⬅️ Sebelumnya", callback_data: "bug:hapus:hal:" + opKey + ":" + katKey + ":" + (h - 1) });
+  if (h < totalHal - 1) nav.push({ text: "Berikutnya ➡️", callback_data: "bug:hapus:hal:" + opKey + ":" + katKey + ":" + (h + 1) });
+  if (nav.length) rows.push(nav);
+  rows.push([{ text: "⬅️ Kembali ke Daftar", callback_data: "bug:kat:" + opKey + ":" + katKey }]);
+  return rows;
+}
+
+// Tampilkan (edit) pesan mode hapus untuk satu kategori. notice =
+// pesan tambahan di atas judul (mis. konfirmasi hapus berhasil).
+// Bila kategori sudah kosong, tampilkan pesan kosong + tombol kembali
+// ke daftar kategori (bug:kat: dengan daftar kosong tidak mengirim
+// apa-apa, jadi jangan arahkan ke sana).
+async function tampilkanModeHapusBug(env, chatId, messageId, opKey, katKey, hal, notice) {
+  const hosts = await daftarHostKategori(env, opKey, katKey);
+  const totalHal = Math.max(1, Math.ceil(hosts.length / PICKER_HOST_PER_HALAMAN));
+  const h = Math.min(Math.max(hal || 0, 0), totalHal - 1);
+  const judul = "🗑️ <b>Hapus Bug — " + escapeHtml(labelOperator(opKey)) + " — " + escapeHtml(labelKategori(opKey, katKey)) + "</b>";
+  const awalan = notice ? notice + "\n\n" : "";
+  if (!hosts.length) {
+    await editTelegram(env, chatId, messageId, awalan + judul + "\n\nKategori ini sudah tidak ada bug lagi.", [
+      [{ text: "⬅️ Kembali ke Kategori", callback_data: "bug:op:" + opKey }],
+      ...TOMBOL_KEMBALI,
+    ]);
+    return;
+  }
+  await editTelegram(env, chatId, messageId,
+    awalan + judul + "\n\nKetuk host yang mau dihapus" + (totalHal > 1 ? " (halaman " + (h + 1) + "/" + totalHal + ")" : "") + ":",
+    keyboardHapusBug(hosts, opKey, katKey, h));
 }
 
 // Kirim daftar pemilih bug sesuai st.pilihBug.langkah.
@@ -2021,6 +2152,14 @@ async function simpanBug(env, op, kat, host, catatan) {
     aksi = "ditambahkan";
   }
   if (!await kvPut(env, "BUGS", bugs)) return null;
+  // Host yang pernah dihapus lalu ditambah lagi harus muncul lagi:
+  // bersihkan entri deleted-set-nya (bila ada).
+  const dihapus = await ambilBugDihapusKv(env);
+  const kunci = kunciBugDihapus(op, kat, host);
+  if (dihapus[kunci]) {
+    delete dihapus[kunci];
+    await kvPut(env, "BUG_DELETED", dihapus);
+  }
   const label = labelOperator(op) + " — " + labelKategori(op, kat);
   await catatUpdate(env, "Bug " + (aksi === "diupdate" ? "diupdate" : "baru") + ": " + host + " (" + label + ")");
   const terkirim = await siarkanUpdate(env, "🆕 Update: bug " + (aksi === "diupdate" ? "diupdate" : "baru") + " — <code>" + escapeHtml(host) + "</code> (" + label + "). Ketik /bug buat lihat daftar terbaru.");
@@ -2515,7 +2654,10 @@ async function handleAdminTertunda(env, chatId, teks) {
 
 // ---- /status: kondisi bot (DM saja; di grup diabaikan) ----
 async function handleStatus(env, chatId) {
-  const bawaan = hitungBugBawaan();
+  // Bug bawaan yang sudah dihapus admin tidak dihitung (tanpa KV
+  // tidak ada penghapusan, jadi 0).
+  const dihapus = env.DATA ? await hitungBugDihapus(env) : 0;
+  const bawaan = hitungBugBawaan() - dihapus;
   const baris = ["📊 <b>Status Bot</b>", "", "• Versi: <b>" + VERSI_BOT + "</b>"];
   if (env.DATA) {
     const pengguna = (await kvList(env, "USER:")).length;
@@ -3068,8 +3210,79 @@ async function handleTelegram(env, update) {
         return;
       }
       for (let i = 0; i < daftar.length; i++) {
-        await sendTelegram(env, chatIdCb, daftar[i], i === daftar.length - 1 ? keyboardKembaliBug(parts[0]) : undefined);
+        await sendTelegram(env, chatIdCb, daftar[i], i === daftar.length - 1 ? keyboardKembaliBug(parts[0], parts[1], cekAdmin(env, chatIdCb) === "ya") : undefined);
       }
+      return;
+    }
+    // ---- Mode hapus bug (v2.8.0, admin saja) ----
+    // Konfirmasi hapus (bug:hapus:ya:<op>:<kat>:<idx>:<hash>).
+    // Hash dicek ulang: bila host di indeks itu sudah bukan host yang
+    // sama (daftar bergeser), tolak — jangan sampai salah hapus.
+    if (data.startsWith("bug:hapus:ya:")) {
+      if (cekAdmin(env, chatIdCb) !== "ya") { await jawabAlert(env, cb.id, "⛔ Perintah ini khusus admin."); return; }
+      const parts = data.slice("bug:hapus:ya:".length).split(":");
+      const [opKey, katKey, idxRaw, hash] = parts;
+      const idx = Number(idxRaw);
+      await jawabCallback(env, cb.id);
+      const hosts = await daftarHostKategori(env, opKey, katKey);
+      const host = hosts[idx];
+      if (!host || hashHostSingkat(host) !== hash) {
+        await tampilkanModeHapusBug(env, chatIdCb, cb.message.message_id, opKey, katKey, 0, "😕 Daftar bug sudah berubah — pilih lagi ya.");
+        return;
+      }
+      const hasil = await hapusBugKv(env, opKey, katKey, host);
+      if (!hasil) {
+        await tampilkanModeHapusBug(env, chatIdCb, cb.message.message_id, opKey, katKey, 0, "😕 Bug itu sudah tidak ada di daftar.");
+        return;
+      }
+      // Kembali ke mode hapus dengan daftar terbaru (biar admin bisa
+      // hapus beberapa bug berurutan).
+      await tampilkanModeHapusBug(env, chatIdCb, cb.message.message_id, opKey, katKey, 0, "✅ Bug <code>" + escapeHtml(host) + "</code> dihapus dari daftar.");
+      return;
+    }
+    // Batal konfirmasi hapus -> kembali ke mode hapus.
+    if (data.startsWith("bug:hapus:batal:")) {
+      if (cekAdmin(env, chatIdCb) !== "ya") { await jawabAlert(env, cb.id, "⛔ Perintah ini khusus admin."); return; }
+      const parts = data.slice("bug:hapus:batal:".length).split(":");
+      await jawabCallback(env, cb.id);
+      await tampilkanModeHapusBug(env, chatIdCb, cb.message.message_id, parts[0], parts[1], 0);
+      return;
+    }
+    // Ketuk host di mode hapus -> minta konfirmasi (hash dicek dulu
+    // supaya tombol usang tidak menampilkan host yang salah).
+    if (data.startsWith("bug:hapus:host:")) {
+      if (cekAdmin(env, chatIdCb) !== "ya") { await jawabAlert(env, cb.id, "⛔ Perintah ini khusus admin."); return; }
+      const parts = data.slice("bug:hapus:host:".length).split(":");
+      const [opKey, katKey, idxRaw, hash] = parts;
+      const idx = Number(idxRaw);
+      await jawabCallback(env, cb.id);
+      const hosts = await daftarHostKategori(env, opKey, katKey);
+      const host = hosts[idx];
+      if (!host || hashHostSingkat(host) !== hash) {
+        await tampilkanModeHapusBug(env, chatIdCb, cb.message.message_id, opKey, katKey, 0, "😕 Daftar bug sudah berubah — pilih lagi ya.");
+        return;
+      }
+      await editTelegram(env, chatIdCb, cb.message.message_id,
+        "🗑️ Hapus bug <code>" + escapeHtml(host) + "</code> dari " + escapeHtml(labelOperator(opKey)) + " — " + escapeHtml(labelKategori(opKey, katKey)) + "?",
+        [
+          [{ text: "✅ Ya, Hapus", callback_data: "bug:hapus:ya:" + opKey + ":" + katKey + ":" + idx + ":" + hash }, { text: "❌ Batal", callback_data: "bug:hapus:batal:" + opKey + ":" + katKey }],
+        ]);
+      return;
+    }
+    // Pindah halaman di mode hapus.
+    if (data.startsWith("bug:hapus:hal:")) {
+      if (cekAdmin(env, chatIdCb) !== "ya") { await jawabAlert(env, cb.id, "⛔ Perintah ini khusus admin."); return; }
+      const parts = data.slice("bug:hapus:hal:".length).split(":");
+      await jawabCallback(env, cb.id);
+      await tampilkanModeHapusBug(env, chatIdCb, cb.message.message_id, parts[0], parts[1], Number(parts[2]) || 0);
+      return;
+    }
+    // Masuk mode hapus (bug:hapus:<op>:<kat>).
+    if (data.startsWith("bug:hapus:")) {
+      if (cekAdmin(env, chatIdCb) !== "ya") { await jawabAlert(env, cb.id, "⛔ Perintah ini khusus admin."); return; }
+      const parts = data.slice("bug:hapus:".length).split(":");
+      await jawabCallback(env, cb.id);
+      await tampilkanModeHapusBug(env, chatIdCb, cb.message.message_id, parts[0], parts[1], 0);
       return;
     }
     await jawabCallback(env, cb.id);
