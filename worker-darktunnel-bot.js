@@ -1544,11 +1544,43 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.10";
+const VERSI_BOT = "v2.9.11";
 
 const PESAN_START =
-  "👋 <b>Generator Config Dark Tunnel</b>\n\n" +
-  "Kirim akun kamu apa adanya — bot akan buatkan config Dark Tunnel-nya.";
+  "👋 <b>Selamat datang di Generator Config Dark Tunnel</b>\n\n" +
+  "Bot ini mengubah akun VPN kamu menjadi file config <b>.dark</b> yang siap diimpor ke aplikasi Dark Tunnel — SSH, VLESS, VMess, Trojan, dan Shadowsocks, semua bisa.\n\n" +
+  "<b>Cara pakai:</b>\n" +
+  "1️⃣ Kirim akun kamu apa adanya — link atau teks acak, bot yang merapikannya.\n" +
+  "2️⃣ Pilih template config, atau ketuk ✏️ Buat Manual untuk mengatur sendiri metodenya.\n" +
+  "3️⃣ Unduh file .dark-nya, impor ke Dark Tunnel, lalu tekan Connect.\n\n" +
+  "🔒 Akun dan config yang kamu buat tidak disimpan di bot.\n\n" +
+  "Pilih menu di bawah untuk mulai 👇";
+
+// Teks bantuan (/help) — v2.9.11: perintah bantuan sendiri, tidak lagi
+// sekadar membuka menu utama.
+const PESAN_BANTUAN =
+  "❓ <b>Bantuan — Generator Config Dark Tunnel</b>\n\n" +
+  "<b>Cara pakai:</b>\n" +
+  "1️⃣ Kirim akun kamu — SSH (<code>host:port@user:pass</code>) atau link VLESS / VMess / Trojan / Shadowsocks. Format acak pun boleh.\n" +
+  "2️⃣ Pilih template config, atau ketuk ✏️ Buat Manual untuk mengatur sendiri metodenya (bug / SNI / payload / proxy).\n" +
+  "3️⃣ Unduh file .dark-nya, impor ke aplikasi Dark Tunnel, lalu tekan Connect.\n\n" +
+  "<b>Perintah:</b>\n" +
+  "/start — buka menu utama\n" +
+  "/bug — daftar bug host per operator\n" +
+  "/cek — cek domain\n" +
+  "/config — template config\n" +
+  "/update — info terbaru\n" +
+  "/status — status bot\n\n" +
+  "🔒 Akun dan config yang kamu buat tidak disimpan di bot.";
+
+// Deskripsi bot (v2.9.11, dipasang lewat /setdeskripsi) — tampil di
+// profil bot dan di hasil pencarian Telegram.
+const DESKRIPSI_SINGKAT_BOT =
+  "Ubah akun SSH / VLESS / VMess / Trojan jadi file config Dark Tunnel (.dark) siap impor.";
+const DESKRIPSI_BOT =
+  "Generator Config Dark Tunnel — ubah akun VPN kamu (SSH, VLESS, VMess, Trojan, Shadowsocks) menjadi file .dark siap impor ke aplikasi Dark Tunnel.\n\n" +
+  "Cara pakai: kirim akun apa adanya, pilih template atau buat manual, unduh file .dark-nya lalu tekan Connect.\n\n" +
+  "Akun & config yang dibuat tidak disimpan di bot.";
 
 const PESAN_GRUP =
   "👋 <b>Generator Config Dark Tunnel</b>\n\n" +
@@ -4596,12 +4628,19 @@ async function handleTelegram(env, update) {
     pendingManualAkun.delete(chatId);
   }
 
-  if (teks === "/start" || teks === "/menu" || teks === "/help" || teks === "▶️ Start" ||
+  if (teks === "/start" || teks === "/menu" || teks === "▶️ Start" ||
       teks.startsWith("/start ") || teks.startsWith("/start@") ||
       teks.startsWith("/menu ") || teks.startsWith("/menu@")) {
     pendingCek.delete(chatId);
     pendingConfig.delete(chatId);
     await tampilkanMenuUtama(env, chatId);
+    return;
+  }
+  // /help (v2.9.11): teks bantuan sendiri, bukan menu utama.
+  if (teks === "/help" || teks.startsWith("/help ") || teks.startsWith("/help@")) {
+    pendingCek.delete(chatId);
+    pendingConfig.delete(chatId);
+    await sendTelegram(env, chatId, PESAN_BANTUAN, TOMBOL_KEMBALI);
     return;
   }
   if (teks === "/bug" || teks.startsWith("/bug ") || teks.startsWith("/bug@")) {
@@ -4642,6 +4681,16 @@ async function handleTelegram(env, update) {
     if (cekAdmin(env, chatId) !== "ya") { await sendTelegram(env, chatId, "⛔ Perintah ini khusus admin."); return; }
     const r = await telegramApi(env, "setMyCommands", { commands: [{ command: "start", description: "Buka menu bot" }] });
     await sendTelegram(env, chatId, r && r.ok ? "✅ Tombol menu sudah dipasang — ketuk ☰ di pojok kiri bawah, isinya cuma <b>start</b> untuk membuka menu bot." : "😕 Gagal memasang tombol menu, coba lagi nanti ya.");
+    return;
+  }
+  // /setdeskripsi (admin, v2.9.11): pasang deskripsi singkat + deskripsi
+  // bot lewat API (tampil di profil bot & hasil pencarian Telegram).
+  // Dipakai sekali; kalau teks deskripsi diubah di kode, kirim lagi.
+  if (teks === "/setdeskripsi" || teks.startsWith("/setdeskripsi ") || teks.startsWith("/setdeskripsi@")) {
+    if (cekAdmin(env, chatId) !== "ya") { await sendTelegram(env, chatId, "⛔ Perintah ini khusus admin."); return; }
+    const r1 = await telegramApi(env, "setMyShortDescription", { short_description: DESKRIPSI_SINGKAT_BOT });
+    const r2 = await telegramApi(env, "setMyDescription", { description: DESKRIPSI_BOT });
+    await sendTelegram(env, chatId, r1 && r1.ok && r2 && r2.ok ? "✅ Deskripsi bot sudah dipasang — cek di profil @autosetdark_bot." : "😕 Gagal memasang deskripsi, coba lagi nanti ya.");
     return;
   }
   if (teks.startsWith("/tambahbug")) {
