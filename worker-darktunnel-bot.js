@@ -892,7 +892,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.7.6";
+const VERSI_BOT = "v2.7.7";
 
 const PESAN_START =
   "👋 <b>Generator Config Dark Tunnel</b>\n\n" +
@@ -1538,10 +1538,96 @@ function ipsDariDoh(j) {
   return j.Answer.filter((a) => a && a.type === 1 && typeof a.data === "string").map((a) => a.data);
 }
 
+// Ambil hostname dari jawaban PTR DoH (atau "" bila tidak ada).
+function hostnameDariPtr(j) {
+  const nama = j && Array.isArray(j.Answer) && j.Answer.find((a) => a && a.type === 12 && typeof a.data === "string");
+  return nama ? String(nama.data).replace(/\.+$/, "") : "";
+}
+
+// Ringkasan header untuk deteksi CDN: nama header (lowercase), via, server.
+function sinyalHeader(h) {
+  const nama = [];
+  try { h.forEach((v, k) => { nama.push(String(k).toLowerCase()); }); } catch { /* abaikan */ }
+  return {
+    nama,
+    via: (h.get("via") || "").toLowerCase(),
+    server: (h.get("server") || "").toLowerCase(),
+    ada: (awalan) => nama.some((n) => n.startsWith(awalan)),
+  };
+}
+
+// Daftar provider CDN: pola hostname edge (hasil PTR) + sinyal header.
+// `server` = label server yang ditampilkan bila provider ini terdeteksi.
+// CATATAN (21 Nov 2026): fetch dari dalam Cloudflare Worker selalu
+// ditempeli header cf-ray + server: cloudflare oleh edge Cloudflare
+// pada SEMUA respons subrequest — cf-ray BUKAN bukti Cloudflare.
+// Karena itu urutan deteksi: (1) hostname edge, (2) header khas
+// provider (CloudFront WAJIB sebelum Cloudflare), (3) cf-ray /
+// cf-cache-status → Cloudflare sebagai jalan terakhir saja.
+export const DAFTAR_CDN = [
+  { nama: "CloudFront", server: "CloudFront",
+    host: ["cloudfront.net"],
+    header: (h, s) => !!(h.get("x-amz-cf-id") || h.get("x-amz-cf-pop") || s.via.includes("cloudfront")) },
+  { nama: "Fastly", server: "Fastly",
+    host: ["fastly.net", "fastlylb.net"],
+    header: (h, s) => !!(h.get("x-fastly-request-id") || s.ada("fastly-") || s.via.includes("fastly") || (h.get("x-served-by") || "").toLowerCase().includes("cache-")) },
+  { nama: "Akamai", server: "AkamaiGHost",
+    host: ["akamai.net", "akamaiedge.net", "akamaized.net", "edgesuite.net"],
+    header: (h, s) => !!(s.ada("x-akamai-") || s.server === "akamaighost" || s.server.includes("akamai")) },
+  { nama: "Alibaba", server: "Tengine",
+    host: ["alicdn.com", "aliyuncs.com", "alibaba"],
+    header: (h, s, host, pola) => !!(s.ada("x-ali-") || h.get("eagleeye-traceid") || (s.server === "tengine" && host && pola.some((p) => host.includes(p)))) },
+  { nama: "Google", server: "gws",
+    host: ["1e100.net", "googleusercontent.com"],
+    header: (h, s) => !!(s.server === "gws" || s.server === "gse" || s.ada("x-goog-") || s.via.includes("google")) },
+  { nama: "Microsoft Azure", server: "Microsoft-IIS",
+    host: ["azureedge.net", "azurefd.net", "azurewebsites.net"],
+    header: (h, s, host, pola) => !!(s.ada("x-azure-") || (s.server.includes("microsoft-iis") && host && pola.some((p) => host.includes(p)))) },
+  { nama: "Tencent", server: "Tencent",
+    host: ["tencentcdn.cn", "qcloud.com", "tencent-cloud"],
+    header: (h, s) => s.ada("x-tencent-") },
+  { nama: "Bunny", server: "BunnyCDN",
+    host: ["b-cdn.net"],
+    header: (h, s) => !!(s.server.includes("bunnycdn") || h.get("cdn-bunny")) },
+  { nama: "Cloudinary", server: "Cloudinary",
+    host: ["cloudinary.com"],
+    header: (h, s) => s.ada("x-cld-") },
+  { nama: "Cloudflare", server: "cloudflare",
+    host: ["cloudflare.com"],
+    header: (h) => !!h.get("cf-cache-status") },
+];
+
+// Deteksi provider CDN dari header respons + hostname edge (PTR).
+// Return { cdn, server } — keduanya "" bila tidak ada sinyal yang cocok.
+// Urutan: (1) hostname edge; (2) header khas provider; (3) cf-ray /
+// cf-cache-status → Cloudflare (jalan terakhir; dari Worker cf-ray
+// selalu ada, jadi ini hanya benar bila tidak ada provider lain yang
+// cocok — situs origin langsung tanpa CDN bisa salah terlabel
+// Cloudflare, itu keterbatasan yang diterima).
+export function deteksiCDN(headers, edgeHostname) {
+  const kosong = { cdn: "", server: "" };
+  if (!headers || typeof headers.get !== "function") return kosong;
+  const host = String(edgeHostname || "").toLowerCase();
+  if (host) {
+    for (const p of DAFTAR_CDN) {
+      if (p.host.some((pola) => host.includes(pola))) return { cdn: p.nama, server: p.server };
+    }
+  }
+  const s = sinyalHeader(headers);
+  for (const p of DAFTAR_CDN) {
+    let kena = false;
+    try { kena = !!p.header(headers, s, host, p.host); } catch { kena = false; }
+    if (kena) return { cdn: p.nama, server: p.server };
+  }
+  if (headers.get("cf-ray") || headers.get("cf-cache-status")) return { cdn: "Cloudflare", server: "cloudflare" };
+  return kosong;
+}
+
 // Cek satu domain: HEAD dulu, fallback GET, timeout 8 detik per upaya.
-// Ditambah: resolve IP (A), reverse DNS bila input IP (PTR), dan cek
-// subdomain umum. Return {domain, ok, status, ms, cdn, server, ips,
-// hostname, subdomains} — subdomains = null bila DNS gagal total.
+// Ditambah: resolve IP (A), reverse DNS (PTR) untuk input IP maupun IP
+// pertama hasil resolve domain, dan cek subdomain umum. Return
+// {domain, ok, status, ms, cdn, server, ips, hostname, subdomains} —
+// subdomains = null bila DNS gagal total.
 export async function cekDomain(domain) {
   const t0 = Date.now();
   const ambil = (url, method) =>
@@ -1559,15 +1645,7 @@ export async function cekDomain(domain) {
   }
   const ms = Date.now() - t0;
   const hasil = { domain, ok: !!res, status: res ? res.status : 0, ms, cdn: "", server: "", ips: [], hostname: "", subdomains: null };
-  if (res) {
-    const h = res.headers;
-    const cfRay = h.get("cf-ray");
-    const amzCf = h.get("x-amz-cf-id") || h.get("x-amz-cf-pop");
-    const via = (h.get("via") || "").toLowerCase();
-    if (cfRay) hasil.cdn = "Cloudflare";
-    else if (amzCf || via.includes("cloudfront")) hasil.cdn = "CloudFront";
-    hasil.server = h.get("server") || "";
-  }
+  const headers = res ? res.headers : null;
   // DNS: resolve IP / reverse / subdomain — gagal dengan anggun
   // (bagian yang gagal dihilangkan saja, bukan error mentah).
   let dnsOk = false;
@@ -1577,20 +1655,44 @@ export async function cekDomain(domain) {
       const ptr = await dohQuery(parts.reverse().join(".") + ".in-addr.arpa", "PTR");
       if (ptr) {
         dnsOk = true;
-        const nama = (ptr.Answer || []).find((a) => a && a.type === 12 && typeof a.data === "string");
-        if (nama) hasil.hostname = String(nama.data).replace(/\.+$/, "");
+        hasil.hostname = hostnameDariPtr(ptr);
       }
     }
   } else {
     const a = await dohQuery(domain, "A");
     if (a) { dnsOk = true; hasil.ips = ipsDariDoh(a).slice(0, 3); }
+    // PTR IP pertama (jalan bareng cek subdomain) → hostname edge,
+    // bukti provider CDN-nya (mis. *.r.cloudfront.net).
+    let ptrP = null;
+    if (hasil.ips.length) {
+      const ip0 = hasil.ips[0].split(".");
+      if (ip0.length === 4) ptrP = dohQuery(ip0.reverse().join(".") + ".in-addr.arpa", "PTR");
+    }
     const cekSub = await Promise.all(SUBDOMAIN_CEK.map(async (sub) => {
       const j = await dohQuery(sub + "." + domain, "A");
       if (j) dnsOk = true;
       const ips = ipsDariDoh(j);
       return ips.length ? { nama: sub + "." + domain, ip: ips[0] } : null;
     }));
+    if (ptrP) hasil.hostname = hostnameDariPtr(await ptrP);
     if (dnsOk) hasil.subdomains = cekSub.filter(Boolean);
+  }
+  // CDN + Server — ditentukan SETELAH hostname diketahui, karena
+  // hostname edge adalah sinyal paling bisa dipercaya. Header cf-ray
+  // dan server: cloudflare TIDAK dipakai sebagai bukti utama: fetch
+  // dari dalam Worker selalu ditempeli keduanya oleh edge Cloudflare
+  // pada semua respons (lihat deteksiCDN).
+  if (headers) {
+    const det = deteksiCDN(headers, hasil.hostname);
+    hasil.cdn = det.cdn;
+    if (det.cdn) {
+      hasil.server = det.server;
+    } else {
+      const sv = (headers.get("server") || "").trim();
+      // "cloudflare" di sini kemungkinan besar tempelan Worker, bukan
+      // server asal — jangan tampilkan yang menyesatkan.
+      hasil.server = sv.toLowerCase() === "cloudflare" ? "" : sv;
+    }
   }
   return hasil;
 }
