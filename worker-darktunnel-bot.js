@@ -966,13 +966,15 @@ function pastikanInject(sub, sniAwal, type) {
   return inj;
 }
 
-// Payload template: terisi -> isi placeholder; kosong -> HAPUS field
-// (tanpa payload — aturan v2.8.2 `""` eksplisit DICABUT atas permintaan
-// Asep 21 Nov 2026: payload yang dilewati jangan disertakan sama sekali,
-// supaya aplikasi tidak menampilkan kolom payload kosong).
+// Payload template: terisi -> isi placeholder; kosong -> `""`
+// (aturan v2.8.2 DIKEMBALIKAN di v2.9.7: omit di v2.9.5 ternyata membuat
+// aplikasi isi ulang payload default SSH-nya sendiri — baris payload
+// tetap tampil berisi Service: SSH di config VLESS. `""` = baris
+// kosong; kolom tidak bisa hilang total selama inject aktif, temuan
+// decompile: baris payload selalu digambar tanpa kondisi `if`.)
 function isiPayloadTemplate(inj, payloadTpl, host, sni) {
   if (payloadTpl) inj.payload = isiPlaceholderPayload(payloadTpl, host, sni);
-  else delete inj.payload;
+  else inj.payload = "";
 }
 
 // Terapkan template SSH ke satu config SSH hasil parsePesan.
@@ -1023,7 +1025,7 @@ async function terapkanTemplateSshMetode(env, cfg, template, bugAkun) {
       inj.mode = "DIRECT";
       if (t.payload) inj.payload = isiPlaceholderPayload(t.payload, ssh.host, "");
       else if (t.enhanced) inj.payload = isiPlaceholderPayload(PAYLOAD_METODE.enhanced.template, ssh.host, "");
-      else delete inj.payload;
+      else inj.payload = "";
       delete inj.proxyHost;
       delete inj.proxyPort;
     }
@@ -1043,7 +1045,7 @@ async function terapkanTemplateSshMetode(env, cfg, template, bugAkun) {
     }
     if (t.payload) inj.payload = isiPlaceholderPayload(t.payload, ssh.host, "");
     else if (t.enhanced) inj.payload = isiPlaceholderPayload(PAYLOAD_METODE.enhanced.template, ssh.host, "");
-    else delete inj.payload;
+    else inj.payload = "";
     return cfg;
   }
 
@@ -1059,7 +1061,7 @@ async function terapkanTemplateSshMetode(env, cfg, template, bugAkun) {
     if (sniEfektif) inj.serverNameIndication = sniEfektif;
     if (t.payload) inj.payload = isiPlaceholderPayload(t.payload, ssh.host, sniEfektif);
     else if (t.enhanced) inj.payload = isiPlaceholderPayload(PAYLOAD_METODE.enhanced.template, ssh.host, sniEfektif);
-    else delete inj.payload;
+    else inj.payload = "";
     return cfg;
   }
 
@@ -1074,7 +1076,7 @@ async function terapkanTemplateSshMetode(env, cfg, template, bugAkun) {
       inj.proxyHost = t.proxyHost;
       if (t.proxyPort) inj.proxyPort = t.proxyPort;
     }
-    delete inj.payload; // tanpa payload (v2.9.5 koreksi) — hapus payload auto dari pastikanInject
+    inj.payload = ""; // tanpa payload (v2.9.7) — kosong, bukan default SSH aplikasi
     return cfg;
   }
 
@@ -1111,11 +1113,10 @@ async function terapkanTemplateSshGenerik(env, cfg, template, bugAkun) {
     } else if (t.enhanced) {
       inj.payload = isiPlaceholderPayload(PAYLOAD_METODE.enhanced.template, ssh.host, sniEfektif);
     } else {
-      // Template tanpa payload & tanpa enhanced: tanpa payload — hapus
-      // payload auto dari parsePesan / injectConfigAktif. Aturan v2.8.2
-      // `""` eksplisit DICABUT (Asep 21 Nov 2026): payload yang dilewati
-      // jangan disertakan sama sekali.
-      delete inj.payload;
+      // Template tanpa payload & tanpa enhanced: payload kosong `""`
+      // (v2.9.7, aturan v2.8.2 dikembalikan: omit di v2.9.5 membuat
+      // aplikasi isi ulang payload default SSH-nya sendiri).
+      inj.payload = "";
     }
     if (t.proxyHost) {
       inj.proxyHost = t.proxyHost;
@@ -1264,12 +1265,12 @@ async function terapkanTemplateXrayMetode(env, cfg, template, bugAkun) {
     if (t.proxyHost) {
       const adaInj = !!sub.injectConfig;
       const inj = pastikanInject(sub, t.sni || "", cfg.type);
-      if (!adaInj) delete inj.payload; // hapus payload auto (v2.9.5 koreksi)
+      if (!adaInj) inj.payload = ""; // payload kosong (v2.9.7) — bukan default SSH aplikasi
       inj.proxyHost = t.proxyHost;
       if (t.proxyPort) inj.proxyPort = t.proxyPort;
       if (t.sni) inj.mode = "PROXY_SNI";
       else { inj.mode = "PROXY"; inj.serverNameIndication = ""; }
-      if (m === "XRAY_PROXY") delete inj.payload; // metode ini tanpa payload
+      if (m === "XRAY_PROXY") inj.payload = ""; // metode ini tanpa payload (v2.9.7) — kosong, bukan default SSH
     }
     return out;
   }
@@ -1339,12 +1340,11 @@ async function terapkanTemplateXrayGenerik(env, cfg, template, bugAkun) {
   }
   if (inj) {
     if (sniEfektif) inj.serverNameIndication = sniEfektif;
-    // Template dipakai: payload kosong = tanpa payload — hapus payload
-    // auto dari parsePesan / injectConfigAktif. Aturan v2.8.2 `""`
-    // eksplisit DICABUT (Asep 21 Nov 2026): payload yang dilewati jangan
-    // disertakan sama sekali.
+    // Template dipakai: payload kosong = `""` (v2.9.7, aturan v2.8.2
+    // dikembalikan: omit di v2.9.5 membuat aplikasi isi ulang payload
+    // default SSH-nya sendiri).
     if (t.payload) inj.payload = isiPlaceholderPayload(t.payload, v2.host, sniEfektif);
-    else delete inj.payload;
+    else inj.payload = "";
     if (slowdns) {
       inj.mode = "DNSTT";
       inj.dnsttUdpDnsHost = t.udpDnsHost || "1.1.1.1";
@@ -1465,7 +1465,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.6";
+const VERSI_BOT = "v2.9.7";
 
 const PESAN_START =
   "👋 <b>Generator Config Dark Tunnel</b>\n\n" +
