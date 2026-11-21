@@ -857,6 +857,13 @@ function isiPlaceholderPayload(tpl, host, bug) {
     .replaceAll("[bug]", bug || "");
 }
 
+// v2.9.1: placeholder "[host]" untuk SNI template — SNI ngikutin host
+// server akun pengguna saat generate. Selain "[host]" persis, nilai
+// dikembalikan apa adanya (null tetap null).
+export function isiPlaceholderHost(nilai, host) {
+  return String(nilai).toLowerCase() === "[host]" ? (host || "") : nilai;
+}
+
 // Cari info bug untuk SNI efektif + terapkan aturan WC (v2.6) bila
 // bug ber-tag wc. Return SNI efektif (WC host atau bug asli).
 async function sniEfektifTemplate(env, bug, serverHost) {
@@ -889,8 +896,14 @@ function isiPayloadTemplate(inj, payloadTpl, host, sni) {
 // Template tanpa `metode` -> jalur generik v2.8.2 (kompatibilitas
 // mundur); template bermetode -> cabang per metode (v2.9.0).
 async function terapkanTemplateSsh(env, cfg, template, bugAkun) {
-  if (template.metode) return terapkanTemplateSshMetode(env, cfg, template, bugAkun);
-  return terapkanTemplateSshGenerik(env, cfg, template, bugAkun);
+  // v2.9.1: SNI template "[host]" -> host server akun pengguna.
+  // Resolusi di sini, sebelum cabang metode/generik memakai t.sni;
+  // salinan dangkal saja — objek template dari KV jangan dimutasi.
+  const hostAkun = cfg.sshTunnelConfig?.sshConfig?.host || "";
+  const sni = isiPlaceholderHost(template.ssh?.sni, hostAkun);
+  const tpl = sni !== template.ssh?.sni ? { ...template, ssh: { ...(template.ssh || {}), sni } } : template;
+  if (tpl.metode) return terapkanTemplateSshMetode(env, cfg, tpl, bugAkun);
+  return terapkanTemplateSshGenerik(env, cfg, tpl, bugAkun);
 }
 
 // Terapkan template SSH bermetode (v2.9.0). Mengubah cfg di tempat.
@@ -1050,8 +1063,19 @@ async function terapkanTemplateSshGenerik(env, cfg, template, bugAkun) {
 // Template tanpa `metode` -> jalur generik v2.8.2 (kompatibilitas
 // mundur); template bermetode -> cabang per metode (v2.9.0).
 async function terapkanTemplateXray(env, cfg, template, bugAkun) {
-  if (template.metode) return terapkanTemplateXrayMetode(env, cfg, template, bugAkun);
-  return terapkanTemplateXrayGenerik(env, cfg, template, bugAkun);
+  // v2.9.1: SNI / Header Host template "[host]" -> host server akun
+  // pengguna (xray_domain menulis keduanya). Resolusi di sini, sebelum
+  // cabang metode/generik memakai t.sni / t.headerHost; salinan dangkal
+  // saja — objek template dari KV jangan dimutasi.
+  const subKey = ["vmessTunnelConfig", "vlessTunnelConfig", "trojanTunnelConfig", "shadowsocksTunnelConfig"].find((k) => cfg[k]);
+  const hostAkun = subKey ? cfg[subKey].v2rayConfig?.host || "" : "";
+  const sni = isiPlaceholderHost(template.xray?.sni, hostAkun);
+  const headerHost = isiPlaceholderHost(template.xray?.headerHost, hostAkun);
+  const tpl = (sni !== template.xray?.sni || headerHost !== template.xray?.headerHost)
+    ? { ...template, xray: { ...(template.xray || {}), sni, headerHost } }
+    : template;
+  if (tpl.metode) return terapkanTemplateXrayMetode(env, cfg, tpl, bugAkun);
+  return terapkanTemplateXrayGenerik(env, cfg, tpl, bugAkun);
 }
 
 // Terapkan template Xray bermetode (v2.9.0). Mengubah cfg di tempat.
@@ -1346,7 +1370,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.0";
+const VERSI_BOT = "v2.9.1";
 
 const PESAN_START =
   "👋 <b>Generator Config Dark Tunnel</b>\n\n" +
@@ -1705,6 +1729,13 @@ function validHost(h) {
   if (!h) return false;
   if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(h)) return true;
   return /^[A-Za-z0-9][A-Za-z0-9.\-]*\.[A-Za-z]{2,}$/.test(h) && !h.toLowerCase().endsWith(".dark.backup");
+}
+
+// v2.9.1: tahap SNI/domain wizard menerima host biasa ATAU placeholder
+// "[host]" (SNI ngikutin host akun pengguna saat generate).
+function validSniTemplate(v) {
+  const s = String(v || "").toLowerCase();
+  return s === "[host]" || validHost(s);
 }
 
 // Cari akun SSH di teks. Return {akun|null, kurang:[...], adaSsh:boolean}.
@@ -2882,7 +2913,7 @@ async function kirimLangkahTemplate(env, chatId, st) {
   } else if (t === "ssh_bug") {
     await sendTelegram(env, chatId, "🐛 <b>Bug / Host SSH</b>\n\nKirim bug format <code>host:port</code> (mis. <code>bug.contoh.com:443</code>) atau host saja — atau ketuk 📋 Pilih dari Daftar Bug.\n\nHost & port bug ini dipakai sebagai host SSH (username/password tetap dari akun pengguna).", batal);
   } else if (t === "ssh_sni") {
-    await sendTelegram(env, chatId, "🎯 <b>SNI</b>\n\nKetik SNI manual (host, contoh: <code>edu.ruangguru.com</code>) — atau ketuk 📋 Pilih dari Daftar Bug.\n\nKosong = pakai bug/SNI dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
+    await sendTelegram(env, chatId, "🎯 <b>SNI</b>\n\nKetik SNI manual (host, contoh: <code>edu.ruangguru.com</code>) — atau ketuk 📋 Pilih dari Daftar Bug.\n\nKetik <code>[host]</code> supaya SNI ngikutin host akun pengguna.\n\nKosong = pakai bug/SNI dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "ssh_enhanced") {
     await sendTelegram(env, chatId, "⚡ <b>Enhanced</b>\n\nAktifkan payload Enhanced?", keyboardTemplateYaTidak("tw:enhanced"));
   } else if (t === "ssh_slowdns") {
@@ -2899,7 +2930,7 @@ async function kirimLangkahTemplate(env, chatId, st) {
     const judul = (st.metode === "WS" || st.metode === "WC") ? "🎯 <b>Target / Bug</b>" : "🎯 <b>Target Server</b>";
     await sendTelegram(env, chatId, judul + "\n\nKirim target server format <code>host:port</code> (boleh dari daftar bug — atau ketuk 📋 Pilih dari Daftar Bug).\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_domain") {
-    await sendTelegram(env, chatId, "🌐 <b>Domain</b>\n\nKetik domain (host, contoh: <code>sg1.contoh.com</code>) — atau ketuk 📋 Pilih dari Daftar Bug.\n\nDomain ini dipakai sebagai SNI/TLS dan Header Host.\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
+    await sendTelegram(env, chatId, "🌐 <b>Domain</b>\n\nKetik domain (host, contoh: <code>sg1.contoh.com</code>) — atau ketuk 📋 Pilih dari Daftar Bug.\n\nDomain ini dipakai sebagai SNI/TLS dan Header Host.\n\nKetik <code>[host]</code> supaya SNI dan Header Host ngikutin host akun pengguna.\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_server") {
     await sendTelegram(env, chatId, "🎯 <b>Server / Domain</b>\n\nKirim server format <code>host:port</code> (mis. <code>sg1.contoh.com:443</code>) — atau ketuk 📋 Pilih dari Daftar Bug.\n\nDipakai sebagai host server + Header Host.\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_bug") {
@@ -2913,7 +2944,7 @@ async function kirimLangkahTemplate(env, chatId, st) {
   } else if (t === "xray_proxyport") {
     await sendTelegram(env, chatId, "🔀 <b>Port Proxy</b>\n\nPort proxy untuk <code>" + escapeHtml(st.xray?.proxyHost || "") + "</code>:\n\nKirim angka 1-65535 (mis. <code>80</code>, <code>443</code>, atau <code>8080</code>).\n\nKosong = default <code>8080</code>. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_sni") {
-    await sendTelegram(env, chatId, "🎯 <b>Server Name / SNI</b>\n\nKetik SNI manual (host, contoh: <code>sg1.contoh.com</code>) — atau ketuk 📋 Pilih dari Daftar Bug.\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
+    await sendTelegram(env, chatId, "🎯 <b>Server Name / SNI</b>\n\nKetik SNI manual (host, contoh: <code>sg1.contoh.com</code>) — atau ketuk 📋 Pilih dari Daftar Bug.\n\nKetik <code>[host]</code> supaya SNI ngikutin host akun pengguna.\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_header") {
     await sendTelegram(env, chatId, "🎯 <b>Header Host</b>\n\nKirim header host (host, boleh dari daftar bug — atau ketuk 📋 Pilih dari Daftar Bug).\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_payload") {
@@ -3016,7 +3047,7 @@ async function handleTemplateTeks(env, chatId, st, teks) {
   }
   if (t === "ssh_sni") {
     const v = kosongkan(teks);
-    if (v !== null && !validHost(v.toLowerCase())) return salah("😕 SNI tidak valid. Kirim host yang benar, mis. <code>edu.ruangguru.com</code> —  atau ketuk ⏭️ Lewati untuk kosong.");
+    if (v !== null && !validSniTemplate(v)) return salah("😕 SNI tidak valid. Kirim host yang benar, mis. <code>edu.ruangguru.com</code>, atau ketik <code>[host]</code> supaya SNI ngikutin host akun —  atau ketuk ⏭️ Lewati untuk kosong.");
     st.ssh.sni = v === null ? null : v.toLowerCase();
     st.tahap = tahapBerikutTemplate(st, t); st.ts = Date.now();
     await kirimLangkahTemplate(env, chatId, st);
@@ -3067,7 +3098,7 @@ async function handleTemplateTeks(env, chatId, st, teks) {
   }
   if (t === "xray_domain") {
     const v = kosongkan(teks);
-    if (v !== null && !validHost(v.toLowerCase())) return salah("😕 Domain tidak valid. Kirim host yang benar, mis. <code>sg1.contoh.com</code> —  atau ketuk ⏭️ Lewati untuk kosong.");
+    if (v !== null && !validSniTemplate(v)) return salah("😕 Domain tidak valid. Kirim host yang benar, mis. <code>sg1.contoh.com</code>, atau ketik <code>[host]</code> supaya SNI dan Header Host ngikutin host akun —  atau ketuk ⏭️ Lewati untuk kosong.");
     st.xray.sni = v === null ? null : v.toLowerCase();
     st.xray.headerHost = st.xray.sni;
     st.tahap = tahapBerikutTemplate(st, t); st.ts = Date.now();
@@ -3115,7 +3146,7 @@ async function handleTemplateTeks(env, chatId, st, teks) {
   }
   if (t === "xray_sni") {
     const v = kosongkan(teks);
-    if (v !== null && !validHost(v.toLowerCase())) return salah("😕 SNI tidak valid. Kirim host yang benar, mis. <code>sg1.contoh.com</code> —  atau ketuk ⏭️ Lewati untuk kosong.");
+    if (v !== null && !validSniTemplate(v)) return salah("😕 SNI tidak valid. Kirim host yang benar, mis. <code>sg1.contoh.com</code>, atau ketik <code>[host]</code> supaya SNI ngikutin host akun —  atau ketuk ⏭️ Lewati untuk kosong.");
     st.xray.sni = v === null ? null : v.toLowerCase();
     st.tahap = tahapBerikutTemplate(st, t); st.ts = Date.now();
     await kirimLangkahTemplate(env, chatId, st);
