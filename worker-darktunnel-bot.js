@@ -702,38 +702,67 @@ async function catatanBugUntuk(env, hasil) {
 
 // Ringkasan terformat dari satu TunnelConfig untuk caption hasil generate
 // (pola @XHMTunBot — pengguna bisa memverifikasi isi config sebelum impor).
-// TIDAK menampilkan password, UUID, atau kredensial lain.
+// (v2.9.3) Tampilkan ISI config selengkapnya dalam blok <pre> format
+// "Label   : nilai" (contoh Asep 21 Nov 2026) — Xray: Domain, Port,
+// Key/UUID, Network, Path ws, Host, SNI, TLS; SSH: Host, Port, Username,
+// Password, SNI/Bug, Inject, Proxy, Payload, SlowDNS. Kredensial
+// (Key/UUID, Password) DITAMPILKAN atas permintaan Asep: itu data akun
+// pengirim sendiri yang dikembalikan ke DM-nya sendiri, dan file .dark
+// yang dikirim bersamaan sudah berisi kredensial yang sama.
 export function ringkasanConfig(c) {
   if (!c || typeof c !== "object") return "";
   const sub = c.sshTunnelConfig || c.sshDnsttTunnelConfig || c.vmessTunnelConfig || c.vlessTunnelConfig || c.trojanTunnelConfig || c.shadowsocksTunnelConfig;
   const ssh = sub?.sshConfig;
   const v2 = sub?.v2rayConfig;
   const dnstt = sub?.dnsttConfig;
-  const host = ssh?.host || v2?.host || "";
-  const port = ssh?.port || v2?.port || "";
   const inj = sub?.injectConfig;
-  const baris = ["📋 <b>Rincian Config</b>"];
-  baris.push("• Protokol: <b>" + escapeHtml(c.type || "-") + "</b>");
-  if (host) baris.push("• Server: <code>" + escapeHtml(host) + "</code>" + (port ? ":<code>" + escapeHtml(String(port)) + "</code>" : ""));
-  if (ssh?.username) baris.push("• Username: <code>" + escapeHtml(ssh.username) + "</code>");
-  const sni = inj?.serverNameIndication || v2?.serverNameIndication || "";
+  const baris = [];
+  const tambah = (label, nilai) => {
+    if (nilai === undefined || nilai === null || nilai === "") return;
+    baris.push(String(label).padEnd(8, " ") + " : " + String(nilai));
+  };
+  tambah("Protokol", c.type || "");
+  if (ssh) {
+    tambah("Host", ssh.host);
+    tambah("Port", ssh.port);
+    tambah("Username", ssh.username);
+    tambah("Password", ssh.password);
+  }
+  if (v2) {
+    tambah("Domain", v2.host);
+    tambah("Port", v2.port);
+    tambah("Key/UUID", v2.uuid);
+    const trans = v2.transportNetwork ? String(v2.transportNetwork) : "";
+    const jaringan = trans === "Websocket" ? "ws" : trans === "gRPC" ? "grpc" : trans === "TCP" ? "tcp" : trans.toLowerCase();
+    tambah("Network", jaringan);
+    tambah("Path ws", v2.wsPath);
+    tambah("Service", v2.grpcServiceName);
+    tambah("Host", v2.wsHeaderHost);
+    tambah("SNI", v2.serverNameIndication);
+    if (v2.tls === true) tambah("TLS", "Aktif");
+    else if (v2.tls === false) tambah("TLS", "Mati");
+  }
   // Mode WC (v2.6): SNI inject = bug + "." + host server. Terdeteksi
   // bila SNI inject diakhiri "." + host server config ini.
-  const adalahWc = !!(inj && inj.serverNameIndication && host && inj.serverNameIndication.endsWith("." + host));
-  if (sni) baris.push("• SNI/Bug: <code>" + escapeHtml(sni) + "</code>" + (adalahWc ? " (WC)" : ""));
-  baris.push("• Inject: " + (inj ? "✅ ON (" + escapeHtml(inj.mode || "DIRECT_SNI") + ")" : "❌ OFF"));
-  if (adalahWc) baris.push("• Mode: WC (wildcard)");
+  const sniInject = inj?.serverNameIndication || "";
+  const hostServer = ssh?.host || v2?.host || "";
+  const adalahWc = !!(inj && sniInject && hostServer && sniInject.endsWith("." + hostServer));
+  tambah("SNI/Bug", sniInject ? sniInject + (adalahWc ? " (WC)" : "") : "");
+  if (inj) {
+    tambah("Inject", "ON (" + (inj.mode || "DIRECT_SNI") + ")");
+    if (inj.proxyHost) tambah("Proxy", inj.proxyHost + (inj.proxyPort ? ":" + inj.proxyPort : ""));
+    if (inj.payload !== undefined) tambah("Payload", inj.payload === "" ? "Tidak ada" : (inj.payloadEnhanced ? "Ada (Enhanced)" : "Ada"));
+    if (adalahWc) tambah("Mode", "WC (wildcard)");
+  } else {
+    tambah("Inject", "OFF");
+  }
   // SlowDNS (v2.7): tipe SSH_DNSTT atau inject mode DNSTT.
   if (dnstt || inj?.mode === "DNSTT") {
     const ns = dnstt?.serverName || inj?.dnsttServerName || "";
-    baris.push("• SlowDNS: ✅ Ya" + (ns ? " (Name Server: <code>" + escapeHtml(ns) + "</code>)" : ""));
+    tambah("SlowDNS", "Ya" + (ns ? " (Name Server: " + ns + ")" : ""));
   }
-  if (v2) {
-    const trans = v2.transportNetwork ? String(v2.transportNetwork) : "";
-    const tls = v2.tls === true ? "Aktif" : v2.tls === false ? "Mati" : "";
-    if (trans || tls) baris.push("• Transport: " + escapeHtml(trans || "-") + (tls ? " · TLS: " + tls : ""));
-  }
-  return baris.join("\n");
+  if (!baris.length) return "";
+  return "📋 <b>Rincian Config</b>\n<pre>" + baris.map(escapeHtml).join("\n") + "</pre>";
 }
 
 // ================= TEMPLATE CONFIG (v2.7) =================
@@ -1370,7 +1399,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.2";
+const VERSI_BOT = "v2.9.3";
 
 const PESAN_START =
   "👋 <b>Generator Config Dark Tunnel</b>\n\n" +
