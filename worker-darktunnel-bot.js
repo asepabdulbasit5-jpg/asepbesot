@@ -1399,7 +1399,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.3";
+const VERSI_BOT = "v2.9.4";
 
 const PESAN_START =
   "👋 <b>Generator Config Dark Tunnel</b>\n\n" +
@@ -3411,7 +3411,7 @@ async function handleConfig(env, chatId, notice, messageId) {
   const isAdmin = cekAdmin(env, chatId) === "ya";
   const awalan = notice ? notice + "\n\n" : "";
   if (!arr.length && !templates.length) {
-    await editAtauKirim(env, chatId, messageId, awalan + "📋 <b>Config & Template</b>\n\nBelum ada config contoh atau template.", TOMBOL_KEMBALI);
+    await editAtauKirim(env, chatId, messageId, awalan + "📋 <b>Config & Template</b>\n\nBelum ada config contoh atau template.", [[{ text: "📡 Template Xray (0)", callback_data: "tpl:tipe:xray" }, { text: "🔐 Template SSH (0)", callback_data: "tpl:tipe:ssh" }], ...TOMBOL_KEMBALI]);
     return;
   }
   const bagian = [];
@@ -3422,44 +3422,42 @@ async function handleConfig(env, chatId, notice, messageId) {
       daftar.map((e, i) => (i + 1) + ". <b>" + escapeHtml(e.nama) + "</b> (" + labelOperator(e.operator) + " — " + labelKategori(e.operator, e.kategori) + ") — " + e.tanggal).join("\n"));
     for (const e of daftar) keyboard.push([{ text: String(e.nama).slice(0, 40), callback_data: "cfg:" + e.id }]);
   }
+  // (v2.9.4) Template Config dibagi dua bagian per TIPE (Xray & SSH) —
+  // bukan lagi per operator. Kedua tombol selalu tampil, walau N=0.
+  const nXray = templates.filter((t) => t.tipe === "XRAY").length;
+  const nSsh = templates.filter((t) => t.tipe === "SSH").length;
   if (templates.length) {
-    const opDenganTemplate = Object.keys(BUG_DB).filter((op) => templates.some((t) => t.operator === op));
-    // Template yang operatornya tidak ada di BUG_DB (misal operator lama)
-    // tetap ditampilkan di bawah label operatornya.
-    const opLain = [...new Set(templates.map((t) => t.operator))].filter((op) => !BUG_DB[op]);
-    bagian.push("🧩 <b>Template Config</b>\n\nPilih operator buat lihat template config-nya:");
-    for (const op of [...opDenganTemplate, ...opLain]) {
-      const n = templates.filter((t) => t.operator === op).length;
-      keyboard.push([{ text: labelOperator(op) + " (" + n + ")", callback_data: "tpl:op:" + op }]);
-    }
+    bagian.push("🧩 <b>Template Config</b>\n\nKetuk Xray atau SSH buat lihat template config-nya.");
   } else {
     bagian.push("🧩 <b>Template Config</b>\n\nBelum ada template. Admin bisa buat lewat panel admin.");
   }
+  keyboard.push([{ text: "📡 Template Xray (" + nXray + ")", callback_data: "tpl:tipe:xray" }, { text: "🔐 Template SSH (" + nSsh + ")", callback_data: "tpl:tipe:ssh" }]);
   let teks = awalan + bagian.join("\n\n");
-  if (arr.length) teks += "\n\nKetuk satu config buat ambil file-nya, atau satu operator buat lihat template config-nya.";
-  else teks += "\n\nKetuk satu operator buat lihat template config-nya.";
+  if (arr.length) teks += "\n\nKetuk satu config buat ambil file-nya.";
   keyboard.push(...TOMBOL_KEMBALI);
   await editAtauKirim(env, chatId, messageId, teks, keyboard);
 }
 
-// ---- Daftar template config satu operator (dari /config) ----
+// ---- Daftar template config satu tipe (dari /config) ----
 // notice = pesan tambahan di atas judul (misal konfirmasi hapus).
-async function handleTemplateOperator(env, chatId, opKey, notice, messageId) {
+async function handleTemplateTipe(env, chatId, tipe, notice, messageId) {
   const templates = await ambilTemplatesKv(env);
-  const daftar = templates.filter((t) => t.operator === opKey);
+  const isXray = tipe === "xray";
+  const kunci = isXray ? "XRAY" : "SSH";
+  const daftar = templates.filter((t) => t.tipe === kunci);
   const isAdmin = cekAdmin(env, chatId) === "ya";
-  const judul = "🧩 <b>Template Config — " + escapeHtml(labelOperator(opKey)) + "</b>";
+  const judul = "🧩 <b>Template Config — " + (isXray ? "Xray" : "SSH") + "</b>";
   const awalan = notice ? notice + "\n\n" : "";
   if (!daftar.length) {
-    await editAtauKirim(env, chatId, messageId, awalan + judul + "\n\nBelum ada template untuk operator ini.", [
-      [{ text: "⬅️ Kembali", callback_data: "tpl:op:daftar" }],
+    await editAtauKirim(env, chatId, messageId, awalan + judul + "\n\nBelum ada template " + (isXray ? "Xray" : "SSH") + ".", [
+      [{ text: "⬅️ Kembali", callback_data: "tpl:tipe:daftar" }],
       ...TOMBOL_KEMBALI,
     ]);
     return;
   }
   const daftarTampil = daftar.slice(0, 20);
   const teks = awalan + judul + "\n\n" +
-    daftarTampil.map((e, i) => (i + 1) + ". <b>" + escapeHtml(e.nama) + "</b> (" + (e.tipe === "SSH" ? "SSH" : "Xray") + (e.metode ? " · " + labelMetode(e.tipe, e.metode) : "") + " · " + labelKategori(e.operator, e.kategori) + ") — " + e.tanggal).join("\n") +
+    daftarTampil.map((e, i) => (i + 1) + ". <b>" + escapeHtml(e.nama) + "</b> (" + escapeHtml(labelOperator(e.operator)) + " · " + escapeHtml(labelKategori(e.operator, e.kategori)) + (e.metode ? " · " + escapeHtml(labelMetode(e.tipe, e.metode)) : "") + ") — " + e.tanggal).join("\n") +
     "\n\nKetuk satu template buat generate pakai template itu.";
   const keyboard = [];
   for (const e of daftarTampil) {
@@ -3467,7 +3465,7 @@ async function handleTemplateOperator(env, chatId, opKey, notice, messageId) {
     if (isAdmin) row.push({ text: "🗑️", callback_data: "tpl:del:" + e.id });
     keyboard.push(row);
   }
-  keyboard.push([{ text: "⬅️ Kembali", callback_data: "tpl:op:daftar" }]);
+  keyboard.push([{ text: "⬅️ Kembali", callback_data: "tpl:tipe:daftar" }]);
   keyboard.push(...TOMBOL_KEMBALI);
   await editAtauKirim(env, chatId, messageId, teks, keyboard);
 }
@@ -3947,17 +3945,19 @@ async function handleTelegram(env, update) {
       if (!t) { await sendTelegram(env, chatIdCb, "😕 Template itu sudah tidak ada."); return; }
       const ok = await hapusTemplateKv(env, id);
       if (!ok) { await sendTelegram(env, chatIdCb, "😕 Gagal menghapus template, coba lagi nanti ya."); return; }
-      // Kembali ke daftar template operator itu (atau /config bila
-      // operatornya sudah tidak punya template lagi).
+      // Kembali ke daftar template tipe itu (atau /config bila
+      // tipenya sudah tidak punya template lagi).
       const notice = "✅ Template <b>" + escapeHtml(t.nama) + "</b> dihapus.";
-      const sisa = (await ambilTemplatesKv(env)).filter((e) => e.operator === t.operator);
-      if (sisa.length) await handleTemplateOperator(env, chatIdCb, t.operator, notice, cb.message.message_id);
+      const sisa = (await ambilTemplatesKv(env)).filter((e) => e.tipe === t.tipe);
+      if (sisa.length) await handleTemplateTipe(env, chatIdCb, t.tipe === "SSH" ? "ssh" : "xray", notice, cb.message.message_id);
       else await handleConfig(env, chatIdCb, notice, cb.message.message_id);
       return;
     }
     if (data.startsWith("tpl:del:batal")) {
       await jawabCallback(env, cb.id);
-      await handleConfig(env, chatIdCb, undefined, cb.message.message_id);
+      const rest = data.slice("tpl:del:batal".length);
+      if (rest === ":xray" || rest === ":ssh") await handleTemplateTipe(env, chatIdCb, rest.slice(1), undefined, cb.message.message_id);
+      else await handleConfig(env, chatIdCb, undefined, cb.message.message_id);
       return;
     }
     if (data.startsWith("tpl:del:")) {
@@ -3968,21 +3968,22 @@ async function handleTelegram(env, update) {
       await jawabCallback(env, cb.id);
       if (!t) { await sendTelegram(env, chatIdCb, "😕 Template itu sudah tidak ada."); return; }
       await editAtauKirim(env, chatIdCb, cb.message.message_id, "🗑️ Hapus template <b>" + escapeHtml(t.nama) + "</b>?", [
-        [{ text: "✅ Ya, hapus", callback_data: "tpl:del:ya:" + id }, { text: "❌ Batal", callback_data: "tpl:del:batal" }],
+        [{ text: "✅ Ya, hapus", callback_data: "tpl:del:ya:" + id }, { text: "❌ Batal", callback_data: "tpl:del:batal:" + (t.tipe === "SSH" ? "ssh" : "xray") }],
       ]);
       return;
     }
-    // ---- Kembali ke daftar operator template (tpl:op:daftar) ----
-    if (data === "tpl:op:daftar") {
+    // ---- Kembali ke daftar tipe template (tpl:tipe:daftar) ----
+    if (data === "tpl:tipe:daftar") {
       await jawabCallback(env, cb.id);
       await handleConfig(env, chatIdCb, undefined, cb.message.message_id);
       return;
     }
-    // ---- Daftar template satu operator (tpl:op:<operator>) ----
-    if (data.startsWith("tpl:op:")) {
-      const op = data.slice("tpl:op:".length);
+    // ---- Daftar template satu tipe (tpl:tipe:xray / tpl:tipe:ssh) ----
+    if (data.startsWith("tpl:tipe:")) {
+      const tipe = data.slice("tpl:tipe:".length);
+      if (tipe !== "xray" && tipe !== "ssh") return;
       await jawabCallback(env, cb.id);
-      await handleTemplateOperator(env, chatIdCb, op, undefined, cb.message.message_id);
+      await handleTemplateTipe(env, chatIdCb, tipe, undefined, cb.message.message_id);
       return;
     }
     // ---- Pakai template (tpl:pakai:<id>) ----
