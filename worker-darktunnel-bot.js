@@ -892,7 +892,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.7.4";
+const VERSI_BOT = "v2.7.5";
 
 const PESAN_START =
   "👋 <b>Generator Config Dark Tunnel</b>\n\n" +
@@ -1696,6 +1696,86 @@ function keyboardTemplateKategori(opKey) {
   return rows;
 }
 
+// ---- Pemilih bug di wizard template (v2.7.5) ----
+// Daftar host satu kategori (BUG_DB + KV BUGS, KV dulu, dedup).
+// Pola sama seperti daftarBugPesanGabungan, tapi return array host
+// mentah (bukan pesan teks). Kategori yang cuma ada di KV tetap jalan.
+async function daftarHostKategori(env, opKey, katKey) {
+  const kat = BUG_DB[opKey]?.kategori?.[katKey];
+  const kv = await ambilBugsKv(env);
+  const kvList = (kv?.[opKey]?.[katKey] || []).filter((e) => e && e.host);
+  const ada = new Set(kvList.map((e) => String(e.host).toLowerCase()));
+  return [
+    ...kvList.map((e) => String(e.host)),
+    ...(kat ? kat.hosts.filter((e) => !ada.has(e.h.toLowerCase())).map((e) => e.h) : []),
+  ];
+}
+
+function keyboardPilihBugOperator() {
+  const ops = Object.entries(BUG_DB);
+  const rows = [];
+  for (let i = 0; i < ops.length; i += 2) {
+    rows.push(ops.slice(i, i + 2).map(([k, v]) => ({ text: v.label, callback_data: "tw:bug:op:" + k })));
+  }
+  rows.push([{ text: "⬅️ Kembali", callback_data: "tw:bug:kembali" }]);
+  return rows;
+}
+
+function keyboardPilihBugKategori(opKey, kvKats) {
+  const op = BUG_DB[opKey];
+  const katsBawaan = op ? Object.keys(op.kategori) : [];
+  const semua = [...new Set([...katsBawaan, ...(kvKats || [])])].sort((a, b) => {
+    const ia = URUTAN_KATEGORI.indexOf(a), ib = URUTAN_KATEGORI.indexOf(b);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+  });
+  const rows = baris2(semua.map((k) => ({ text: labelKategori(opKey, k), callback_data: "tw:bug:kat:" + opKey + ":" + k })));
+  rows.push([{ text: "⬅️ Ganti operator", callback_data: "tw:bug" }]);
+  rows.push([{ text: "⬅️ Kembali", callback_data: "tw:bug:kembali" }]);
+  return rows;
+}
+
+// Host per halaman di pemilih bug (kategori besar mis. ilped punya
+// 100+ host — 1 pesan keyboard Telegram maks 100 tombol).
+const PICKER_HOST_PER_HALAMAN = 20;
+
+function keyboardPilihBugHost(st) {
+  const pb = st.pilihBug;
+  const per = PICKER_HOST_PER_HALAMAN;
+  const totalHal = Math.max(1, Math.ceil(pb.hosts.length / per));
+  const hal = Math.min(pb.page || 0, totalHal - 1);
+  const awal = hal * per;
+  // Callback pakai indeks + op:kat (bukan host mentah): host terpanjang
+  // di BUG_DB 52 karakter, "tw:bug:host:" + host sudah tepat 64 byte
+  // (batas Telegram) — host KV yang lebih panjang akan gagal. Indeks
+  // selalu aman; op:kat diikutkan supaya tombol pesan lama yang sudah
+  // tidak berlaku (kategori diganti) tidak salah isi.
+  const rows = pb.hosts.slice(awal, awal + per).map((h, i) => ([{ text: h, callback_data: "tw:bug:host:" + pb.op + ":" + pb.kat + ":" + (awal + i) }]));
+  const nav = [];
+  if (hal > 0) nav.push({ text: "⬅️ Sebelumnya", callback_data: "tw:bug:hal:" + (hal - 1) });
+  if (hal < totalHal - 1) nav.push({ text: "Berikutnya ➡️", callback_data: "tw:bug:hal:" + (hal + 1) });
+  if (nav.length) rows.push(nav);
+  rows.push([{ text: "⬅️ Ganti kategori", callback_data: "tw:bug:op:" + pb.op }]);
+  rows.push([{ text: "⬅️ Kembali", callback_data: "tw:bug:kembali" }]);
+  return rows;
+}
+
+// Kirim daftar pemilih bug sesuai st.pilihBug.langkah.
+async function kirimPilihBug(env, chatId, st) {
+  const pb = st.pilihBug;
+  if (!pb) return;
+  if (pb.langkah === "operator") {
+    await sendTelegram(env, chatId, "📋 <b>Pilih dari Daftar Bug</b>\n\nPilih operator:", keyboardPilihBugOperator());
+  } else if (pb.langkah === "kategori") {
+    const kv = await ambilBugsKv(env);
+    await sendTelegram(env, chatId, "📋 <b>Pilih dari Daftar Bug</b> (" + labelOperator(pb.op) + ")\n\nPilih kategori:", keyboardPilihBugKategori(pb.op, Object.keys(kv[pb.op] || {})));
+  } else if (pb.langkah === "host") {
+    const per = PICKER_HOST_PER_HALAMAN;
+    const totalHal = Math.max(1, Math.ceil(pb.hosts.length / per));
+    const hal = Math.min(pb.page || 0, totalHal - 1);
+    await sendTelegram(env, chatId, "📋 <b>Pilih dari Daftar Bug</b> (" + labelOperator(pb.op) + " — " + labelKategori(pb.op, pb.kat) + ")\n\nKetuk host yang mau dipakai" + (totalHal > 1 ? " (halaman " + (hal + 1) + "/" + totalHal + ")" : "") + ":", keyboardPilihBugHost(st));
+  }
+}
+
 function keyboardTemplateYaTidak(prefix) {
   return [
     [{ text: "Ya", callback_data: prefix + ":ya" }, { text: "Tidak", callback_data: prefix + ":tidak" }],
@@ -2020,10 +2100,35 @@ function parseHostPort(s) {
 
 const TOMBOL_BATAL_TEMPLATE = [[{ text: "❌ Batal", callback_data: "admin:batal" }]];
 
+// Keyboard tahap teks yang bisa dikosongkan: Lewati + Batal.
+const TOMBOL_LEWATI_TEMPLATE = [
+  [{ text: "⏭️ Lewati", callback_data: "tw:lewati" }, { text: "❌ Batal", callback_data: "admin:batal" }],
+];
+
+// Keyboard tahap yang isinya host/bug: pilih dari daftar bug + Lewati + Batal.
+const TOMBOL_PILIH_BUG_TEMPLATE = [
+  [{ text: "📋 Pilih dari Daftar Bug", callback_data: "tw:bug" }],
+  [{ text: "⏭️ Lewati", callback_data: "tw:lewati" }, { text: "❌ Batal", callback_data: "admin:batal" }],
+];
+
+// Tahap teks wizard yang bisa dikosongkan (tombol Lewati tampil).
+const TAHAP_LEWATI = new Set([
+  "ssh_port", "ssh_payload", "ssh_proxy", "ssh_sni", "ssh_udphost", "ssh_udpport",
+  "xray_target", "xray_sni", "xray_header", "xray_payload", "xray_ssh",
+  "xray_ns", "xray_pubkey", "xray_udphost", "xray_udpport",
+]);
+
+// Tahap yang isinya host/bug (tombol Pilih dari Daftar Bug tampil).
+const TAHAP_PILIH_BUG = new Set(["ssh_proxy", "ssh_sni", "xray_target", "xray_sni", "xray_header"]);
+
 // Kirim prompt untuk tahap wizard template saat ini.
 async function kirimLangkahTemplate(env, chatId, st) {
   const t = st.tahap;
-  const batal = TOMBOL_BATAL_TEMPLATE;
+  // Keyboard per tahap teks: tahap host/bug dapat tombol Pilih dari
+  // Daftar Bug + Lewati; tahap lain yang bisa dikosongkan dapat Lewati;
+  // tahap wajib (nama, kategori_baru, ssh_ns, ssh_pubkey) cuma Batal.
+  const batal = TAHAP_PILIH_BUG.has(t) ? TOMBOL_PILIH_BUG_TEMPLATE
+    : TAHAP_LEWATI.has(t) ? TOMBOL_LEWATI_TEMPLATE : TOMBOL_BATAL_TEMPLATE;
   if (t === "tipe") {
     await sendTelegram(env, chatId, "🧩 <b>Template Config Baru</b>\n\nPilih tipe config:", keyboardTemplateTipe());
   } else if (t === "operator") {
@@ -2035,13 +2140,13 @@ async function kirimLangkahTemplate(env, chatId, st) {
   } else if (t === "nama") {
     await sendTelegram(env, chatId, "🧩 <b>Template Config Baru</b>\n\nKirim <b>nama template</b> — mis. <code>Opok Tsel SSH 1</code>.", batal);
   } else if (t === "ssh_port") {
-    await sendTelegram(env, chatId, "🔌 <b>Port SSH</b>\n\nKirim port (angka 1-65535, mis. <code>80</code> atau <code>443</code>).\n\nKosong = pakai port dari akun pengguna. Ketik <code>lewati</code> untuk kosong.", batal);
+    await sendTelegram(env, chatId, "🔌 <b>Port SSH</b>\n\nKirim port (angka 1-65535, mis. <code>80</code> atau <code>443</code>).\n\nKosong = pakai port dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "ssh_payload") {
-    await sendTelegram(env, chatId, "📝 <b>Payload</b>\n\nKirim teks payload lengkap (boleh pakai <code>[host]</code> / <code>[bug]</code> / <code>[ua]</code>).\n\nKosong = pakai metode payload kategori otomatis. Ketik <code>lewati</code> untuk kosong.", batal);
+    await sendTelegram(env, chatId, "📝 <b>Payload</b>\n\nKirim teks payload lengkap (boleh pakai <code>[host]</code> / <code>[bug]</code> / <code>[ua]</code>).\n\nKosong = pakai metode payload kategori otomatis. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "ssh_proxy") {
-    await sendTelegram(env, chatId, "🔀 <b>Proxy</b>\n\nKirim proxy format <code>host:port</code> (boleh dari daftar bug).\n\nKosong = tanpa proxy. Ketik <code>lewati</code> untuk kosong.", batal);
+    await sendTelegram(env, chatId, "🔀 <b>Proxy</b>\n\nKirim proxy format <code>host:port</code> (boleh dari daftar bug — atau ketuk 📋 Pilih dari Daftar Bug).\n\nKosong = tanpa proxy. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "ssh_sni") {
-    await sendTelegram(env, chatId, "🎯 <b>SNI</b>\n\nKirim SNI (host, boleh dari daftar bug).\n\nKosong = pakai bug/SNI dari akun pengguna. Ketik <code>lewati</code> untuk kosong.", batal);
+    await sendTelegram(env, chatId, "🎯 <b>SNI</b>\n\nKirim SNI (host, boleh dari daftar bug — atau ketuk 📋 Pilih dari Daftar Bug).\n\nKosong = pakai bug/SNI dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "ssh_enhanced") {
     await sendTelegram(env, chatId, "⚡ <b>Enhanced</b>\n\nAktifkan payload Enhanced?", keyboardTemplateYaTidak("tw:enhanced"));
   } else if (t === "ssh_slowdns") {
@@ -2051,27 +2156,27 @@ async function kirimLangkahTemplate(env, chatId, st) {
   } else if (t === "ssh_pubkey") {
     await sendTelegram(env, chatId, "🐢 <b>SlowDNS — Public Key</b>\n\nKirim public key SlowDNS (teks kunci).\n\nWajib diisi untuk SlowDNS.", batal);
   } else if (t === "ssh_udphost") {
-    await sendTelegram(env, chatId, "🐢 <b>SlowDNS — UDP DNS Host</b>\n\nKirim UDP DNS host (mis. <code>1.1.1.1</code>).\n\nKosong = default <code>1.1.1.1</code>. Ketik <code>lewati</code> untuk default.", batal);
+    await sendTelegram(env, chatId, "🐢 <b>SlowDNS — UDP DNS Host</b>\n\nKirim UDP DNS host (mis. <code>1.1.1.1</code>).\n\nKosong = default <code>1.1.1.1</code>. Ketuk ⏭️ Lewati untuk default.", batal);
   } else if (t === "ssh_udpport") {
-    await sendTelegram(env, chatId, "🐢 <b>SlowDNS — UDP DNS Port</b>\n\nKirim UDP DNS port (angka 1-65535, mis. <code>53</code>).\n\nKosong = default <code>53</code>. Ketik <code>lewati</code> untuk default.", batal);
+    await sendTelegram(env, chatId, "🐢 <b>SlowDNS — UDP DNS Port</b>\n\nKirim UDP DNS port (angka 1-65535, mis. <code>53</code>).\n\nKosong = default <code>53</code>. Ketuk ⏭️ Lewati untuk default.", batal);
   } else if (t === "xray_target") {
-    await sendTelegram(env, chatId, "🎯 <b>Target Server</b>\n\nKirim target server format <code>host:port</code> (boleh dari daftar bug).\n\nKosong = dari akun pengguna. Ketik <code>lewati</code> untuk kosong.", batal);
+    await sendTelegram(env, chatId, "🎯 <b>Target Server</b>\n\nKirim target server format <code>host:port</code> (boleh dari daftar bug — atau ketuk 📋 Pilih dari Daftar Bug).\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_sni") {
-    await sendTelegram(env, chatId, "🎯 <b>Server Name / SNI</b>\n\nKirim SNI (host, boleh dari daftar bug).\n\nKosong = dari akun pengguna. Ketik <code>lewati</code> untuk kosong.", batal);
+    await sendTelegram(env, chatId, "🎯 <b>Server Name / SNI</b>\n\nKirim SNI (host, boleh dari daftar bug — atau ketuk 📋 Pilih dari Daftar Bug).\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_header") {
-    await sendTelegram(env, chatId, "🎯 <b>Header Host</b>\n\nKirim header host (host, boleh dari daftar bug).\n\nKosong = dari akun pengguna. Ketik <code>lewati</code> untuk kosong.", batal);
+    await sendTelegram(env, chatId, "🎯 <b>Header Host</b>\n\nKirim header host (host, boleh dari daftar bug — atau ketuk 📋 Pilih dari Daftar Bug).\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_payload") {
-    await sendTelegram(env, chatId, "📝 <b>Payload</b> (opsional)\n\nKirim teks payload (boleh pakai <code>[host]</code> / <code>[bug]</code> / <code>[ua]</code>).\n\nKosong = tanpa payload khusus. Ketik <code>lewati</code> untuk kosong.", batal);
+    await sendTelegram(env, chatId, "📝 <b>Payload</b> (opsional)\n\nKirim teks payload (boleh pakai <code>[host]</code> / <code>[bug]</code> / <code>[ua]</code>).\n\nKosong = tanpa payload khusus. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_ssh") {
-    await sendTelegram(env, chatId, "🔑 <b>Akun SSH</b> (opsional)\n\nKirim akun SSH format <code>host:port@user:pass</code>.\n\nDisimpan di template tapi tidak dipakai di config Xray. Ketik <code>lewati</code> untuk kosong.", batal);
+    await sendTelegram(env, chatId, "🔑 <b>Akun SSH</b> (opsional)\n\nKirim akun SSH format <code>host:port@user:pass</code>.\n\nDisimpan di template tapi tidak dipakai di config Xray. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_ns") {
-    await sendTelegram(env, chatId, "🐢 <b>SlowDNS — Name Server</b> (opsional)\n\nKirim name server SlowDNS (host/IP, mis. <code>id1.dnsx.my.id</code>).\n\nSlowDNS aktif bila name server + public key sama-sama terisi. Ketik <code>lewati</code> untuk kosong.", batal);
+    await sendTelegram(env, chatId, "🐢 <b>SlowDNS — Name Server</b> (opsional)\n\nKirim name server SlowDNS (host/IP, mis. <code>id1.dnsx.my.id</code>).\n\nSlowDNS aktif bila name server + public key sama-sama terisi. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_pubkey") {
-    await sendTelegram(env, chatId, "🐢 <b>SlowDNS — Public Key</b> (opsional)\n\nKirim public key SlowDNS (teks kunci).\n\nSlowDNS aktif bila name server + public key sama-sama terisi. Ketik <code>lewati</code> untuk kosong.", batal);
+    await sendTelegram(env, chatId, "🐢 <b>SlowDNS — Public Key</b> (opsional)\n\nKirim public key SlowDNS (teks kunci).\n\nSlowDNS aktif bila name server + public key sama-sama terisi. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_udphost") {
-    await sendTelegram(env, chatId, "🐢 <b>SlowDNS — UDP DNS Host</b> (opsional)\n\nKirim UDP DNS host (mis. <code>1.1.1.1</code>).\n\nKosong = default <code>1.1.1.1</code>. Ketik <code>lewati</code> untuk default.", batal);
+    await sendTelegram(env, chatId, "🐢 <b>SlowDNS — UDP DNS Host</b> (opsional)\n\nKirim UDP DNS host (mis. <code>1.1.1.1</code>).\n\nKosong = default <code>1.1.1.1</code>. Ketuk ⏭️ Lewati untuk default.", batal);
   } else if (t === "xray_udpport") {
-    await sendTelegram(env, chatId, "🐢 <b>SlowDNS — UDP DNS Port</b> (opsional)\n\nKirim UDP DNS port (angka 1-65535, mis. <code>53</code>).\n\nKosong = default <code>53</code>. Ketik <code>lewati</code> untuk default.", batal);
+    await sendTelegram(env, chatId, "🐢 <b>SlowDNS — UDP DNS Port</b> (opsional)\n\nKirim UDP DNS port (angka 1-65535, mis. <code>53</code>).\n\nKosong = default <code>53</code>. Ketuk ⏭️ Lewati untuk default.", batal);
   } else if (t === "ringkasan") {
     const tpl = { nama: st.nama, operator: st.op, kategori: st.kat, tipe: st.tipe, ssh: st.ssh, xray: st.xray };
     await sendTelegram(env, chatId, "🧩 <b>Cek Template</b>\n\n" + ringkasanTemplate(tpl) + "\n\nSimpan template ini?", keyboardTemplateSimpan());
@@ -2083,7 +2188,11 @@ async function kirimLangkahTemplate(env, chatId, st) {
 // wizard template.
 async function handleTemplateTeks(env, chatId, st, teks) {
   const t = st.tahap;
-  const salah = async (pesan) => { await sendTelegram(env, chatId, pesan, TOMBOL_BATAL_TEMPLATE); return true; };
+  // Pesan error validasi memakai keyboard tahap yang sama (tahap host
+  // tetap bisa pilih bug / lewati dari pesan error).
+  const kbSalah = TAHAP_PILIH_BUG.has(t) ? TOMBOL_PILIH_BUG_TEMPLATE
+    : TAHAP_LEWATI.has(t) ? TOMBOL_LEWATI_TEMPLATE : TOMBOL_BATAL_TEMPLATE;
+  const salah = async (pesan) => { await sendTelegram(env, chatId, pesan, kbSalah); return true; };
   if (t === "kategori_baru") {
     const kat = String(teks || "").trim().toLowerCase();
     if (!/^[a-z][a-z0-9_-]{0,19}$/.test(kat)) return salah("😕 Nama kategori tidak valid. Pakai huruf kecil tanpa spasi, mis. <code>belajar</code> — huruf pertama harus huruf.");
@@ -2103,7 +2212,7 @@ async function handleTemplateTeks(env, chatId, st, teks) {
   }
   if (t === "ssh_port") {
     const v = kosongkan(teks);
-    if (v !== null && !validPortNum(v)) return salah("😕 Port tidak valid. Kirim angka 1-65535, mis. <code>80</code> — atau ketik <code>lewati</code> untuk kosong.");
+    if (v !== null && !validPortNum(v)) return salah("😕 Port tidak valid. Kirim angka 1-65535, mis. <code>80</code> —  atau ketuk ⏭️ Lewati untuk kosong.");
     st.ssh.port = v === null ? null : Number(v);
     st.tahap = "ssh_payload"; st.ts = Date.now();
     await kirimLangkahTemplate(env, chatId, st);
@@ -2119,7 +2228,7 @@ async function handleTemplateTeks(env, chatId, st, teks) {
     const v = kosongkan(teks);
     if (v !== null) {
       const hp = parseHostPort(v);
-      if (!hp) return salah("😕 Format proxy salah. Pakai <code>host:port</code>, mis. <code>proxy.contoh.com:8080</code> — atau ketik <code>lewati</code> untuk kosong.");
+      if (!hp) return salah("😕 Format proxy salah. Pakai <code>host:port</code>, mis. <code>proxy.contoh.com:8080</code> —  atau ketuk ⏭️ Lewati untuk kosong.");
       st.ssh.proxyHost = hp.host; st.ssh.proxyPort = hp.port;
     } else { st.ssh.proxyHost = null; st.ssh.proxyPort = null; }
     st.tahap = "ssh_sni"; st.ts = Date.now();
@@ -2128,7 +2237,7 @@ async function handleTemplateTeks(env, chatId, st, teks) {
   }
   if (t === "ssh_sni") {
     const v = kosongkan(teks);
-    if (v !== null && !validHost(v.toLowerCase())) return salah("😕 SNI tidak valid. Kirim host yang benar, mis. <code>edu.ruangguru.com</code> — atau ketik <code>lewati</code> untuk kosong.");
+    if (v !== null && !validHost(v.toLowerCase())) return salah("😕 SNI tidak valid. Kirim host yang benar, mis. <code>edu.ruangguru.com</code> —  atau ketuk ⏭️ Lewati untuk kosong.");
     st.ssh.sni = v === null ? null : v.toLowerCase();
     st.tahap = "ssh_enhanced"; st.ts = Date.now();
     await kirimLangkahTemplate(env, chatId, st);
@@ -2152,7 +2261,7 @@ async function handleTemplateTeks(env, chatId, st, teks) {
   }
   if (t === "ssh_udphost") {
     const v = kosongkan(teks);
-    if (v !== null && !validHost(v.toLowerCase())) return salah("😕 UDP DNS Host tidak valid. Kirim host/IP yang benar, mis. <code>1.1.1.1</code> — atau ketik <code>lewati</code> untuk default.");
+    if (v !== null && !validHost(v.toLowerCase())) return salah("😕 UDP DNS Host tidak valid. Kirim host/IP yang benar, mis. <code>1.1.1.1</code> —  atau ketuk ⏭️ Lewati untuk default.");
     st.ssh.dnsUdpHost = v === null ? "1.1.1.1" : v.toLowerCase();
     st.tahap = "ssh_udpport"; st.ts = Date.now();
     await kirimLangkahTemplate(env, chatId, st);
@@ -2160,7 +2269,7 @@ async function handleTemplateTeks(env, chatId, st, teks) {
   }
   if (t === "ssh_udpport") {
     const v = kosongkan(teks);
-    if (v !== null && !validPortNum(v)) return salah("😕 UDP DNS Port tidak valid. Kirim angka 1-65535, mis. <code>53</code> — atau ketik <code>lewati</code> untuk default.");
+    if (v !== null && !validPortNum(v)) return salah("😕 UDP DNS Port tidak valid. Kirim angka 1-65535, mis. <code>53</code> —  atau ketuk ⏭️ Lewati untuk default.");
     st.ssh.dnsUdpPort = v === null ? 53 : Number(v);
     st.tahap = "ringkasan"; st.ts = Date.now();
     await kirimLangkahTemplate(env, chatId, st);
@@ -2170,7 +2279,7 @@ async function handleTemplateTeks(env, chatId, st, teks) {
     const v = kosongkan(teks);
     if (v !== null) {
       const hp = parseHostPort(v);
-      if (!hp) return salah("😕 Format target salah. Pakai <code>host:port</code>, mis. <code>sg1.contoh.com:443</code> — atau ketik <code>lewati</code> untuk kosong.");
+      if (!hp) return salah("😕 Format target salah. Pakai <code>host:port</code>, mis. <code>sg1.contoh.com:443</code> —  atau ketuk ⏭️ Lewati untuk kosong.");
       st.xray.targetHost = hp.host; st.xray.targetPort = hp.port;
     } else { st.xray.targetHost = null; st.xray.targetPort = null; }
     st.tahap = "xray_sni"; st.ts = Date.now();
@@ -2179,7 +2288,7 @@ async function handleTemplateTeks(env, chatId, st, teks) {
   }
   if (t === "xray_sni") {
     const v = kosongkan(teks);
-    if (v !== null && !validHost(v.toLowerCase())) return salah("😕 SNI tidak valid. Kirim host yang benar, mis. <code>sg1.contoh.com</code> — atau ketik <code>lewati</code> untuk kosong.");
+    if (v !== null && !validHost(v.toLowerCase())) return salah("😕 SNI tidak valid. Kirim host yang benar, mis. <code>sg1.contoh.com</code> —  atau ketuk ⏭️ Lewati untuk kosong.");
     st.xray.sni = v === null ? null : v.toLowerCase();
     st.tahap = "xray_header"; st.ts = Date.now();
     await kirimLangkahTemplate(env, chatId, st);
@@ -2187,7 +2296,7 @@ async function handleTemplateTeks(env, chatId, st, teks) {
   }
   if (t === "xray_header") {
     const v = kosongkan(teks);
-    if (v !== null && !validHost(v.toLowerCase())) return salah("😕 Header Host tidak valid. Kirim host yang benar — atau ketik <code>lewati</code> untuk kosong.");
+    if (v !== null && !validHost(v.toLowerCase())) return salah("😕 Header Host tidak valid. Kirim host yang benar —  atau ketuk ⏭️ Lewati untuk kosong.");
     st.xray.headerHost = v === null ? null : v.toLowerCase();
     st.tahap = "xray_payload"; st.ts = Date.now();
     await kirimLangkahTemplate(env, chatId, st);
@@ -2203,7 +2312,7 @@ async function handleTemplateTeks(env, chatId, st, teks) {
     const v = kosongkan(teks);
     if (v !== null) {
       const ssh = parseSshTeks(v);
-      if (!ssh.akunList.length) return salah("😕 Format akun SSH salah. Pakai <code>host:port@user:pass</code>, mis. <code>sg1.contoh.com:22@user1:pass1</code> — atau ketik <code>lewati</code> untuk kosong.");
+      if (!ssh.akunList.length) return salah("😕 Format akun SSH salah. Pakai <code>host:port@user:pass</code>, mis. <code>sg1.contoh.com:22@user1:pass1</code> —  atau ketuk ⏭️ Lewati untuk kosong.");
       const a = ssh.akunList[0];
       st.xray.sshHost = a.host; st.xray.sshPort = a.port; st.xray.sshUser = a.username; st.xray.sshPass = a.password;
     } else { st.xray.sshHost = null; st.xray.sshPort = null; st.xray.sshUser = null; st.xray.sshPass = null; }
@@ -2213,7 +2322,7 @@ async function handleTemplateTeks(env, chatId, st, teks) {
   }
   if (t === "xray_ns") {
     const v = kosongkan(teks);
-    if (v !== null && !validHost(v.toLowerCase())) return salah("😕 Name Server tidak valid. Kirim host/IP yang benar, mis. <code>id1.dnsx.my.id</code> — atau ketik <code>lewati</code> untuk kosong.");
+    if (v !== null && !validHost(v.toLowerCase())) return salah("😕 Name Server tidak valid. Kirim host/IP yang benar, mis. <code>id1.dnsx.my.id</code> —  atau ketuk ⏭️ Lewati untuk kosong.");
     st.xray.nameServer = v === null ? null : v.toLowerCase();
     st.tahap = "xray_pubkey"; st.ts = Date.now();
     await kirimLangkahTemplate(env, chatId, st);
@@ -2227,7 +2336,7 @@ async function handleTemplateTeks(env, chatId, st, teks) {
   }
   if (t === "xray_udphost") {
     const v = kosongkan(teks);
-    if (v !== null && !validHost(v.toLowerCase())) return salah("😕 UDP DNS Host tidak valid. Kirim host/IP yang benar, mis. <code>1.1.1.1</code> — atau ketik <code>lewati</code> untuk default.");
+    if (v !== null && !validHost(v.toLowerCase())) return salah("😕 UDP DNS Host tidak valid. Kirim host/IP yang benar, mis. <code>1.1.1.1</code> —  atau ketuk ⏭️ Lewati untuk default.");
     st.xray.udpDnsHost = v === null ? "1.1.1.1" : v.toLowerCase();
     st.tahap = "xray_udpport"; st.ts = Date.now();
     await kirimLangkahTemplate(env, chatId, st);
@@ -2235,7 +2344,7 @@ async function handleTemplateTeks(env, chatId, st, teks) {
   }
   if (t === "xray_udpport") {
     const v = kosongkan(teks);
-    if (v !== null && !validPortNum(v)) return salah("😕 UDP DNS Port tidak valid. Kirim angka 1-65535, mis. <code>53</code> — atau ketik <code>lewati</code> untuk default.");
+    if (v !== null && !validPortNum(v)) return salah("😕 UDP DNS Port tidak valid. Kirim angka 1-65535, mis. <code>53</code> —  atau ketuk ⏭️ Lewati untuk default.");
     st.xray.udpDnsPort = v === null ? 53 : Number(v);
     st.tahap = "ringkasan"; st.ts = Date.now();
     await kirimLangkahTemplate(env, chatId, st);
@@ -2653,6 +2762,85 @@ async function handleTelegram(env, update) {
         const kat = normalisasiKategori(aksi.slice("kat:".length));
         if (!kat || !BUG_DB[st.op]?.kategori?.[kat]) return;
         st.kat = kat; st.tahap = "nama"; st.ts = Date.now();
+        await kirimLangkahTemplate(env, chatIdCb, st);
+        return;
+      }
+      // ---- Tombol Lewati (v2.7.5): hanya untuk tahap teks yang bisa
+      // dikosongkan. Tahap wajib/tombol tidak punya tombol Lewati —
+      // callback nyasar (mis. tombol pesan lama) diabaikan diam-diam.
+      // Pemilih bug yang sedang terbuka ikut dibatalkan.
+      if (aksi === "lewati") {
+        if (!TAHAP_LEWATI.has(st.tahap)) return;
+        delete st.pilihBug;
+        st.ts = Date.now();
+        await handleTemplateTeks(env, chatIdCb, st, "lewati");
+        return;
+      }
+      // ---- Pemilih bug (v2.7.5): sub-alur di dalam wizard. st.tahap
+      // tetap tahap asal; st.pilihBug menyimpan langkah + tahap asal
+      // (dipakai untuk menolak tombol pesan lama yang sudah tidak
+      // berlaku — mis. pengguna sudah mengetik manual lalu maju).
+      if (aksi === "bug") {
+        if (!TAHAP_PILIH_BUG.has(st.tahap)) return;
+        st.pilihBug = { langkah: "operator", tahap: st.tahap }; st.ts = Date.now();
+        await kirimPilihBug(env, chatIdCb, st);
+        return;
+      }
+      if (aksi === "bug:kembali") {
+        delete st.pilihBug; st.ts = Date.now();
+        await kirimLangkahTemplate(env, chatIdCb, st);
+        return;
+      }
+      if (aksi.startsWith("bug:op:")) {
+        const op = normalisasiOperator(aksi.slice("bug:op:".length));
+        if (!op || !TAHAP_PILIH_BUG.has(st.tahap) || !st.pilihBug || st.tahap !== st.pilihBug.tahap) return;
+        st.pilihBug = { langkah: "kategori", tahap: st.tahap, op }; st.ts = Date.now();
+        await kirimPilihBug(env, chatIdCb, st);
+        return;
+      }
+      if (aksi.startsWith("bug:kat:")) {
+        const parts = aksi.slice("bug:kat:".length).split(":");
+        const op = parts[0]; const kat = parts[1];
+        if (parts.length !== 2 || !normalisasiOperator(op) || !TAHAP_PILIH_BUG.has(st.tahap) || !st.pilihBug || st.tahap !== st.pilihBug.tahap || st.pilihBug.op !== op) return;
+        const hosts = await daftarHostKategori(env, op, kat);
+        if (!hosts.length) {
+          await sendTelegram(env, chatIdCb, "😕 Kategori <b>" + escapeHtml(labelKategori(op, kat)) + "</b> belum ada bug-nya. Pilih kategori lain ya.", [[{ text: "⬅️ Ganti kategori", callback_data: "tw:bug:op:" + op }], [{ text: "⬅️ Kembali", callback_data: "tw:bug:kembali" }]]);
+          return;
+        }
+        st.pilihBug = { langkah: "host", tahap: st.tahap, op, kat, hosts, page: 0 }; st.ts = Date.now();
+        await kirimPilihBug(env, chatIdCb, st);
+        return;
+      }
+      if (aksi.startsWith("bug:hal:")) {
+        const hal = Number(aksi.slice("bug:hal:".length));
+        const pb = st.pilihBug;
+        if (!TAHAP_PILIH_BUG.has(st.tahap) || !pb || pb.langkah !== "host" || st.tahap !== pb.tahap || !Number.isInteger(hal) || hal < 0) return;
+        const totalHal = Math.max(1, Math.ceil(pb.hosts.length / PICKER_HOST_PER_HALAMAN));
+        if (hal >= totalHal) return;
+        pb.page = hal; st.ts = Date.now();
+        await kirimPilihBug(env, chatIdCb, st);
+        return;
+      }
+      if (aksi.startsWith("bug:host:")) {
+        const parts = aksi.slice("bug:host:".length).split(":");
+        const op = parts[0]; const kat = parts[1]; const idx = Number(parts[2]);
+        const pb = st.pilihBug;
+        if (parts.length !== 3 || !TAHAP_PILIH_BUG.has(st.tahap) || !pb || pb.langkah !== "host" || st.tahap !== pb.tahap || pb.op !== op || pb.kat !== kat || !Number.isInteger(idx) || idx < 0 || idx >= pb.hosts.length) {
+          await sendTelegram(env, chatIdCb, "😕 Pilihan itu sudah tidak berlaku — pilih lagi dari daftar terbaru ya.");
+          return;
+        }
+        const host = pb.hosts[idx];
+        delete st.pilihBug;
+        // Isi field sesuai tahap asal lalu lanjut ke tahap berikutnya.
+        // host:port diisi host saja (port null): proxy pakai default
+        // 8080 saat generate, target pakai port akun pengguna.
+        if (st.tahap === "ssh_sni") { st.ssh.sni = host; st.tahap = "ssh_enhanced"; }
+        else if (st.tahap === "xray_sni") { st.xray.sni = host; st.tahap = "xray_header"; }
+        else if (st.tahap === "xray_header") { st.xray.headerHost = host; st.tahap = "xray_payload"; }
+        else if (st.tahap === "ssh_proxy") { st.ssh.proxyHost = host; st.ssh.proxyPort = null; st.tahap = "ssh_sni"; }
+        else if (st.tahap === "xray_target") { st.xray.targetHost = host; st.xray.targetPort = null; st.tahap = "xray_sni"; }
+        else return;
+        st.ts = Date.now();
         await kirimLangkahTemplate(env, chatIdCb, st);
         return;
       }
