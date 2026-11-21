@@ -892,7 +892,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.7.2";
+const VERSI_BOT = "v2.7.3";
 
 const PESAN_START =
   "👋 <b>Generator Config Dark Tunnel</b>\n\n" +
@@ -1690,6 +1690,7 @@ function keyboardTemplateKategori(opKey) {
   const op = BUG_DB[opKey];
   const kats = op ? Object.keys(op.kategori) : [];
   const rows = baris2(kats.map((k) => ({ text: labelKategori(opKey, k), callback_data: "tw:kat:" + k })));
+  rows.push([{ text: "➕ Kategori Baru", callback_data: "tw:kat:baru" }]);
   rows.push([{ text: "⬅️ Kembali ke Operator", callback_data: "tw:kembali:op" }]);
   rows.push([{ text: "❌ Batal", callback_data: "admin:batal" }]);
   return rows;
@@ -2029,6 +2030,8 @@ async function kirimLangkahTemplate(env, chatId, st) {
     await sendTelegram(env, chatId, "🧩 <b>Template Config Baru</b> (" + (st.tipe === "SSH" ? "SSH" : "Xray / V2Ray") + ")\n\nPilih operator:", keyboardTemplateOperator());
   } else if (t === "kategori") {
     await sendTelegram(env, chatId, "🧩 <b>Template Config Baru</b>\n\nPilih kategori (" + labelOperator(st.op) + "):", keyboardTemplateKategori(st.op));
+  } else if (t === "kategori_baru") {
+    await sendTelegram(env, chatId, "🆕 <b>Kategori Baru</b>\n\nKirim nama kategori baru — mis. <code>belajar</code>.\n\nHuruf kecil, tanpa spasi (boleh angka / tanda <code>-</code>). Kategori ini cuma dipakai di template ini.", batal);
   } else if (t === "nama") {
     await sendTelegram(env, chatId, "🧩 <b>Template Config Baru</b>\n\nKirim <b>nama template</b> — mis. <code>Opok Tsel SSH 1</code>.", batal);
   } else if (t === "ssh_port") {
@@ -2081,6 +2084,14 @@ async function kirimLangkahTemplate(env, chatId, st) {
 async function handleTemplateTeks(env, chatId, st, teks) {
   const t = st.tahap;
   const salah = async (pesan) => { await sendTelegram(env, chatId, pesan, TOMBOL_BATAL_TEMPLATE); return true; };
+  if (t === "kategori_baru") {
+    const kat = String(teks || "").trim().toLowerCase();
+    if (!/^[a-z][a-z0-9_-]{0,19}$/.test(kat)) return salah("😕 Nama kategori tidak valid. Pakai huruf kecil tanpa spasi, mis. <code>belajar</code> — huruf pertama harus huruf.");
+    st.kat = normalisasiKategori(kat) || kat;
+    st.tahap = "nama"; st.ts = Date.now();
+    await kirimLangkahTemplate(env, chatId, st);
+    return true;
+  }
   if (t === "nama") {
     const nama = String(teks || "").trim();
     if (!nama) return salah("😕 Nama template belum diisi. Kirim nama template — mis. <code>Opok Tsel SSH 1</code>.");
@@ -2633,6 +2644,12 @@ async function handleTelegram(env, update) {
         return;
       }
       if (aksi.startsWith("kat:")) {
+        // "kat:baru" harus dicek dulu — diawali "kat:" juga.
+        if (aksi === "kat:baru") {
+          st.tahap = "kategori_baru"; st.ts = Date.now();
+          await kirimLangkahTemplate(env, chatIdCb, st);
+          return;
+        }
         const kat = normalisasiKategori(aksi.slice("kat:".length));
         if (!kat || !BUG_DB[st.op]?.kategori?.[kat]) return;
         st.kat = kat; st.tahap = "nama"; st.ts = Date.now();
