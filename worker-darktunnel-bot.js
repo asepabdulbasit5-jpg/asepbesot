@@ -892,7 +892,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.7.3";
+const VERSI_BOT = "v2.7.4";
 
 const PESAN_START =
   "👋 <b>Generator Config Dark Tunnel</b>\n\n" +
@@ -2887,6 +2887,15 @@ async function handleTelegram(env, update) {
     pendingCek.delete(chatId);
     pendingConfig.delete(chatId);
     await handleStatus(env, chatId);
+    return;
+  }
+  // /setmenu (admin): pasang tombol Menu ☰ di pojok kiri bawah — isinya
+  // cuma "start" untuk membuka menu bot. Dipakai sekali; BotFather
+  // dikosongkan sebelumnya (21 Nov 2026) jadi tombol ☰ sempat hilang.
+  if (teks === "/setmenu" || teks.startsWith("/setmenu ") || teks.startsWith("/setmenu@")) {
+    if (cekAdmin(env, chatId) !== "ya") { await sendTelegram(env, chatId, "⛔ Perintah ini khusus admin."); return; }
+    const r = await telegramApi(env, "setMyCommands", { commands: [{ command: "start", description: "Buka menu bot" }] });
+    await sendTelegram(env, chatId, r && r.ok ? "✅ Tombol menu sudah dipasang — ketuk ☰ di pojok kiri bawah, isinya cuma <b>start</b> untuk membuka menu bot." : "😕 Gagal memasang tombol menu, coba lagi nanti ya.");
     return;
   }
   if (teks.startsWith("/tambahbug")) {
