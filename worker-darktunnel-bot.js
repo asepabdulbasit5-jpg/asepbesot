@@ -675,9 +675,11 @@ async function hapusTemplateKv(env, id) {
 // karena isinya sama persis: SSH_SNI live.iflix.com port 443) + 1 template
 // XL Conference WC (bug support.zoom.us, dikte Asep 01:23 WIB) + 1 template
 // XL Conference Proxy SNI (versi SSH-nya, bug sama support.zoom.us,
-// dikte Asep 01:24 WIB).
+// dikte Asep 01:24 WIB) + 4 template Edu Timur (V1: bug IP 104.17.3.81,
+// SSH PAYLOAD_PROXY + Xray WS; V2: bug www.zenius.net, SSH
+// PAYLOAD_PROXY_SNI + Xray WS; dikte Asep 01:25–01:26 WIB).
 // Starter "Tsel Ilped SSH" (SNI classroom.google.com) TIDAK ikut: Asep
-// bilang Ilped cuma pakai 2 bug itu (01:19 WIB). Total 22 template.
+// bilang Ilped cuma pakai 2 bug itu (01:19 WIB). Total 26 template.
 // Dimasukkan ke KV lewat /seedtemplate (admin, perintah teks) — upsert
 // menurut nama (simpanTemplate), jadi aman diulang dan tidak ganda.
 // Bentuk entri = persis hasil wizard (field kosong = null).
@@ -694,6 +696,8 @@ export const TEMPLATE_BAWAAN = [
   { nama: "XL TikTok", operator: "xl", kategori: "sosmed", tipe: "SSH", metode: "SSH_SNI", ssh: sshBawaan({ port: 443, sni: "api24-normal.tiktokv.com" }), xray: null },
   { nama: "Axis WA", operator: "axis", kategori: "wa", tipe: "SSH", metode: "SSH_DIRECT", ssh: sshBawaan({ host: "listen.noice.id", port: 80, payload: "HEAD / HTTP/1.1[crlf]Host: listen.noice.id:80[crlf]Connection: Keep-Alive[crlf]User-Agent: [ua][crlf][crlf]BMOVE / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf][crlf]" }), xray: null },
   { nama: "XL Edu Jabar", operator: "xl", kategori: "edu", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY", ssh: sshBawaan({ port: 80, proxyHost: "edu.ruangguru.com", proxyPort: 80, payload: "HEAD / HTTP/1.1[crlf]Host: edu.ruangguru.com:80[crlf]Connection: Keep-Alive[crlf]User-Agent: [ua][crlf][crlf]BMOVE / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf][crlf]", enhanced: true }), xray: null },
+  { nama: "XL Edu Timur Proxy", operator: "xl", kategori: "edu", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY", ssh: sshBawaan({ port: 80, proxyHost: "104.17.3.81", proxyPort: 80, enhanced: true }), xray: null },
+  { nama: "XL Edu Timur V2 Proxy SNI", operator: "xl", kategori: "edu", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY_SNI", ssh: sshBawaan({ port: 443, proxyHost: "www.zenius.net", proxyPort: 443, sni: "www.zenius.net", enhanced: true }), xray: null },
   { nama: "XL Edu Direct", operator: "xl", kategori: "edu", tipe: "SSH", metode: "SSH_DIRECT", ssh: sshBawaan({ host: "162.159.140.147", port: 80, payload: "GET / HTTP/1.1[crlf]Host: edu.ruangguru.com[crlf][crlf]PATCH / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf][crlf][split]HTTP/ 69[crlf][crlf]" }), xray: null },
   { nama: "XL Vision+", operator: "xl", kategori: "nonton", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY", ssh: sshBawaan({ port: 80, proxyHost: "link.visionplus.id", proxyPort: 80, payload: "HEAD / HTTP/1.1[crlf]Host: link.visionplus.id:80[crlf]Connection: Keep-Alive[crlf]User-Agent: [ua][crlf*2]BMOVE / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf*2][split]HTTP/1.1 200 OK[crlf*2]" }), xray: null },
   { nama: "XL Catchplay", operator: "xl", kategori: "nonton", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY", ssh: sshBawaan({ port: 80, proxyHost: "partner.catchplay.com", proxyPort: 80, payload: "GET / HTTP/1.1[crlf]Host: partner.catchplay.com[crlf][crlf]PATCH / HTTP/1.1[crlf]Host: [host][crlf]Connection: Keep-Alive[crlf]Service: SSH[crlf]ModeX: Bypass[crlf]Upgrade: websocket[crlf][crlf]" }), xray: null },
@@ -710,6 +714,8 @@ export const TEMPLATE_BAWAAN = [
   { nama: "by.U Opok WS", operator: "byu", kategori: "opok", tipe: "XRAY", metode: "WS", ssh: null, xray: xrayBawaan({ targetHost: "tdwcontent.telkomsel.com", targetPort: 443 }) },
   { nama: "XL Iflix Timur WS", operator: "xl", kategori: "nonton", tipe: "XRAY", metode: "WS", ssh: null, xray: xrayBawaan({ targetHost: "www.iflix.com", targetPort: 443 }) },
   { nama: "XL Iflix Barat TLS", operator: "xl", kategori: "nonton", tipe: "XRAY", metode: "SSL_TLS", ssh: null, xray: xrayBawaan({ targetPort: 443, sni: "live.iflix.com" }) },
+  { nama: "XL Edu Timur WS", operator: "xl", kategori: "edu", tipe: "XRAY", metode: "WS", ssh: null, xray: xrayBawaan({ targetHost: "104.17.3.81", targetPort: 443 }) },
+  { nama: "XL Edu Timur V2 WS", operator: "xl", kategori: "edu", tipe: "XRAY", metode: "WS", ssh: null, xray: xrayBawaan({ targetHost: "www.zenius.net", targetPort: 443 }) },
 ];
 
 // Masukkan TEMPLATE_BAWAAN ke KV (satu per satu, upsert menurut nama).
@@ -1120,7 +1126,9 @@ async function terapkanTemplateSshMetode(env, cfg, template, bugAkun) {
       inj.proxyHost = t.proxyHost;
       if (t.proxyPort) inj.proxyPort = t.proxyPort;
     }
-    isiPayloadSshTemplate(inj, t, ssh.host, "");
+    // (v2.9.8) bug untuk payload enhanced = proxy (dulu "" -> "Host: :80"
+    // rusak bila template enhanced tanpa payload, mis. Edu Timur).
+    isiPayloadSshTemplate(inj, t, ssh.host, t.proxyHost || "");
     return cfg;
   }
 
@@ -1149,7 +1157,7 @@ async function terapkanTemplateSshMetode(env, cfg, template, bugAkun) {
       inj.proxyHost = t.proxyHost;
       if (t.proxyPort) inj.proxyPort = t.proxyPort;
     }
-    isiPayloadSshTemplate(inj, t, ssh.host, ""); // (v2.9.8) tanpa payload -> default Asep, bukan "" v2.9.7
+    isiPayloadSshTemplate(inj, t, ssh.host, t.proxyHost || ""); // (v2.9.8) bug = proxy (bukan ""), sama seperti PAYLOAD_PROXY
     return cfg;
   }
 
