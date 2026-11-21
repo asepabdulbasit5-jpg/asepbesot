@@ -892,7 +892,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.7.8";
+const VERSI_BOT = "v2.7.9";
 
 const PESAN_START =
   "👋 <b>Generator Config Dark Tunnel</b>\n\n" +
@@ -1714,29 +1714,33 @@ export async function cekDomain(domain) {
 
 export function formatHasilCek(r) {
   const barisIp = (r.ips && r.ips.length)
-    ? "\n🌐 IP: " + r.ips.map((ip) => escapeHtml(ip)).join(", ") : "";
+    ? "🌐 IP: " + r.ips.map((ip) => escapeHtml(ip)).join(", ") : "";
   const barisHost = r.hostname
-    ? "\n🔁 Hostname: <code>" + escapeHtml(r.hostname) + "</code>" : "";
+    ? "🔁 Hostname: <code>" + escapeHtml(r.hostname) + "</code>" : "";
   // Subdomain: satu per baris, format nama/ip (Provider) — provider
   // dalam kurung bila terdeteksi, tanpa kurung bila tidak.
   const barisSub = r.subdomains
     ? (r.subdomains.length
-      ? "\n🔎 Subdomain yang ditemukan:\n" + r.subdomains.map((s) => "• " + escapeHtml(s.nama) + "/" + escapeHtml(s.ip) + (s.server ? " (" + escapeHtml(s.server) + ")" : "")).join("\n")
-      : "\n🔎 Subdomain: tidak ditemukan")
+      ? "🔎 Subdomain yang ditemukan:\n" + r.subdomains.map((s) => "• " + escapeHtml(s.nama) + "/" + escapeHtml(s.ip) + (s.server ? " (" + escapeHtml(s.server) + ")" : "")).join("\n")
+      : "🔎 Subdomain: tidak ditemukan")
     : "";
   if (!r.ok) {
     return "🌐 <b>" + escapeHtml(r.domain) + "</b>\n\n" +
       "❌ Domain tidak merespons — tidak ditemukan atau tidak bisa dijangkau.\n" +
       "Coba cek lagi ejaannya, atau coba lagi nanti ya." +
-      barisIp + barisHost + barisSub;
+      (barisIp ? "\n" + barisIp : "") + (barisHost ? "\n" + barisHost : "") + (barisSub ? "\n" + barisSub : "");
   }
-  let teks = "🌐 <b>" + escapeHtml(r.domain) + "</b>\n\n" +
-    "✅ Merespons — HTTP " + r.status + " (" + r.ms + " ms)";
-  if (r.status >= 400) teks += "\n⚠️ Domain merespons, tapi mengembalikan status " + r.status + " (akses dibatasi / halaman tidak ada).";
-  teks += barisIp + barisHost + barisSub;
-  if (r.cdn) teks += "\n📡 CDN: " + r.cdn;
-  if (r.server) teks += "\n🖥️ Server: " + escapeHtml(r.server);
-  return teks;
+  // Cabang sukses — urutan v2.7.9 (contoh Asep, ovo.id):
+  // judul → status → IP/Hostname/CDN/Server → subdomain (paling akhir),
+  // tiap blok dipisah satu baris kosong. Tanpa baris peringatan status.
+  const info = [barisIp, barisHost,
+    r.cdn ? "📡 CDN: " + r.cdn : "",
+    r.server ? "🖥️ Server: " + escapeHtml(r.server) : ""].filter(Boolean).join("\n");
+  const blok = ["🌐 <b>" + escapeHtml(r.domain) + "</b>",
+    "✅ Merespons — HTTP " + r.status + " (" + r.ms + " ms)"];
+  if (info) blok.push(info);
+  if (barisSub) blok.push(barisSub);
+  return blok.join("\n\n");
 }
 
 function keyboardStart(isAdmin) {
