@@ -329,9 +329,17 @@ function keyboardKategoriBug(opKey, kvKats) {
     const ia = URUTAN_KATEGORI.indexOf(a), ib = URUTAN_KATEGORI.indexOf(b);
     return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
   });
-  const rows = semua.map((k) => ([{ text: labelKategori(opKey, k), callback_data: "bug:kat:" + opKey + ":" + k }]));
+  const rows = baris2(semua.map((k) => ({ text: labelKategori(opKey, k), callback_data: "bug:kat:" + opKey + ":" + k })));
   rows.push([{ text: "⬅️ Ganti operator", callback_data: "bug:back" }]);
   rows.push(...TOMBOL_KEMBALI);
+  return rows;
+}
+
+// Kelompokkan tombol jadi 2 per baris (biar daftar kategori tidak
+// memanjang ke bawah — 1 tombol per baris bikin daftar kepanjangan).
+function baris2(tombol) {
+  const rows = [];
+  for (let i = 0; i < tombol.length; i += 2) rows.push(tombol.slice(i, i + 2));
   return rows;
 }
 
@@ -439,10 +447,23 @@ export function validBugHost(s) {
   return validHost(h);
 }
 
-// Status admin: "ya" | "bukan" | "belum" (ADMIN_CHAT_ID tidak diset).
+// Chat ID admin (Asep). Workflow deploy tidak memasang ADMIN_CHAT_ID
+// sebagai variabel Worker (hanya dipakai untuk notifikasi deploy), jadi
+// env.ADMIN_CHAT_ID di Worker KOSONG — panel admin tidak pernah muncul.
+// Fallback ke ID ini supaya admin tetap dikenali walau env belum diset
+// di dashboard Cloudflare. (Chat ID bukan rahasia — cuma nomor pengenal
+// chat Telegram, bukan token/kredensial.)
+const ADMIN_CHAT_ID_DEFAULT = "1315468885";
+
+function adminChatId(env) {
+  return env.ADMIN_CHAT_ID ? String(env.ADMIN_CHAT_ID) : ADMIN_CHAT_ID_DEFAULT;
+}
+
+// Status admin: "ya" | "bukan" | "belum" (tidak ada ADMIN_CHAT_ID sama sekali).
 function cekAdmin(env, chatId) {
-  if (!env.ADMIN_CHAT_ID) return "belum";
-  return String(chatId) === String(env.ADMIN_CHAT_ID) ? "ya" : "bukan";
+  const adminId = adminChatId(env);
+  if (!adminId) return "belum";
+  return String(chatId) === adminId ? "ya" : "bukan";
 }
 
 // ---- Bug tambahan admin (KV key BUGS) ----
@@ -576,7 +597,7 @@ async function catatUpdate(env, teks) {
 async function siarkanUpdate(env, teks) {
   if (!env.DATA) return 0;
   const keys = await kvList(env, "USER:");
-  const adminId = env.ADMIN_CHAT_ID ? String(env.ADMIN_CHAT_ID) : null;
+  const adminId = adminChatId(env);
   let terkirim = 0;
   for (const k of keys) {
     const chatId = k.slice("USER:".length);
@@ -871,7 +892,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.7";
+const VERSI_BOT = "v2.7.2";
 
 const PESAN_START =
   "👋 <b>Generator Config Dark Tunnel</b>\n\n" +
@@ -1470,8 +1491,9 @@ async function editTelegram(env, chatId, messageId, text, keyboard) {
 }
 
 async function kabariAdmin(env, teks) {
-  if (!env.ADMIN_CHAT_ID) return;
-  try { await sendTelegram(env, env.ADMIN_CHAT_ID, "⚠️ Bot Dark Tunnel: " + teks); } catch { /* abaikan */ }
+  const adminId = adminChatId(env);
+  if (!adminId) return;
+  try { await sendTelegram(env, adminId, "⚠️ Bot Dark Tunnel: " + teks); } catch { /* abaikan */ }
 }
 
 // ================= CEK DOMAIN =================
@@ -1667,7 +1689,7 @@ function keyboardTemplateOperator() {
 function keyboardTemplateKategori(opKey) {
   const op = BUG_DB[opKey];
   const kats = op ? Object.keys(op.kategori) : [];
-  const rows = kats.map((k) => ([{ text: labelKategori(opKey, k), callback_data: "tw:kat:" + k }]));
+  const rows = baris2(kats.map((k) => ({ text: labelKategori(opKey, k), callback_data: "tw:kat:" + k })));
   rows.push([{ text: "⬅️ Kembali ke Operator", callback_data: "tw:kembali:op" }]);
   rows.push([{ text: "❌ Batal", callback_data: "admin:batal" }]);
   return rows;
@@ -1691,8 +1713,28 @@ const TEKS_PANEL_ADMIN = "⚙️ <b>Menu Admin</b>\n\nPilih yang mau dilakukan:"
 
 // Menu utama: PESAN_START + keyboard inline saja. (Tombol reply keyboard
 // "▶️ Start" bawah dihapus 21 Nov 2026 atas permintaan Asep — tidak berguna.)
+// Karena keyboard lama masih nempel di HP pengguna (Telegram menyimpan
+// reply keyboard sampai dihapus eksplisit), /start pertama kali juga
+// mengirim pesan remove_keyboard sekali per pengguna (dilacak KV KBRM).
 async function tampilkanMenuUtama(env, chatId) {
   await sendTelegram(env, chatId, PESAN_START, keyboardStart(cekAdmin(env, chatId) === "ya"));
+  await hapusKeyboardBawahSekali(env, chatId);
+}
+
+// Hapus reply keyboard "▶️ Start" lama — sekali per pengguna (KV KBRM).
+// Telegram tidak bisa menghapus reply keyboard lewat pesan inline_keyboard;
+// harus pesan khusus dengan remove_keyboard. Tanpa KV: dilewati diam-diam.
+async function hapusKeyboardBawahSekali(env, chatId) {
+  if (!env.DATA) return;
+  try {
+    if (await env.DATA.get("KBRM:" + chatId)) return;
+    await telegramApi(env, "sendMessage", {
+      chat_id: chatId,
+      text: "Tombol ▶️ Start di bawah sudah dihapus.",
+      reply_markup: { remove_keyboard: true },
+    });
+    await env.DATA.put("KBRM:" + chatId, "1");
+  } catch { /* abaikan */ }
 }
 
 // ================= HANDLER TELEGRAM =================
@@ -2782,15 +2824,16 @@ async function handleTelegram(env, update) {
     return;
   }
 
-  // Perintah apa pun membatalkan pilihan jenis config & state admin
-  // yang tertunda — pengguna pindah alur.
-  if (teks.startsWith("/")) {
+  // Perintah apa pun (atau ketuk "▶️ Start" dari keyboard lama yang masih
+  // nempel) membatalkan pilihan jenis config & state admin yang tertunda —
+  // pengguna pindah alur.
+  if (teks.startsWith("/") || teks === "▶️ Start") {
     pendingAdmin.delete(chatId);
     pendingPilih.delete(chatId);
     pendingTemplate.delete(chatId);
   }
 
-  if (teks === "/start" || teks === "/menu" || teks === "/help" ||
+  if (teks === "/start" || teks === "/menu" || teks === "/help" || teks === "▶️ Start" ||
       teks.startsWith("/start ") || teks.startsWith("/start@") ||
       teks.startsWith("/menu ") || teks.startsWith("/menu@")) {
     pendingCek.delete(chatId);
