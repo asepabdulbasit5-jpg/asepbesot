@@ -662,6 +662,67 @@ async function hapusTemplateKv(env, id) {
   } catch { return false; }
 }
 
+// ---- Template bawaan (v2.9.8) ----
+// 9 template dikte Asep 22 Nov 2026 (00:52–00:58 WIB) + 2 template
+// starter (XL Edu SSH, by.U Opok SSH — dari template-starter-3.json,
+// draf 21 Nov 2026, dari bahan grup) + 4 template Ilped (api.quipper.com
+// + wp-assets.ovo.id, masing-masing SSH + Xray WS, dikte Asep 01:18–
+// 01:19 WIB) + 2 template by.U Opok 500mb (SSH PAYLOAD_PROXY_SNI +
+// Xray WS, dikte Asep 01:20 WIB) + 2 template Iflix Timur (bug
+// www.iflix.com, SSH PAYLOAD_PROXY_SNI + Xray WS, dikte Asep 01:22 WIB)
+// + 1 template Iflix Barat TLS (Xray SSL_TLS, SNI live.iflix.com, dikte
+// Asep 01:22 WIB; SSH-nya = "XL Iflix Barat", ganti nama dari "XL Iflix"
+// karena isinya sama persis: SSH_SNI live.iflix.com port 443) + 1 template
+// XL Conference WC (bug support.zoom.us, dikte Asep 01:23 WIB) + 1 template
+// XL Conference Proxy SNI (versi SSH-nya, bug sama support.zoom.us,
+// dikte Asep 01:24 WIB).
+// Starter "Tsel Ilped SSH" (SNI classroom.google.com) TIDAK ikut: Asep
+// bilang Ilped cuma pakai 2 bug itu (01:19 WIB). Total 22 template.
+// Dimasukkan ke KV lewat /seedtemplate (admin, perintah teks) — upsert
+// menurut nama (simpanTemplate), jadi aman diulang dan tidak ganda.
+// Bentuk entri = persis hasil wizard (field kosong = null).
+function sshBawaan(patch) {
+  return { host: null, port: null, payload: null, proxyHost: null, proxyPort: null, sni: null, enhanced: false, slowdns: false, dnsNameServer: null, dnsPublicKey: null, dnsUdpHost: null, dnsUdpPort: null, ...patch };
+}
+function xrayBawaan(patch) {
+  return { targetHost: null, targetPort: null, sni: null, headerHost: null, payload: null, sshHost: null, sshPort: null, sshUser: null, sshPass: null, nameServer: null, publicKey: null, udpDnsHost: null, udpDnsPort: null, proxyHost: null, proxyPort: null, ...patch };
+}
+export const TEMPLATE_BAWAAN = [
+  { nama: "XL Iflix Barat", operator: "xl", kategori: "nonton", tipe: "SSH", metode: "SSH_SNI", ssh: sshBawaan({ port: 443, sni: "live.iflix.com" }), xray: null },
+  { nama: "XL Iflix Timur Proxy SNI", operator: "xl", kategori: "nonton", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY_SNI", ssh: sshBawaan({ port: 443, proxyHost: "www.iflix.com", proxyPort: 443, sni: "www.iflix.com" }), xray: null },
+  { nama: "XL Conference Proxy SNI", operator: "xl", kategori: "conference", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY_SNI", ssh: sshBawaan({ port: 443, proxyHost: "support.zoom.us", proxyPort: 443, sni: "support.zoom.us" }), xray: null },
+  { nama: "XL TikTok", operator: "xl", kategori: "sosmed", tipe: "SSH", metode: "SSH_SNI", ssh: sshBawaan({ port: 443, sni: "api24-normal.tiktokv.com" }), xray: null },
+  { nama: "Axis WA", operator: "axis", kategori: "wa", tipe: "SSH", metode: "SSH_DIRECT", ssh: sshBawaan({ host: "listen.noice.id", port: 80, payload: "HEAD / HTTP/1.1[crlf]Host: listen.noice.id:80[crlf]Connection: Keep-Alive[crlf]User-Agent: [ua][crlf][crlf]BMOVE / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf][crlf]" }), xray: null },
+  { nama: "XL Edu Jabar", operator: "xl", kategori: "edu", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY", ssh: sshBawaan({ port: 80, proxyHost: "edu.ruangguru.com", proxyPort: 80, payload: "HEAD / HTTP/1.1[crlf]Host: edu.ruangguru.com:80[crlf]Connection: Keep-Alive[crlf]User-Agent: [ua][crlf][crlf]BMOVE / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf][crlf]", enhanced: true }), xray: null },
+  { nama: "XL Edu Direct", operator: "xl", kategori: "edu", tipe: "SSH", metode: "SSH_DIRECT", ssh: sshBawaan({ host: "162.159.140.147", port: 80, payload: "GET / HTTP/1.1[crlf]Host: edu.ruangguru.com[crlf][crlf]PATCH / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf][crlf][split]HTTP/ 69[crlf][crlf]" }), xray: null },
+  { nama: "XL Vision+", operator: "xl", kategori: "nonton", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY", ssh: sshBawaan({ port: 80, proxyHost: "link.visionplus.id", proxyPort: 80, payload: "HEAD / HTTP/1.1[crlf]Host: link.visionplus.id:80[crlf]Connection: Keep-Alive[crlf]User-Agent: [ua][crlf*2]BMOVE / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf*2][split]HTTP/1.1 200 OK[crlf*2]" }), xray: null },
+  { nama: "XL Catchplay", operator: "xl", kategori: "nonton", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY", ssh: sshBawaan({ port: 80, proxyHost: "partner.catchplay.com", proxyPort: 80, payload: "GET / HTTP/1.1[crlf]Host: partner.catchplay.com[crlf][crlf]PATCH / HTTP/1.1[crlf]Host: [host][crlf]Connection: Keep-Alive[crlf]Service: SSH[crlf]ModeX: Bypass[crlf]Upgrade: websocket[crlf][crlf]" }), xray: null },
+  { nama: "XL Edu SSH", operator: "xl", kategori: "edu", tipe: "SSH", metode: null, ssh: sshBawaan({ port: 80, sni: "edu.ruangguru.com", proxyHost: "edu.ruangguru.com", proxyPort: 80, payload: "HEAD / HTTP/1.1[crlf]Host: edu.ruangguru.com:80[crlf]Connection: Keep-Alive[crlf]User-Agent: [ua][crlf][crlf]BMOVE / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf][crlf]", enhanced: true }), xray: null },
+  { nama: "by.U Opok SSH", operator: "byu", kategori: "opok", tipe: "SSH", metode: null, ssh: sshBawaan({ sni: "tdwcontent.telkomsel.com", payload: "GET / HTTP/1.1[crlf]Host: [host][crlf]Connection: Upgrade[crlf]User-Agent: [ua][crlf]Upgrade: websocket[crlf][crlf]", proxyHost: "space.byu.id", proxyPort: 443 }), xray: null },
+  { nama: "by.U Opok Proxy SNI", operator: "byu", kategori: "opok", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY_SNI", ssh: sshBawaan({ port: 443, proxyHost: "space.byu.id", proxyPort: 443, sni: "[host]" }), xray: null },
+  { nama: "Tsel Ilped Proxy", operator: "telkomsel", kategori: "ilped", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY", ssh: sshBawaan({ port: 80, proxyHost: "api.quipper.com", proxyPort: 80 }), xray: null },
+  { nama: "Tsel Ilped Proxy SNI", operator: "telkomsel", kategori: "ilped", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY_SNI", ssh: sshBawaan({ port: 443, proxyHost: "wp-assets.ovo.id", proxyPort: 443, sni: "wp-assets.ovo.id" }), xray: null },
+  { nama: "XL Spotify WC", operator: "xl", kategori: "musik", tipe: "XRAY", metode: "WC", ssh: null, xray: xrayBawaan({ targetHost: "investors.spotify.com", targetPort: 443 }) },
+  { nama: "XL Conference WC", operator: "xl", kategori: "conference", tipe: "XRAY", metode: "WC", ssh: null, xray: xrayBawaan({ targetHost: "support.zoom.us", targetPort: 443 }) },
+  { nama: "XL Vidio", operator: "xl", kategori: "nonton", tipe: "XRAY", metode: "WS", ssh: null, xray: xrayBawaan({ targetHost: "quiz.int.vidio.com", targetPort: 443 }) },
+  { nama: "Tsel Ilped WS Quipper", operator: "telkomsel", kategori: "ilped", tipe: "XRAY", metode: "WS", ssh: null, xray: xrayBawaan({ targetHost: "api.quipper.com", targetPort: 443 }) },
+  { nama: "Tsel Ilped WS Wpassets", operator: "telkomsel", kategori: "ilped", tipe: "XRAY", metode: "WS", ssh: null, xray: xrayBawaan({ targetHost: "wp-assets.ovo.id", targetPort: 443 }) },
+  { nama: "by.U Opok WS", operator: "byu", kategori: "opok", tipe: "XRAY", metode: "WS", ssh: null, xray: xrayBawaan({ targetHost: "tdwcontent.telkomsel.com", targetPort: 443 }) },
+  { nama: "XL Iflix Timur WS", operator: "xl", kategori: "nonton", tipe: "XRAY", metode: "WS", ssh: null, xray: xrayBawaan({ targetHost: "www.iflix.com", targetPort: 443 }) },
+  { nama: "XL Iflix Barat TLS", operator: "xl", kategori: "nonton", tipe: "XRAY", metode: "SSL_TLS", ssh: null, xray: xrayBawaan({ targetPort: 443, sni: "live.iflix.com" }) },
+];
+
+// Masukkan TEMPLATE_BAWAAN ke KV (satu per satu, upsert menurut nama).
+// Return daftar { nama, ok, aksi } — dipakai /seedtemplate.
+export async function seedTemplateBawaan(env) {
+  const hasil = [];
+  for (const tpl of TEMPLATE_BAWAAN) {
+    const r = await simpanTemplate(env, tpl);
+    hasil.push({ nama: tpl.nama, ok: !!r, aksi: r ? r.aksi : "gagal" });
+  }
+  return hasil;
+}
+
 // ---- Feed update (KV key UPDATES, array maks 20, terbaru dulu) ----
 async function ambilUpdatesKv(env) {
   const d = await kvGet(env, "UPDATES");
@@ -972,9 +1033,23 @@ function pastikanInject(sub, sniAwal, type) {
 // tetap tampil berisi Service: SSH di config VLESS. `""` = baris
 // kosong; kolom tidak bisa hilang total selama inject aktif, temuan
 // decompile: baris payload selalu digambar tanpa kondisi `if`.)
+// (v2.9.8: aturan `""` di atas kini hanya untuk Xray — untuk SSH,
+// template tanpa payload pakai PAYLOAD_SSH_DEFAULT di bawah.)
 function isiPayloadTemplate(inj, payloadTpl, host, sni) {
   if (payloadTpl) inj.payload = isiPlaceholderPayload(payloadTpl, host, sni);
   else inj.payload = "";
+}
+
+// (v2.9.8) Payload default untuk template SSH tanpa payload — perintah
+// Asep 22 Nov 2026 01:08 WIB ("kalau yang gak ada payload nya pakai
+// ini aja"). Sama dengan PAYLOAD_METODE.sshpayload.template.
+// [host] = host server akun, [ua] = User-Agent standar.
+// Urutan isi payload SSH template: payload template > enhanced > default.
+export const PAYLOAD_SSH_DEFAULT = "GET / HTTP/1.1[crlf]Host: [host][crlf]Connection: Upgrade[crlf]User-Agent: [ua][crlf]Upgrade: websocket[crlf][crlf]";
+function isiPayloadSshTemplate(inj, t, host, bug) {
+  if (t.payload) inj.payload = isiPlaceholderPayload(t.payload, host, bug);
+  else if (t.enhanced) inj.payload = isiPlaceholderPayload(PAYLOAD_METODE.enhanced.template, host, bug);
+  else inj.payload = isiPlaceholderPayload(PAYLOAD_SSH_DEFAULT, host, bug);
 }
 
 // Terapkan template SSH ke satu config SSH hasil parsePesan.
@@ -1015,7 +1090,11 @@ async function terapkanTemplateSshMetode(env, cfg, template, bugAkun) {
 
   // SSH DIRECT: host/port SSH dari bug template (user/pass tetap dari
   // akun pengguna); inject DIRECT, tanpa SNI, tanpa proxy.
+  // (v2.9.8) [host] = host server akun, [bug] = bug template — host akun
+  // disimpan dulu sebelum ssh.host ditimpa bug (sebelumnya [host] ikut
+  // jadi bug, padahal Host kedua payload DIRECT harus server akun).
   if (m === "SSH_DIRECT") {
+    const hostAkun = ssh.host;
     if (t.host) ssh.host = t.host;
     if (t.port) ssh.port = t.port;
     const butuh = !!(t.payload || t.enhanced || sub.injectConfig);
@@ -1023,9 +1102,7 @@ async function terapkanTemplateSshMetode(env, cfg, template, bugAkun) {
       const inj = pastikanInject(sub, "", "SSH");
       inj.serverNameIndication = "";
       inj.mode = "DIRECT";
-      if (t.payload) inj.payload = isiPlaceholderPayload(t.payload, ssh.host, "");
-      else if (t.enhanced) inj.payload = isiPlaceholderPayload(PAYLOAD_METODE.enhanced.template, ssh.host, "");
-      else inj.payload = "";
+      isiPayloadSshTemplate(inj, t, hostAkun, t.host || "");
       delete inj.proxyHost;
       delete inj.proxyPort;
     }
@@ -1043,9 +1120,7 @@ async function terapkanTemplateSshMetode(env, cfg, template, bugAkun) {
       inj.proxyHost = t.proxyHost;
       if (t.proxyPort) inj.proxyPort = t.proxyPort;
     }
-    if (t.payload) inj.payload = isiPlaceholderPayload(t.payload, ssh.host, "");
-    else if (t.enhanced) inj.payload = isiPlaceholderPayload(PAYLOAD_METODE.enhanced.template, ssh.host, "");
-    else inj.payload = "";
+    isiPayloadSshTemplate(inj, t, ssh.host, "");
     return cfg;
   }
 
@@ -1059,9 +1134,7 @@ async function terapkanTemplateSshMetode(env, cfg, template, bugAkun) {
     const inj = pastikanInject(sub, sniEfektif, "SSH");
     inj.mode = "DIRECT";
     if (sniEfektif) inj.serverNameIndication = sniEfektif;
-    if (t.payload) inj.payload = isiPlaceholderPayload(t.payload, ssh.host, sniEfektif);
-    else if (t.enhanced) inj.payload = isiPlaceholderPayload(PAYLOAD_METODE.enhanced.template, ssh.host, sniEfektif);
-    else inj.payload = "";
+    isiPayloadSshTemplate(inj, t, ssh.host, sniEfektif);
     return cfg;
   }
 
@@ -1076,7 +1149,7 @@ async function terapkanTemplateSshMetode(env, cfg, template, bugAkun) {
       inj.proxyHost = t.proxyHost;
       if (t.proxyPort) inj.proxyPort = t.proxyPort;
     }
-    inj.payload = ""; // tanpa payload (v2.9.7) — kosong, bukan default SSH aplikasi
+    isiPayloadSshTemplate(inj, t, ssh.host, ""); // (v2.9.8) tanpa payload -> default Asep, bukan "" v2.9.7
     return cfg;
   }
 
@@ -1108,16 +1181,9 @@ async function terapkanTemplateSshGenerik(env, cfg, template, bugAkun) {
   }
   if (inj) {
     if (sniEfektif) inj.serverNameIndication = sniEfektif;
-    if (t.payload) {
-      inj.payload = isiPlaceholderPayload(t.payload, ssh.host, sniEfektif);
-    } else if (t.enhanced) {
-      inj.payload = isiPlaceholderPayload(PAYLOAD_METODE.enhanced.template, ssh.host, sniEfektif);
-    } else {
-      // Template tanpa payload & tanpa enhanced: payload kosong `""`
-      // (v2.9.7, aturan v2.8.2 dikembalikan: omit di v2.9.5 membuat
-      // aplikasi isi ulang payload default SSH-nya sendiri).
-      inj.payload = "";
-    }
+    // Payload template > enhanced > default Asep (v2.9.8 — "" v2.9.7
+    // hanya tinggal untuk Xray).
+    isiPayloadSshTemplate(inj, t, ssh.host, sniEfektif);
     if (t.proxyHost) {
       inj.proxyHost = t.proxyHost;
       if (t.proxyPort) inj.proxyPort = t.proxyPort;
@@ -1465,7 +1531,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.7";
+const VERSI_BOT = "v2.9.8";
 
 const PESAN_START =
   "👋 <b>Generator Config Dark Tunnel</b>\n\n" +
@@ -3046,7 +3112,7 @@ async function kirimLangkahTemplate(env, chatId, st) {
   } else if (t === "ssh_port") {
     await tampil("🔌 <b>Port SSH</b>\n\nKirim port (angka 1-65535, mis. <code>80</code> atau <code>443</code>).\n\nKosong = pakai port dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "ssh_payload") {
-    await tampil("📝 <b>Payload</b>\n\nKirim teks payload lengkap (boleh pakai <code>[host]</code> / <code>[bug]</code> / <code>[ua]</code>).\n\nKosong = tanpa payload. Ketuk ⏭️ Lewati untuk kosong.", batal);
+    await tampil("📝 <b>Payload</b>\n\nKirim teks payload lengkap (boleh pakai <code>[host]</code> / <code>[bug]</code> / <code>[ua]</code>).\n\nKosong = pakai payload default SSH (GET ... [host] ...). Ketuk ⏭️ Lewati untuk default.", batal);
   } else if (t === "ssh_proxy") {
     await tampil("🔀 <b>Proxy</b>\n\nKirim proxy — host saja (mis. <code>proxy.contoh.com</code>, port ditanya setelahnya) atau langsung format <code>host:port</code> (boleh dari daftar bug — atau ketuk 📋 Pilih dari Daftar Bug).\n\nKosong = tanpa proxy. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "ssh_proxyport") {
@@ -4329,6 +4395,27 @@ async function handleTelegram(env, update) {
     }
     pendingConfig.set(chatId, { op, kat, nama, ts: Date.now() });
     await sendTelegram(env, chatId, "📋 Config <b>" + escapeHtml(nama) + "</b> (" + labelOperator(op) + " — " + labelKategori(op, kat) + ").\n\nKirim akunnya (SSH/Xray, bebas format) — bot akan simpan sebagai config contoh.");
+    return;
+  }
+  // /seedtemplate (admin, v2.9.8): masukkan template bawaan
+  // (TEMPLATE_BAWAAN: 9 dikte Asep + 3 starter) ke KV. Upsert menurut
+  // nama — aman diulang; template tampil di /config.
+  if (teks === "/seedtemplate" || teks.startsWith("/seedtemplate ") || teks.startsWith("/seedtemplate@")) {
+    pendingCek.delete(chatId);
+    pendingConfig.delete(chatId);
+    const st = cekAdmin(env, chatId);
+    if (st === "belum") { await sendTelegram(env, chatId, "⚠️ Fitur admin belum dikonfigurasi."); return; }
+    if (st === "bukan") { await sendTelegram(env, chatId, "⛔ Perintah ini khusus admin."); return; }
+    if (!env.DATA) { await sendTelegram(env, chatId, "⚠️ Fitur admin belum aktif — KV belum dipasang di Worker."); return; }
+    const hasil = await seedTemplateBawaan(env);
+    const ok = hasil.filter((h) => h.ok);
+    const gagal = hasil.filter((h) => !h.ok);
+    if (ok.length) await catatUpdate(env, "Template bawaan ditambahkan: " + ok.length + " template (seed /seedtemplate)");
+    await sendTelegram(env, chatId,
+      (gagal.length ? "⚠️ " : "✅ ") + "Seed template selesai: <b>" + ok.length + " berhasil</b>" + (gagal.length ? ", <b>" + gagal.length + " gagal</b>" : "") + " dari " + hasil.length + " template bawaan.\n\n" +
+      ok.map((h) => "• " + escapeHtml(h.nama) + " (" + h.aksi + ")").join("\n") +
+      (gagal.length ? "\n\nGagal: " + gagal.map((h) => escapeHtml(h.nama)).join(", ") : "") +
+      "\n\nLihat di /config — Template Xray & SSH.");
     return;
   }
   if (teks.startsWith("/")) { pendingCek.delete(chatId); pendingConfig.delete(chatId); return; } // perintah tak dikenal diabaikan diam-diam
