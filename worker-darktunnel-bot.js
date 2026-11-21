@@ -694,21 +694,22 @@ async function catatanBugUntuk(env, hasil) {
     }
     return "";
   }
-  if (!hasil.adaInject) {
-    return "\n\n💡 Belum ada bug/SNI — kalau butuh, ketik /bug buat lihat daftar bug host.";
-  }
+  // (v2.9.5) Hint "Belum ada bug/SNI" dihapus atas permintaan Asep.
   return "";
 }
 
 // Ringkasan terformat dari satu TunnelConfig untuk caption hasil generate
 // (pola @XHMTunBot — pengguna bisa memverifikasi isi config sebelum impor).
-// (v2.9.3) Tampilkan ISI config selengkapnya dalam blok <pre> format
-// "Label   : nilai" (contoh Asep 21 Nov 2026) — Xray: Domain, Port,
-// Key/UUID, Network, Path ws, Host, SNI, TLS; SSH: Host, Port, Username,
-// Password, SNI/Bug, Inject, Proxy, Payload, SlowDNS. Kredensial
-// (Key/UUID, Password) DITAMPILKAN atas permintaan Asep: itu data akun
-// pengirim sendiri yang dikembalikan ke DM-nya sendiri, dan file .dark
-// yang dikirim bersamaan sudah berisi kredensial yang sama.
+// (v2.9.5) Xray tampil format CLASH (satu entri proxy, bisa ditempel ke
+// bagian `proxies:`); SSH tetap format label lama, tanpa baris "Inject"
+// (Asep: kalau tidak guna, hapus dari semuanya). Kredensial (Key/UUID,
+// Password) DITAMPILKAN atas permintaan Asep: itu data akun pengirim
+// sendiri yang dikembalikan ke DM-nya sendiri, dan file .dark yang
+// dikirim bersamaan sudah berisi kredensial yang sama.
+// Nilai string di-quote ganda gaya YAML (escape \ dan ").
+function yamlStr(v) {
+  return "\"" + String(v ?? "").replace(/\\/g, "\\\\").replace(/"/g, "\\\"") + "\"";
+}
 export function ringkasanConfig(c) {
   if (!c || typeof c !== "object") return "";
   const sub = c.sshTunnelConfig || c.sshDnsttTunnelConfig || c.vmessTunnelConfig || c.vlessTunnelConfig || c.trojanTunnelConfig || c.shadowsocksTunnelConfig;
@@ -716,6 +717,57 @@ export function ringkasanConfig(c) {
   const v2 = sub?.v2rayConfig;
   const dnstt = sub?.dnsttConfig;
   const inj = sub?.injectConfig;
+  const tipe = String(c.type || "").toUpperCase();
+  // --- Xray: blok Clash (v2rayConfig ada) ---
+  if (v2) {
+    const adalahSs = tipe === "SHADOWSOCKS";
+    const adalahTrojan = tipe === "TROJAN";
+    const adalahVmess = tipe === "VMESS";
+    const trans = v2.transportNetwork ? String(v2.transportNetwork) : "";
+    const jaringan = trans === "Websocket" ? "ws" : trans === "gRPC" ? "grpc" : trans === "TCP" ? "tcp" : (trans ? trans.toLowerCase() : "ws");
+    const tlsAktif = v2.tls === true;
+    const y = [];
+    y.push("- name: " + yamlStr(c.name || ""));
+    y.push("  type: " + (adalahSs ? "ss" : adalahTrojan ? "trojan" : adalahVmess ? "vmess" : "vless"));
+    y.push("  server: " + yamlStr(v2.host || ""));
+    y.push("  port: " + (v2.port ?? ""));
+    if (!adalahTrojan && !adalahSs) y.push("  uuid: " + yamlStr(v2.uuid || ""));
+    if (adalahVmess) { y.push("  alterId: 0"); y.push("  cipher: auto"); }
+    if (adalahSs) {
+      if (c._ssMethod) y.push("  cipher: " + yamlStr(c._ssMethod));
+      y.push("  password: " + yamlStr(v2.uuid || ""));
+    }
+    if (adalahTrojan) y.push("  password: " + yamlStr(v2.uuid || ""));
+    if (!adalahSs) {
+      y.push("  network: " + jaringan);
+      y.push("  tls: " + (tlsAktif ? "true" : "false"));
+      y.push("  udp: true");
+      if (jaringan === "ws" && v2.wsPath) y.push("  ws-path: " + yamlStr(v2.wsPath));
+      if (jaringan === "ws" && v2.wsHeaderHost) { y.push("  ws-headers:"); y.push("    Host: " + yamlStr(v2.wsHeaderHost)); }
+      if (jaringan === "grpc" && v2.grpcServiceName) y.push("  grpc-service-name: " + yamlStr(v2.grpcServiceName));
+      if (tlsAktif && v2.serverNameIndication) {
+        if (adalahTrojan) y.push("  sni: " + yamlStr(v2.serverNameIndication));
+        else y.push("  servername: " + yamlStr(v2.serverNameIndication));
+      }
+    } else {
+      y.push("  udp: true");
+    }
+    // Info inject tanpa padanan Clash — jadi komentar (tetap valid YAML).
+    if (inj?.proxyHost) y.push("  # proxy: " + inj.proxyHost + (inj.proxyPort ? ":" + inj.proxyPort : ""));
+    if (dnstt || inj?.mode === "DNSTT") {
+      const ns = dnstt?.serverName || inj?.dnsttServerName || "";
+      y.push("  # slowdns: " + (ns || "ya"));
+    }
+    // SNI/bug (inject) yang beda dari TLS SNI — mis. jalur generik WC:
+    // servername = domain server, tapi inject SNI = host WC. Bila sama
+    // (metode WC — keduanya host WC) atau tanpa inject, nilainya sudah
+    // tampil di servername:/Host: di atas, jadi tidak ditambah lagi.
+    if (inj?.serverNameIndication && inj.serverNameIndication !== v2.serverNameIndication) {
+      y.push("  # sni/bug: " + inj.serverNameIndication);
+    }
+    return "📋 <b>Rincian Config</b>\n<pre>" + y.map(escapeHtml).join("\n") + "</pre>";
+  }
+  // --- SSH: format label lama, tanpa baris "Inject" (v2.9.5) ---
   const baris = [];
   const tambah = (label, nilai) => {
     if (nilai === undefined || nilai === null || nilai === "") return;
@@ -728,20 +780,6 @@ export function ringkasanConfig(c) {
     tambah("Username", ssh.username);
     tambah("Password", ssh.password);
   }
-  if (v2) {
-    tambah("Domain", v2.host);
-    tambah("Port", v2.port);
-    tambah("Key/UUID", v2.uuid);
-    const trans = v2.transportNetwork ? String(v2.transportNetwork) : "";
-    const jaringan = trans === "Websocket" ? "ws" : trans === "gRPC" ? "grpc" : trans === "TCP" ? "tcp" : trans.toLowerCase();
-    tambah("Network", jaringan);
-    tambah("Path ws", v2.wsPath);
-    tambah("Service", v2.grpcServiceName);
-    tambah("Host", v2.wsHeaderHost);
-    tambah("SNI", v2.serverNameIndication);
-    if (v2.tls === true) tambah("TLS", "Aktif");
-    else if (v2.tls === false) tambah("TLS", "Mati");
-  }
   // Mode WC (v2.6): SNI inject = bug + "." + host server. Terdeteksi
   // bila SNI inject diakhiri "." + host server config ini.
   const sniInject = inj?.serverNameIndication || "";
@@ -749,12 +787,9 @@ export function ringkasanConfig(c) {
   const adalahWc = !!(inj && sniInject && hostServer && sniInject.endsWith("." + hostServer));
   tambah("SNI/Bug", sniInject ? sniInject + (adalahWc ? " (WC)" : "") : "");
   if (inj) {
-    tambah("Inject", "ON (" + (inj.mode || "DIRECT_SNI") + ")");
     if (inj.proxyHost) tambah("Proxy", inj.proxyHost + (inj.proxyPort ? ":" + inj.proxyPort : ""));
     if (inj.payload !== undefined) tambah("Payload", inj.payload === "" ? "Tidak ada" : (inj.payloadEnhanced ? "Ada (Enhanced)" : "Ada"));
     if (adalahWc) tambah("Mode", "WC (wildcard)");
-  } else {
-    tambah("Inject", "OFF");
   }
   // SlowDNS (v2.7): tipe SSH_DNSTT atau inject mode DNSTT.
   if (dnstt || inj?.mode === "DNSTT") {
@@ -776,15 +811,18 @@ export function ringkasanConfig(c) {
 // Daftar ini dari Asep (21 Nov 2026) + tambahan asisten untuk mengisi
 // celah (XRAY gRPC, XRAY PROXY, SSH + PAYLOAD, SSH + PROXY).
 export const METODE_TEMPLATE = {
+  // (v2.9.5 koreksi) Label pendek tanpa prefix tipe — panel sudah
+  // menyebut tipenya ("Template Config Baru (SSH/Xray)"), dan label
+  // panjang terpotong di tombol ("SSH + PAYLOAD + PRO..." ganda).
   SSH: [
-    { id: "SSH_SNI", label: "SSH + SNI" },
-    { id: "SSH_PAYLOAD_PROXY", label: "SSH + PAYLOAD + PROXY" },
-    { id: "SSH_PAYLOAD_PROXY_SNI", label: "SSH + PAYLOAD + PROXY + SNI" },
-    { id: "SSH_DIRECT", label: "SSH DIRECT" },
-    { id: "SSH_UDP", label: "SSH UDP" },
-    { id: "SSH_SLOWDNS", label: "SSH SLOWDNS" },
-    { id: "SSH_PAYLOAD", label: "SSH + PAYLOAD" },
-    { id: "SSH_PROXY", label: "SSH + PROXY" },
+    { id: "SSH_SNI", label: "SNI" },
+    { id: "SSH_PAYLOAD_PROXY", label: "PAYLOAD + PROXY" },
+    { id: "SSH_PAYLOAD_PROXY_SNI", label: "PAYLOAD+PROXY+SNI" },
+    { id: "SSH_DIRECT", label: "DIRECT" },
+    { id: "SSH_UDP", label: "UDP" },
+    { id: "SSH_SLOWDNS", label: "SLOWDNS" },
+    { id: "SSH_PAYLOAD", label: "PAYLOAD" },
+    { id: "SSH_PROXY", label: "PROXY" },
   ],
   XRAY: [
     { id: "WS", label: "WS" },
@@ -792,12 +830,12 @@ export const METODE_TEMPLATE = {
     { id: "SSL_TLS", label: "SSL/TLS" },
     { id: "WC_TLS", label: "WC/TLS" },
     { id: "WC_ONERING", label: "WC ONERING" },
-    { id: "XRAY_PAYLOAD", label: "XRAY + PAYLOAD" },
-    { id: "XRAY_PAYLOAD_PROXY", label: "XRAY + PAYLOAD + PROXY" },
-    { id: "XRAY_DNS", label: "XRAY OVER DNS" },
-    { id: "XRAY_HTTP", label: "XRAY OVER HTTP" },
-    { id: "XRAY_GRPC", label: "XRAY gRPC" },
-    { id: "XRAY_PROXY", label: "XRAY PROXY" },
+    { id: "XRAY_PAYLOAD", label: "PAYLOAD" },
+    { id: "XRAY_PAYLOAD_PROXY", label: "PAYLOAD + PROXY" },
+    { id: "XRAY_DNS", label: "OVER DNS" },
+    { id: "XRAY_HTTP", label: "OVER HTTP" },
+    { id: "XRAY_GRPC", label: "gRPC" },
+    { id: "XRAY_PROXY", label: "PROXY" },
   ],
 };
 
@@ -806,16 +844,18 @@ export const METODE_TEMPLATE = {
 // host saja (tanpa port) — dilewati tahapBerikutTemplate bila proxy
 // kosong / port sudah terisi.
 export const TAHAP_METODE_TEMPLATE = {
-  SSH_SNI: ["ssh_sni"],
-  SSH_PAYLOAD_PROXY: ["ssh_proxy", "ssh_proxyport", "ssh_payload", "ssh_enhanced"],
-  SSH_PAYLOAD_PROXY_SNI: ["ssh_proxy", "ssh_proxyport", "ssh_sni", "ssh_payload", "ssh_enhanced"],
+  // (v2.9.5) ssh_port jadi tahap PERTAMA semua metode SSH kecuali
+  // DIRECT (port DIRECT sudah dari tahap ssh_bug format host:port).
+  SSH_SNI: ["ssh_port", "ssh_sni"],
+  SSH_PAYLOAD_PROXY: ["ssh_port", "ssh_proxy", "ssh_proxyport", "ssh_payload", "ssh_enhanced"],
+  SSH_PAYLOAD_PROXY_SNI: ["ssh_port", "ssh_proxy", "ssh_proxyport", "ssh_sni", "ssh_payload", "ssh_enhanced"],
   SSH_DIRECT: ["ssh_bug", "ssh_payload", "ssh_enhanced"],
-  SSH_UDP: [],
-  SSH_SLOWDNS: ["ssh_sni", "ssh_ns", "ssh_pubkey", "ssh_udphost", "ssh_udpport"],
-  SSH_PAYLOAD: ["ssh_payload", "ssh_enhanced"],
-  SSH_PROXY: ["ssh_proxy", "ssh_proxyport"],
+  SSH_UDP: ["ssh_port"],
+  SSH_SLOWDNS: ["ssh_port", "ssh_sni", "ssh_ns", "ssh_pubkey", "ssh_udphost", "ssh_udpport"],
+  SSH_PAYLOAD: ["ssh_port", "ssh_payload", "ssh_enhanced"],
+  SSH_PROXY: ["ssh_port", "ssh_proxy", "ssh_proxyport"],
   WS: ["xray_target", "xray_domain", "xray_payload"],
-  WC: ["xray_target", "xray_domain", "xray_payload"],
+  WC: ["xray_target", "xray_payload"], // (v2.9.5 koreksi) domain WC selalu dari host akun — wizard tidak lagi menanyakan domain
   SSL_TLS: ["xray_server", "xray_sni", "xray_payload"],
   WC_TLS: ["xray_bug", "xray_domain", "xray_payload"],
   WC_ONERING: ["xray_bugserver", "xray_host", "xray_payload"],
@@ -914,11 +954,13 @@ function pastikanInject(sub, sniAwal, type) {
   return inj;
 }
 
-// Payload template: terisi -> isi placeholder; kosong -> "" eksplisit
-// (tanpa payload — JANGAN `delete`, lihat aturan v2.8.2).
+// Payload template: terisi -> isi placeholder; kosong -> HAPUS field
+// (tanpa payload — aturan v2.8.2 `""` eksplisit DICABUT atas permintaan
+// Asep 21 Nov 2026: payload yang dilewati jangan disertakan sama sekali,
+// supaya aplikasi tidak menampilkan kolom payload kosong).
 function isiPayloadTemplate(inj, payloadTpl, host, sni) {
   if (payloadTpl) inj.payload = isiPlaceholderPayload(payloadTpl, host, sni);
-  else inj.payload = "";
+  else delete inj.payload;
 }
 
 // Terapkan template SSH ke satu config SSH hasil parsePesan.
@@ -943,6 +985,13 @@ async function terapkanTemplateSshMetode(env, cfg, template, bugAkun) {
   const m = template.metode;
   const sub = cfg.sshTunnelConfig;
 
+  // (v2.9.5) Port template berlaku di SEMUA cabang metode SSH —
+  // termasuk SSH_UDP dan cabang early-return lain; port kosong/null
+  // = pakai port akun pengguna. (Baris sama di SSH_DIRECT/generik
+  // dibiarkan sebagai duplikasi tak berbahaya; generik juga dipanggil
+  // langsung dari jalur legacy tanpa metode.)
+  if (t.port) ssh.port = t.port;
+
   // SSH UDP: plain SSH tanpa inject — hapus inject apa pun dari parse;
   // abaikan bug/SNI/payload/proxy apa pun.
   if (m === "SSH_UDP") {
@@ -962,7 +1011,7 @@ async function terapkanTemplateSshMetode(env, cfg, template, bugAkun) {
       inj.mode = "DIRECT";
       if (t.payload) inj.payload = isiPlaceholderPayload(t.payload, ssh.host, "");
       else if (t.enhanced) inj.payload = isiPlaceholderPayload(PAYLOAD_METODE.enhanced.template, ssh.host, "");
-      else inj.payload = "";
+      else delete inj.payload;
       delete inj.proxyHost;
       delete inj.proxyPort;
     }
@@ -982,7 +1031,7 @@ async function terapkanTemplateSshMetode(env, cfg, template, bugAkun) {
     }
     if (t.payload) inj.payload = isiPlaceholderPayload(t.payload, ssh.host, "");
     else if (t.enhanced) inj.payload = isiPlaceholderPayload(PAYLOAD_METODE.enhanced.template, ssh.host, "");
-    else inj.payload = "";
+    else delete inj.payload;
     return cfg;
   }
 
@@ -998,7 +1047,7 @@ async function terapkanTemplateSshMetode(env, cfg, template, bugAkun) {
     if (sniEfektif) inj.serverNameIndication = sniEfektif;
     if (t.payload) inj.payload = isiPlaceholderPayload(t.payload, ssh.host, sniEfektif);
     else if (t.enhanced) inj.payload = isiPlaceholderPayload(PAYLOAD_METODE.enhanced.template, ssh.host, sniEfektif);
-    else inj.payload = "";
+    else delete inj.payload;
     return cfg;
   }
 
@@ -1013,7 +1062,7 @@ async function terapkanTemplateSshMetode(env, cfg, template, bugAkun) {
       inj.proxyHost = t.proxyHost;
       if (t.proxyPort) inj.proxyPort = t.proxyPort;
     }
-    inj.payload = "";
+    delete inj.payload; // tanpa payload (v2.9.5 koreksi) — hapus payload auto dari pastikanInject
     return cfg;
   }
 
@@ -1050,11 +1099,11 @@ async function terapkanTemplateSshGenerik(env, cfg, template, bugAkun) {
     } else if (t.enhanced) {
       inj.payload = isiPlaceholderPayload(PAYLOAD_METODE.enhanced.template, ssh.host, sniEfektif);
     } else {
-      // Template tanpa payload & tanpa enhanced: tanpa payload (hapus
-      // payload auto). String kosong eksplisit, bukan `delete` —
-      // InjectConfig.payload punya nilai default di aplikasi, jadi
-      // field yang hilang akan diisi template bawaan aplikasi.
-      inj.payload = "";
+      // Template tanpa payload & tanpa enhanced: tanpa payload — hapus
+      // payload auto dari parsePesan / injectConfigAktif. Aturan v2.8.2
+      // `""` eksplisit DICABUT (Asep 21 Nov 2026): payload yang dilewati
+      // jangan disertakan sama sekali.
+      delete inj.payload;
     }
     if (t.proxyHost) {
       inj.proxyHost = t.proxyHost;
@@ -1119,10 +1168,14 @@ async function terapkanTemplateXrayMetode(env, cfg, template, bugAkun) {
 
   // WC: SNI/header = bug + "." + domain — SELALU, bukan cuma bila bug
   // ber-tag wc (itu bedanya dengan aturan WC generik v2.6/v2.8.2).
+  // (v2.9.5 koreksi) domain SELALU dari host akun pengguna — template
+  // lama yang menyimpan xray.sni = bug diabaikan di cabang ini (kalau
+  // tidak, bug == domain dan hostWildcard tidak bisa memperbaikinya).
+  // hostWildcard tidak menggandakan bila bug == domain.
   if (m === "WC") {
+    const hostAkun = v2.host || "";
     const target = t.targetHost || "";
-    const domain = t.sni || "";
-    const wc = target && domain ? target + "." + domain : (target || "");
+    const wc = hostWildcard(target, hostAkun);
     if (!wc) return cfg;
     if (t.targetHost) v2.host = t.targetHost;
     if (t.targetPort) v2.port = t.targetPort;
@@ -1153,10 +1206,12 @@ async function terapkanTemplateXrayMetode(env, cfg, template, bugAkun) {
   }
 
   // WC/TLS: SNI/header = bug + "." + domain; host server = domain.
+  // (v2.9.5) domain fallback ke host akun; hostWildcard anti-ganda.
   if (m === "WC_TLS") {
+    const hostAkun = v2.host || "";
     const bug = t.targetHost || "";
-    const domain = t.sni || "";
-    const wc = bug && domain ? bug + "." + domain : "";
+    const domain = t.sni || hostAkun || "";
+    const wc = hostWildcard(bug, domain);
     if (domain) v2.host = domain;
     if (wc) {
       v2.wsHeaderHost = wc;
@@ -1197,12 +1252,12 @@ async function terapkanTemplateXrayMetode(env, cfg, template, bugAkun) {
     if (t.proxyHost) {
       const adaInj = !!sub.injectConfig;
       const inj = pastikanInject(sub, t.sni || "", cfg.type);
-      if (!adaInj) inj.payload = "";
+      if (!adaInj) delete inj.payload; // hapus payload auto (v2.9.5 koreksi)
       inj.proxyHost = t.proxyHost;
       if (t.proxyPort) inj.proxyPort = t.proxyPort;
       if (t.sni) inj.mode = "PROXY_SNI";
       else { inj.mode = "PROXY"; inj.serverNameIndication = ""; }
-      if (m === "XRAY_PROXY") inj.payload = "";
+      if (m === "XRAY_PROXY") delete inj.payload; // metode ini tanpa payload
     }
     return out;
   }
@@ -1273,12 +1328,11 @@ async function terapkanTemplateXrayGenerik(env, cfg, template, bugAkun) {
   if (inj) {
     if (sniEfektif) inj.serverNameIndication = sniEfektif;
     // Template dipakai: payload kosong = tanpa payload — hapus payload
-    // auto dari parsePesan / injectConfigAktif. Pakai string kosong
-    // eksplisit, BUKAN `delete`: InjectConfig.payload punya nilai
-    // default di aplikasi (lihat analisis-format-config.md), jadi field
-    // yang hilang akan diisi template bawaan aplikasi.
+    // auto dari parsePesan / injectConfigAktif. Aturan v2.8.2 `""`
+    // eksplisit DICABUT (Asep 21 Nov 2026): payload yang dilewati jangan
+    // disertakan sama sekali.
     if (t.payload) inj.payload = isiPlaceholderPayload(t.payload, v2.host, sniEfektif);
-    else inj.payload = "";
+    else delete inj.payload;
     if (slowdns) {
       inj.mode = "DNSTT";
       inj.dnsttUdpDnsHost = t.udpDnsHost || "1.1.1.1";
@@ -1399,7 +1453,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.4";
+const VERSI_BOT = "v2.9.5";
 
 const PESAN_START =
   "👋 <b>Generator Config Dark Tunnel</b>\n\n" +
@@ -1846,11 +1900,18 @@ export function dukungWildcard(note) {
 }
 
 // Gabung bug + host server jadi host wildcard. Bila salah satu kosong,
-// kembalikan bug apa adanya.
+// kembalikan bug apa adanya. Bila bug == domain (atau domain sudah
+// bentuk WC "bug.domain"), jangan gandakan — kembalikan domain apa
+// adanya (v2.9.5: template WC dengan bug == domain akun, mis.
+// investors.spotify.com, sebelumnya jadi investors.spotify.com.
+// investors.spotify.com).
 export function hostWildcard(bug, serverHost) {
   const b = String(bug || "").trim();
   const s = String(serverHost || "").trim();
   if (!b || !s) return b;
+  const kecil = (x) => x.toLowerCase();
+  if (kecil(b) === kecil(s)) return s;
+  if (kecil(s).startsWith(kecil(b) + ".")) return s;
   return b + "." + s;
 }
 
