@@ -309,12 +309,18 @@ export function daftarBugPesan(opKey, katKey) {
   if (!op || !kat) return null;
   // Entri berupa IP tetap ditampilkan seperti host biasa.
   const hosts = kat.hosts;
-  const judul = "🐛 <b>Bug " + op.label + " — " + kat.label + "</b> (" + hosts.length + " host)\n\n";
+  const judulDasar = "🐛 <b>Bug " + op.label + " — " + kat.label + "</b> (" + hosts.length + " host";
   const baris = hosts.map((e) => "• <code>" + e.h + "</code>" + (e.n ? " (" + e.n + ")" : ""));
   const pesan = [];
+  // (v2.9.6) SETIAP potongan membawa judul — potongan lanjutan tanpa
+  // judul dulu terlihat seperti daftar lepas yang tidak berhubungan
+  // (laporan Asep 22 Nov 2026). Satu potongan: judul persis format lama.
+  const total = Math.max(1, Math.ceil(baris.length / 30));
   for (let i = 0; i < baris.length; i += 30) {
     const akhir = i + 30 >= baris.length;
-    pesan.push((i === 0 ? judul : "") + baris.slice(i, i + 30).join("\n") +
+    const no = i / 30 + 1;
+    const judul = total > 1 ? judulDasar + " — bagian " + no + "/" + total + ")\n\n" : judulDasar + ")\n\n";
+    pesan.push(judul + baris.slice(i, i + 30).join("\n") +
       (akhir ? "\n\n⚠️ Bug bisa mati sewaktu-waktu — coba satu-satu ya." : ""));
   }
   return pesan;
@@ -602,11 +608,17 @@ export async function daftarBugPesanGabungan(env, opKey, katKey) {
       "• <code>" + e.h + "</code>" + (e.n ? " (" + e.n + ")" : ""))
     : [];
   const semua = [...barisKv, ...barisBawaan];
-  const judul = "🐛 <b>Bug " + (op?.label || labelOperator(opKey)) + " — " + (kat?.label || labelKategori(opKey, katKey)) + "</b> (" + semua.length + " host)\n\n";
+  const judulDasar = "🐛 <b>Bug " + (op?.label || labelOperator(opKey)) + " — " + (kat?.label || labelKategori(opKey, katKey)) + "</b> (" + semua.length + " host";
   const pesan = [];
+  // (v2.9.6) SETIAP potongan membawa judul — potongan lanjutan tanpa
+  // judul dulu terlihat seperti daftar lepas yang tidak berhubungan
+  // (laporan Asep 22 Nov 2026). Satu potongan: judul persis format lama.
+  const total = Math.max(1, Math.ceil(semua.length / 30));
   for (let i = 0; i < semua.length; i += 30) {
     const akhir = i + 30 >= semua.length;
-    pesan.push((i === 0 ? judul : "") + semua.slice(i, i + 30).join("\n") +
+    const no = i / 30 + 1;
+    const judul = total > 1 ? judulDasar + " — bagian " + no + "/" + total + ")\n\n" : judulDasar + ")\n\n";
+    pesan.push(judul + semua.slice(i, i + 30).join("\n") +
       (akhir ? "\n\n⚠️ Bug bisa mati sewaktu-waktu — coba satu-satu ya." : ""));
   }
   return pesan;
@@ -1453,7 +1465,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.5";
+const VERSI_BOT = "v2.9.6";
 
 const PESAN_START =
   "👋 <b>Generator Config Dark Tunnel</b>\n\n" +
@@ -4119,7 +4131,8 @@ async function handleTelegram(env, update) {
       for (let i = 0; i < daftar.length; i++) {
         const kbDaftar = i === daftar.length - 1 ? keyboardKembaliBug(parts[0], parts[1], cekAdmin(env, chatIdCb) === "ya") : undefined;
         // (v2.9.2: potongan pertama mengedit pesan kategori; sisanya
-        // kirim baru — daftar besar tetap terpecah seperti dulu.)
+        // kirim baru. v2.9.6: tiap potongan kini membawa judul + nomor
+        // bagian, jadi tidak terlihat seperti daftar lepas.)
         if (i === 0) await editAtauKirim(env, chatIdCb, cb.message.message_id, daftar[i], kbDaftar);
         else await sendTelegram(env, chatIdCb, daftar[i], kbDaftar);
       }
