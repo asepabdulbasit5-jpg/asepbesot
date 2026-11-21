@@ -677,9 +677,11 @@ async function hapusTemplateKv(env, id) {
 // XL Conference Proxy SNI (versi SSH-nya, bug sama support.zoom.us,
 // dikte Asep 01:24 WIB) + 4 template Edu Timur (V1: bug IP 104.17.3.81,
 // SSH PAYLOAD_PROXY + Xray WS; V2: bug www.zenius.net, SSH
-// PAYLOAD_PROXY_SNI + Xray WS; dikte Asep 01:25–01:26 WIB).
+// PAYLOAD_PROXY_SNI + Xray WS; dikte Asep 01:25–01:26 WIB) + 1 template
+// XL TikTok TLS (Xray SSL_TLS, SNI api24-normal.tiktokv.com; Asep
+// 01:31 WIB: TikTok ada 2 varian — SSH SNI + Xray SNI).
 // Starter "Tsel Ilped SSH" (SNI classroom.google.com) TIDAK ikut: Asep
-// bilang Ilped cuma pakai 2 bug itu (01:19 WIB). Total 26 template.
+// bilang Ilped cuma pakai 2 bug itu (01:19 WIB). Total 27 template.
 // Dimasukkan ke KV lewat /seedtemplate (admin, perintah teks) — upsert
 // menurut nama (simpanTemplate), jadi aman diulang dan tidak ganda.
 // Bentuk entri = persis hasil wizard (field kosong = null).
@@ -691,29 +693,30 @@ function xrayBawaan(patch) {
 }
 export const TEMPLATE_BAWAAN = [
   { nama: "XL Iflix Barat", operator: "xl", kategori: "nonton", tipe: "SSH", metode: "SSH_SNI", ssh: sshBawaan({ port: 443, sni: "live.iflix.com" }), xray: null },
-  { nama: "XL Iflix Timur Proxy SNI", operator: "xl", kategori: "nonton", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY_SNI", ssh: sshBawaan({ port: 443, proxyHost: "www.iflix.com", proxyPort: 443, sni: "www.iflix.com" }), xray: null },
-  { nama: "XL Conference Proxy SNI", operator: "xl", kategori: "conference", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY_SNI", ssh: sshBawaan({ port: 443, proxyHost: "support.zoom.us", proxyPort: 443, sni: "support.zoom.us" }), xray: null },
+  { nama: "XL Iflix Timur WS TLS", operator: "xl", kategori: "nonton", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY_SNI", ssh: sshBawaan({ port: 443, proxyHost: "www.iflix.com", proxyPort: 443, sni: "www.iflix.com" }), xray: null },
+  { nama: "XL Conference WS TLS", operator: "xl", kategori: "conference", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY_SNI", ssh: sshBawaan({ port: 443, proxyHost: "support.zoom.us", proxyPort: 443, sni: "support.zoom.us" }), xray: null },
   { nama: "XL TikTok", operator: "xl", kategori: "sosmed", tipe: "SSH", metode: "SSH_SNI", ssh: sshBawaan({ port: 443, sni: "api24-normal.tiktokv.com" }), xray: null },
   { nama: "Axis WA", operator: "axis", kategori: "wa", tipe: "SSH", metode: "SSH_DIRECT", ssh: sshBawaan({ host: "listen.noice.id", port: 80, payload: "HEAD / HTTP/1.1[crlf]Host: listen.noice.id:80[crlf]Connection: Keep-Alive[crlf]User-Agent: [ua][crlf][crlf]BMOVE / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf][crlf]" }), xray: null },
   { nama: "XL Edu Jabar", operator: "xl", kategori: "edu", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY", ssh: sshBawaan({ port: 80, proxyHost: "edu.ruangguru.com", proxyPort: 80, payload: "HEAD / HTTP/1.1[crlf]Host: edu.ruangguru.com:80[crlf]Connection: Keep-Alive[crlf]User-Agent: [ua][crlf][crlf]BMOVE / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf][crlf]", enhanced: true }), xray: null },
   { nama: "XL Edu Timur Proxy", operator: "xl", kategori: "edu", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY", ssh: sshBawaan({ port: 80, proxyHost: "104.17.3.81", proxyPort: 80, enhanced: true }), xray: null },
-  { nama: "XL Edu Timur V2 Proxy SNI", operator: "xl", kategori: "edu", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY_SNI", ssh: sshBawaan({ port: 443, proxyHost: "www.zenius.net", proxyPort: 443, sni: "www.zenius.net", enhanced: true }), xray: null },
+  { nama: "XL Edu Timur V2 WS TLS", operator: "xl", kategori: "edu", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY_SNI", ssh: sshBawaan({ port: 443, proxyHost: "www.zenius.net", proxyPort: 443, sni: "www.zenius.net", enhanced: true }), xray: null },
   { nama: "XL Edu Direct", operator: "xl", kategori: "edu", tipe: "SSH", metode: "SSH_DIRECT", ssh: sshBawaan({ host: "162.159.140.147", port: 80, payload: "GET / HTTP/1.1[crlf]Host: edu.ruangguru.com[crlf][crlf]PATCH / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf][crlf][split]HTTP/ 69[crlf][crlf]" }), xray: null },
   { nama: "XL Vision+", operator: "xl", kategori: "nonton", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY", ssh: sshBawaan({ port: 80, proxyHost: "link.visionplus.id", proxyPort: 80, payload: "HEAD / HTTP/1.1[crlf]Host: link.visionplus.id:80[crlf]Connection: Keep-Alive[crlf]User-Agent: [ua][crlf*2]BMOVE / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf*2][split]HTTP/1.1 200 OK[crlf*2]" }), xray: null },
   { nama: "XL Catchplay", operator: "xl", kategori: "nonton", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY", ssh: sshBawaan({ port: 80, proxyHost: "partner.catchplay.com", proxyPort: 80, payload: "GET / HTTP/1.1[crlf]Host: partner.catchplay.com[crlf][crlf]PATCH / HTTP/1.1[crlf]Host: [host][crlf]Connection: Keep-Alive[crlf]Service: SSH[crlf]ModeX: Bypass[crlf]Upgrade: websocket[crlf][crlf]" }), xray: null },
   { nama: "XL Edu SSH", operator: "xl", kategori: "edu", tipe: "SSH", metode: null, ssh: sshBawaan({ port: 80, sni: "edu.ruangguru.com", proxyHost: "edu.ruangguru.com", proxyPort: 80, payload: "HEAD / HTTP/1.1[crlf]Host: edu.ruangguru.com:80[crlf]Connection: Keep-Alive[crlf]User-Agent: [ua][crlf][crlf]BMOVE / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf][crlf]", enhanced: true }), xray: null },
   { nama: "by.U Opok SSH", operator: "byu", kategori: "opok", tipe: "SSH", metode: null, ssh: sshBawaan({ sni: "tdwcontent.telkomsel.com", payload: "GET / HTTP/1.1[crlf]Host: [host][crlf]Connection: Upgrade[crlf]User-Agent: [ua][crlf]Upgrade: websocket[crlf][crlf]", proxyHost: "space.byu.id", proxyPort: 443 }), xray: null },
-  { nama: "by.U Opok Proxy SNI", operator: "byu", kategori: "opok", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY_SNI", ssh: sshBawaan({ port: 443, proxyHost: "space.byu.id", proxyPort: 443, sni: "[host]" }), xray: null },
+  { nama: "by.U Opok WS TLS", operator: "byu", kategori: "opok", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY_SNI", ssh: sshBawaan({ port: 443, proxyHost: "space.byu.id", proxyPort: 443, sni: "[host]" }), xray: null },
   { nama: "Tsel Ilped Proxy", operator: "telkomsel", kategori: "ilped", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY", ssh: sshBawaan({ port: 80, proxyHost: "api.quipper.com", proxyPort: 80 }), xray: null },
-  { nama: "Tsel Ilped Proxy SNI", operator: "telkomsel", kategori: "ilped", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY_SNI", ssh: sshBawaan({ port: 443, proxyHost: "wp-assets.ovo.id", proxyPort: 443, sni: "wp-assets.ovo.id" }), xray: null },
+  { nama: "Tsel Ilped WS TLS", operator: "telkomsel", kategori: "ilped", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY_SNI", ssh: sshBawaan({ port: 443, proxyHost: "wp-assets.ovo.id", proxyPort: 443, sni: "wp-assets.ovo.id" }), xray: null },
   { nama: "XL Spotify WC", operator: "xl", kategori: "musik", tipe: "XRAY", metode: "WC", ssh: null, xray: xrayBawaan({ targetHost: "investors.spotify.com", targetPort: 443 }) },
   { nama: "XL Conference WC", operator: "xl", kategori: "conference", tipe: "XRAY", metode: "WC", ssh: null, xray: xrayBawaan({ targetHost: "support.zoom.us", targetPort: 443 }) },
-  { nama: "XL Vidio", operator: "xl", kategori: "nonton", tipe: "XRAY", metode: "WS", ssh: null, xray: xrayBawaan({ targetHost: "quiz.int.vidio.com", targetPort: 443 }) },
+  { nama: "XL Vidio", operator: "xl", kategori: "nonton", tipe: "XRAY", metode: "WS", ssh: null, xray: xrayBawaan({ targetHost: "quiz.int.vidio.com", targetPort: 80 }) },
   { nama: "Tsel Ilped WS Quipper", operator: "telkomsel", kategori: "ilped", tipe: "XRAY", metode: "WS", ssh: null, xray: xrayBawaan({ targetHost: "api.quipper.com", targetPort: 443 }) },
   { nama: "Tsel Ilped WS Wpassets", operator: "telkomsel", kategori: "ilped", tipe: "XRAY", metode: "WS", ssh: null, xray: xrayBawaan({ targetHost: "wp-assets.ovo.id", targetPort: 443 }) },
   { nama: "by.U Opok WS", operator: "byu", kategori: "opok", tipe: "XRAY", metode: "WS", ssh: null, xray: xrayBawaan({ targetHost: "tdwcontent.telkomsel.com", targetPort: 443 }) },
   { nama: "XL Iflix Timur WS", operator: "xl", kategori: "nonton", tipe: "XRAY", metode: "WS", ssh: null, xray: xrayBawaan({ targetHost: "www.iflix.com", targetPort: 443 }) },
   { nama: "XL Iflix Barat TLS", operator: "xl", kategori: "nonton", tipe: "XRAY", metode: "SSL_TLS", ssh: null, xray: xrayBawaan({ targetPort: 443, sni: "live.iflix.com" }) },
+  { nama: "XL TikTok TLS", operator: "xl", kategori: "sosmed", tipe: "XRAY", metode: "SSL_TLS", ssh: null, xray: xrayBawaan({ targetPort: 443, sni: "api24-normal.tiktokv.com" }) },
   { nama: "XL Edu Timur WS", operator: "xl", kategori: "edu", tipe: "XRAY", metode: "WS", ssh: null, xray: xrayBawaan({ targetHost: "104.17.3.81", targetPort: 443 }) },
   { nama: "XL Edu Timur V2 WS", operator: "xl", kategori: "edu", tipe: "XRAY", metode: "WS", ssh: null, xray: xrayBawaan({ targetHost: "www.zenius.net", targetPort: 443 }) },
 ];
@@ -895,8 +898,8 @@ export const METODE_TEMPLATE = {
   // panjang terpotong di tombol ("SSH + PAYLOAD + PRO..." ganda).
   SSH: [
     { id: "SSH_SNI", label: "SNI" },
-    { id: "SSH_PAYLOAD_PROXY", label: "PAYLOAD + PROXY" },
-    { id: "SSH_PAYLOAD_PROXY_SNI", label: "PAYLOAD+PROXY+SNI" },
+    { id: "SSH_PAYLOAD_PROXY", label: "WS" }, // (v2.9.8) Asep 01:32 WIB: "ssh payload proxy jadi ssh ws"
+    { id: "SSH_PAYLOAD_PROXY_SNI", label: "WS TLS" }, // (v2.9.8) Asep 01:32 WIB: "ssh payload proxy sni jadi ssh ws tls"
     { id: "SSH_DIRECT", label: "DIRECT" },
     { id: "SSH_UDP", label: "UDP" },
     { id: "SSH_SLOWDNS", label: "SLOWDNS" },
