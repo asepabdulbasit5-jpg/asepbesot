@@ -740,6 +740,108 @@ export function ringkasanConfig(c) {
 // Template = setting config tanpa akun. Field template yang terisi
 // MENANG atas hasil auto-detect; field kosong diambil dari akun pengguna.
 
+// ---- Pemilih METODE di awal wizard Template Config (v2.9.0) ----
+// Sebelum bikin template, admin memilih dulu METODE-nya (per tipe),
+// supaya setting dan hasil generate sesuai per metode. `id` = nilai
+// `template.metode` yang disimpan di KV; `label` = teks tombol.
+// Daftar ini dari Asep (21 Nov 2026) + tambahan asisten untuk mengisi
+// celah (XRAY gRPC, XRAY PROXY, SSH + PAYLOAD, SSH + PROXY).
+export const METODE_TEMPLATE = {
+  SSH: [
+    { id: "SSH_SNI", label: "SSH + SNI" },
+    { id: "SSH_PAYLOAD_PROXY", label: "SSH + PAYLOAD + PROXY" },
+    { id: "SSH_PAYLOAD_PROXY_SNI", label: "SSH + PAYLOAD + PROXY + SNI" },
+    { id: "SSH_DIRECT", label: "SSH DIRECT" },
+    { id: "SSH_UDP", label: "SSH UDP" },
+    { id: "SSH_SLOWDNS", label: "SSH SLOWDNS" },
+    { id: "SSH_PAYLOAD", label: "SSH + PAYLOAD" },
+    { id: "SSH_PROXY", label: "SSH + PROXY" },
+  ],
+  XRAY: [
+    { id: "WS", label: "WS" },
+    { id: "WC", label: "WC" },
+    { id: "SSL_TLS", label: "SSL/TLS" },
+    { id: "WC_TLS", label: "WC/TLS" },
+    { id: "WC_ONERING", label: "WC ONERING" },
+    { id: "XRAY_PAYLOAD", label: "XRAY + PAYLOAD" },
+    { id: "XRAY_PAYLOAD_PROXY", label: "XRAY + PAYLOAD + PROXY" },
+    { id: "XRAY_DNS", label: "XRAY OVER DNS" },
+    { id: "XRAY_HTTP", label: "XRAY OVER HTTP" },
+    { id: "XRAY_GRPC", label: "XRAY gRPC" },
+    { id: "XRAY_PROXY", label: "XRAY PROXY" },
+  ],
+};
+
+// Urutan tahap wizard per metode (tahap field KHUSUS metode itu saja).
+// Tahap "ssh_proxyport"/"xray_proxyport" hanya muncul bila proxy diisi
+// host saja (tanpa port) — dilewati tahapBerikutTemplate bila proxy
+// kosong / port sudah terisi.
+export const TAHAP_METODE_TEMPLATE = {
+  SSH_SNI: ["ssh_sni"],
+  SSH_PAYLOAD_PROXY: ["ssh_proxy", "ssh_proxyport", "ssh_payload", "ssh_enhanced"],
+  SSH_PAYLOAD_PROXY_SNI: ["ssh_proxy", "ssh_proxyport", "ssh_sni", "ssh_payload", "ssh_enhanced"],
+  SSH_DIRECT: ["ssh_bug", "ssh_payload", "ssh_enhanced"],
+  SSH_UDP: [],
+  SSH_SLOWDNS: ["ssh_sni", "ssh_ns", "ssh_pubkey", "ssh_udphost", "ssh_udpport"],
+  SSH_PAYLOAD: ["ssh_payload", "ssh_enhanced"],
+  SSH_PROXY: ["ssh_proxy", "ssh_proxyport"],
+  WS: ["xray_target", "xray_domain", "xray_payload"],
+  WC: ["xray_target", "xray_domain", "xray_payload"],
+  SSL_TLS: ["xray_server", "xray_sni", "xray_payload"],
+  WC_TLS: ["xray_bug", "xray_domain", "xray_payload"],
+  WC_ONERING: ["xray_bugserver", "xray_host", "xray_payload"],
+  XRAY_PAYLOAD: ["xray_target", "xray_sni", "xray_header", "xray_payload"],
+  XRAY_PAYLOAD_PROXY: ["xray_target", "xray_sni", "xray_header", "xray_payload", "xray_proxy", "xray_proxyport"],
+  XRAY_DNS: ["xray_target", "xray_sni", "xray_header", "xray_ns", "xray_pubkey", "xray_udphost", "xray_udpport"],
+  XRAY_HTTP: ["xray_target", "xray_sni", "xray_proxy", "xray_proxyport", "xray_payload"],
+  XRAY_GRPC: ["xray_target", "xray_sni", "xray_header", "xray_payload"],
+  XRAY_PROXY: ["xray_target", "xray_sni", "xray_header", "xray_proxy", "xray_proxyport"],
+};
+
+// Tahap wizard LAMA (v2.7–v2.8.2, tanpa metode) — cadangan saja bila
+// state wizard tanpa `metode` (wizard baru selalu memilih metode).
+const TAHAP_LEGACY_SSH = ["ssh_port", "ssh_payload", "ssh_proxy", "ssh_proxyport", "ssh_sni", "ssh_enhanced", "ssh_slowdns", "ssh_ns", "ssh_pubkey", "ssh_udphost", "ssh_udpport"];
+const TAHAP_LEGACY_XRAY = ["xray_target", "xray_sni", "xray_header", "xray_payload", "xray_ssh", "xray_ns", "xray_pubkey", "xray_udphost", "xray_udpport"];
+
+// Label tombol metode untuk satu tipe+id; id tak dikenal -> id apa adanya.
+export function labelMetode(tipe, id) {
+  const m = (METODE_TEMPLATE[tipe] || []).find((e) => e.id === id);
+  return m ? m.label : String(id || "-");
+}
+
+// Daftar tahap wizard untuk state ini (per metode; tanpa metode -> legacy).
+export function daftarTahapMetode(st) {
+  if (st?.metode && TAHAP_METODE_TEMPLATE[st.metode]) return TAHAP_METODE_TEMPLATE[st.metode];
+  if (st?.tipe === "SSH") return TAHAP_LEGACY_SSH;
+  if (st?.tipe === "XRAY") return TAHAP_LEGACY_XRAY;
+  return [];
+}
+
+// Tahap pertama wizard (atau "ringkasan" bila metode tanpa tahap, mis. SSH_UDP).
+export function tahapPertamaTemplate(st) {
+  const daftar = daftarTahapMetode(st);
+  for (const s of daftar) {
+    if (s === "ssh_proxyport" || s === "xray_proxyport") continue;
+    return s;
+  }
+  return "ringkasan";
+}
+
+// Tahap setelah `dari` dalam urutan metode ini (atau "ringkasan").
+// Tahap port proxy dilewati bila proxy kosong / port sudah terisi.
+export function tahapBerikutTemplate(st, dari) {
+  const daftar = daftarTahapMetode(st);
+  const i = daftar.indexOf(dari);
+  if (i < 0) return "ringkasan";
+  for (let j = i + 1; j < daftar.length; j++) {
+    const s = daftar[j];
+    if (s === "ssh_proxyport" && (!st.ssh?.proxyHost || st.ssh.proxyPort != null)) continue;
+    if (s === "xray_proxyport" && (!st.xray?.proxyHost || st.xray.proxyPort != null)) continue;
+    return s;
+  }
+  return "ringkasan";
+}
+
 // SlowDNS Xray aktif bila name server + public key sama-sama terisi.
 export function xraySlowdnsAktif(t) {
   const x = t?.xray || {};
@@ -765,9 +867,123 @@ async function sniEfektifTemplate(env, bug, serverHost) {
   return bug;
 }
 
+// Pastikan injectConfig ada di sub config; bila belum ada, buat dengan
+// SNI awal + payload standar aplikasi (payload selalu ditimpa pemanggil).
+function pastikanInject(sub, sniAwal, type) {
+  let inj = sub.injectConfig;
+  if (!inj) {
+    inj = injectConfigAktif(sniAwal || "", type);
+    sub.injectConfig = inj;
+  }
+  return inj;
+}
+
+// Payload template: terisi -> isi placeholder; kosong -> "" eksplisit
+// (tanpa payload — JANGAN `delete`, lihat aturan v2.8.2).
+function isiPayloadTemplate(inj, payloadTpl, host, sni) {
+  if (payloadTpl) inj.payload = isiPlaceholderPayload(payloadTpl, host, sni);
+  else inj.payload = "";
+}
+
 // Terapkan template SSH ke satu config SSH hasil parsePesan.
-// Mengubah cfg di tempat, return cfg yang sama.
+// Template tanpa `metode` -> jalur generik v2.8.2 (kompatibilitas
+// mundur); template bermetode -> cabang per metode (v2.9.0).
 async function terapkanTemplateSsh(env, cfg, template, bugAkun) {
+  if (template.metode) return terapkanTemplateSshMetode(env, cfg, template, bugAkun);
+  return terapkanTemplateSshGenerik(env, cfg, template, bugAkun);
+}
+
+// Terapkan template SSH bermetode (v2.9.0). Mengubah cfg di tempat.
+async function terapkanTemplateSshMetode(env, cfg, template, bugAkun) {
+  const ssh = cfg.sshTunnelConfig?.sshConfig;
+  if (!ssh) return cfg;
+  const t = template.ssh || {};
+  const m = template.metode;
+  const sub = cfg.sshTunnelConfig;
+
+  // SSH UDP: plain SSH tanpa inject — hapus inject apa pun dari parse;
+  // abaikan bug/SNI/payload/proxy apa pun.
+  if (m === "SSH_UDP") {
+    delete sub.injectConfig;
+    return cfg;
+  }
+
+  // SSH DIRECT: host/port SSH dari bug template (user/pass tetap dari
+  // akun pengguna); inject DIRECT, tanpa SNI, tanpa proxy.
+  if (m === "SSH_DIRECT") {
+    if (t.host) ssh.host = t.host;
+    if (t.port) ssh.port = t.port;
+    const butuh = !!(t.payload || t.enhanced || sub.injectConfig);
+    if (butuh) {
+      const inj = pastikanInject(sub, "", "SSH");
+      inj.serverNameIndication = "";
+      inj.mode = "DIRECT";
+      if (t.payload) inj.payload = isiPlaceholderPayload(t.payload, ssh.host, "");
+      else if (t.enhanced) inj.payload = isiPlaceholderPayload(PAYLOAD_METODE.enhanced.template, ssh.host, "");
+      else inj.payload = "";
+      delete inj.proxyHost;
+      delete inj.proxyPort;
+    }
+    return cfg;
+  }
+
+  // SSH + PAYLOAD + PROXY: inject PROXY, tanpa SNI.
+  if (m === "SSH_PAYLOAD_PROXY") {
+    const butuh = !!(t.proxyHost || t.payload || t.enhanced || sub.injectConfig);
+    if (!butuh) return cfg;
+    const inj = pastikanInject(sub, "", "SSH");
+    inj.mode = "PROXY";
+    inj.serverNameIndication = "";
+    if (t.proxyHost) {
+      inj.proxyHost = t.proxyHost;
+      if (t.proxyPort) inj.proxyPort = t.proxyPort;
+    }
+    if (t.payload) inj.payload = isiPlaceholderPayload(t.payload, ssh.host, "");
+    else if (t.enhanced) inj.payload = isiPlaceholderPayload(PAYLOAD_METODE.enhanced.template, ssh.host, "");
+    else inj.payload = "";
+    return cfg;
+  }
+
+  // SSH + PAYLOAD: inject DIRECT; SNI dari bug akun bila ada (fallback
+  // perilaku lama), tanpa proxy.
+  if (m === "SSH_PAYLOAD") {
+    const bugAsli = bugAkun || sub.injectConfig?.serverNameIndication || null;
+    const sniEfektif = await sniEfektifTemplate(env, bugAsli, ssh.host);
+    const butuh = !!(sniEfektif || t.payload || t.enhanced || sub.injectConfig);
+    if (!butuh) return cfg;
+    const inj = pastikanInject(sub, sniEfektif, "SSH");
+    inj.mode = "DIRECT";
+    if (sniEfektif) inj.serverNameIndication = sniEfektif;
+    if (t.payload) inj.payload = isiPlaceholderPayload(t.payload, ssh.host, sniEfektif);
+    else if (t.enhanced) inj.payload = isiPlaceholderPayload(PAYLOAD_METODE.enhanced.template, ssh.host, sniEfektif);
+    else inj.payload = "";
+    return cfg;
+  }
+
+  // SSH + PROXY: inject PROXY, tanpa payload, tanpa SNI.
+  if (m === "SSH_PROXY") {
+    const butuh = !!(t.proxyHost || sub.injectConfig);
+    if (!butuh) return cfg;
+    const inj = pastikanInject(sub, "", "SSH");
+    inj.mode = "PROXY";
+    inj.serverNameIndication = "";
+    if (t.proxyHost) {
+      inj.proxyHost = t.proxyHost;
+      if (t.proxyPort) inj.proxyPort = t.proxyPort;
+    }
+    inj.payload = "";
+    return cfg;
+  }
+
+  // SSH_SNI / SSH_PAYLOAD_PROXY_SNI / SSH_SLOWDNS = perilaku generik
+  // v2.8.2 (sudah tepat: DIRECT_SNI / PROXY_SNI / DNSTT).
+  return terapkanTemplateSshGenerik(env, cfg, template, bugAkun);
+}
+
+// Terapkan template SSH GENERIK (v2.8.2) — dipakai template lama tanpa
+// `metode` dan metode yang perilakunya sama dengan generik.
+// Mengubah cfg di tempat, return cfg yang sama.
+async function terapkanTemplateSshGenerik(env, cfg, template, bugAkun) {
   const ssh = cfg.sshTunnelConfig?.sshConfig;
   if (!ssh) return cfg;
   const t = template.ssh || {};
@@ -831,7 +1047,150 @@ async function terapkanTemplateSsh(env, cfg, template, bugAkun) {
 // Terapkan template Xray ke satu config V2Ray hasil parsePesan.
 // Akun SSH di template Xray DISIMPAN tapi TIDAK dipakai di config
 // (jangan campur sshTunnelConfig ke config V2Ray).
+// Template tanpa `metode` -> jalur generik v2.8.2 (kompatibilitas
+// mundur); template bermetode -> cabang per metode (v2.9.0).
 async function terapkanTemplateXray(env, cfg, template, bugAkun) {
+  if (template.metode) return terapkanTemplateXrayMetode(env, cfg, template, bugAkun);
+  return terapkanTemplateXrayGenerik(env, cfg, template, bugAkun);
+}
+
+// Terapkan template Xray bermetode (v2.9.0). Mengubah cfg di tempat.
+async function terapkanTemplateXrayMetode(env, cfg, template, bugAkun) {
+  const subKey = ["vmessTunnelConfig", "vlessTunnelConfig", "trojanTunnelConfig", "shadowsocksTunnelConfig"].find((k) => cfg[k]);
+  if (!subKey) return cfg;
+  const v2 = cfg[subKey].v2rayConfig;
+  if (!v2) return cfg;
+  const t = template.xray || {};
+  const m = template.metode;
+  const sub = cfg[subKey];
+
+  // WC: SNI/header = bug + "." + domain — SELALU, bukan cuma bila bug
+  // ber-tag wc (itu bedanya dengan aturan WC generik v2.6/v2.8.2).
+  if (m === "WC") {
+    const target = t.targetHost || "";
+    const domain = t.sni || "";
+    const wc = target && domain ? target + "." + domain : (target || "");
+    if (!wc) return cfg;
+    if (t.targetHost) v2.host = t.targetHost;
+    if (t.targetPort) v2.port = t.targetPort;
+    v2.wsHeaderHost = wc;
+    v2.serverNameIndication = wc;
+    const inj = pastikanInject(sub, wc, cfg.type);
+    inj.serverNameIndication = wc;
+    inj.mode = "DIRECT_SNI";
+    isiPayloadTemplate(inj, t.payload, v2.host, wc);
+    return cfg;
+  }
+
+  // SSL/TLS: server = domain (host+port template), TLS SNI = bug,
+  // inject SNI = bug apa adanya (tanpa transformasi WC).
+  if (m === "SSL_TLS") {
+    const bug = t.sni || "";
+    if (t.targetHost) v2.host = t.targetHost;
+    if (t.targetPort) v2.port = t.targetPort;
+    if (t.headerHost) v2.wsHeaderHost = t.headerHost;
+    if (bug) v2.serverNameIndication = bug;
+    const butuh = !!(bug || t.payload || sub.injectConfig);
+    if (!butuh) return cfg;
+    const inj = pastikanInject(sub, bug, cfg.type);
+    inj.serverNameIndication = bug;
+    inj.mode = "DIRECT_SNI";
+    isiPayloadTemplate(inj, t.payload, v2.host, bug);
+    return cfg;
+  }
+
+  // WC/TLS: SNI/header = bug + "." + domain; host server = domain.
+  if (m === "WC_TLS") {
+    const bug = t.targetHost || "";
+    const domain = t.sni || "";
+    const wc = bug && domain ? bug + "." + domain : "";
+    if (domain) v2.host = domain;
+    if (wc) {
+      v2.wsHeaderHost = wc;
+      v2.serverNameIndication = wc;
+    }
+    const butuh = !!(wc || t.payload || sub.injectConfig);
+    if (!butuh) return cfg;
+    const inj = pastikanInject(sub, wc, cfg.type);
+    if (wc) inj.serverNameIndication = wc;
+    inj.mode = "DIRECT_SNI";
+    isiPayloadTemplate(inj, t.payload, v2.host, wc);
+    return cfg;
+  }
+
+  // WC ONERING: SNI = "onering:" + host + ":" + bug; port default 443
+  // bila target tanpa port; transport websocket.
+  if (m === "WC_ONERING") {
+    const bug = t.targetHost || "";
+    const host = t.headerHost || "";
+    const sni = bug && host ? "onering:" + host + ":" + bug : "";
+    if (!sni) return cfg;
+    v2.host = bug;
+    v2.port = t.targetPort || 443;
+    v2.wsHeaderHost = host;
+    v2.serverNameIndication = sni;
+    v2.transportNetwork = "Websocket";
+    const inj = pastikanInject(sub, sni, cfg.type);
+    inj.serverNameIndication = sni;
+    inj.mode = "DIRECT_SNI";
+    isiPayloadTemplate(inj, t.payload, v2.host, sni);
+    return cfg;
+  }
+
+  // XRAY + PAYLOAD + PROXY / XRAY PROXY: generik + proxy. Mode
+  // PROXY_SNI bila SNI template terisi, else PROXY (tanpa SNI).
+  if (m === "XRAY_PAYLOAD_PROXY" || m === "XRAY_PROXY") {
+    const out = await terapkanTemplateXrayGenerik(env, cfg, template, bugAkun);
+    if (t.proxyHost) {
+      const adaInj = !!sub.injectConfig;
+      const inj = pastikanInject(sub, t.sni || "", cfg.type);
+      if (!adaInj) inj.payload = "";
+      inj.proxyHost = t.proxyHost;
+      if (t.proxyPort) inj.proxyPort = t.proxyPort;
+      if (t.sni) inj.mode = "PROXY_SNI";
+      else { inj.mode = "PROXY"; inj.serverNameIndication = ""; }
+      if (m === "XRAY_PROXY") inj.payload = "";
+    }
+    return out;
+  }
+
+  // XRAY OVER HTTP (tebakan definisi asisten — Asep tidak merinci):
+  // Xray via HTTP proxy. Mode PROXY_SNI bila SNI terisi, else PROXY
+  // (tanpa SNI); payload template.
+  if (m === "XRAY_HTTP") {
+    if (t.targetHost) v2.host = t.targetHost;
+    if (t.targetPort) v2.port = t.targetPort;
+    if (t.sni) v2.serverNameIndication = t.sni;
+    const butuh = !!(t.proxyHost || t.sni || t.payload || sub.injectConfig);
+    if (!butuh) return cfg;
+    const inj = pastikanInject(sub, t.sni || "", cfg.type);
+    if (t.proxyHost) {
+      inj.proxyHost = t.proxyHost;
+      if (t.proxyPort) inj.proxyPort = t.proxyPort;
+    }
+    if (t.sni) { inj.mode = "PROXY_SNI"; inj.serverNameIndication = t.sni; }
+    else { inj.mode = "PROXY"; inj.serverNameIndication = ""; }
+    isiPayloadTemplate(inj, t.payload, v2.host, t.sni || "");
+    return cfg;
+  }
+
+  // XRAY gRPC: seperti WS (generik) tapi transport gRPC.
+  if (m === "XRAY_GRPC") {
+    const out = await terapkanTemplateXrayGenerik(env, cfg, template, bugAkun);
+    out[subKey].v2rayConfig.transportNetwork = "gRPC";
+    return out;
+  }
+
+  // WS / XRAY_PAYLOAD / XRAY_DNS = perilaku generik v2.8.2 (sudah
+  // tepat: DIRECT_SNI / payload "" / DNSTT untuk SlowDNS).
+  return terapkanTemplateXrayGenerik(env, cfg, template, bugAkun);
+}
+
+// Terapkan template Xray GENERIK (v2.8.2) — dipakai template lama tanpa
+// `metode` dan metode yang perilakunya sama dengan generik.
+// Akun SSH di template Xray DISIMPAN tapi TIDAK dipakai di config
+// (jangan campur sshTunnelConfig ke config V2Ray).
+async function terapkanTemplateXrayGenerik(env, cfg, template, bugAkun) {
   const subKey = ["vmessTunnelConfig", "vlessTunnelConfig", "trojanTunnelConfig", "shadowsocksTunnelConfig"].find((k) => cfg[k]);
   if (!subKey) return cfg;
   const v2 = cfg[subKey].v2rayConfig;
@@ -899,9 +1258,11 @@ export function ringkasanTemplate(t) {
   if (!t) return "";
   const baris = ["🧩 <b>Template: " + escapeHtml(t.nama || "-") + "</b>"];
   baris.push("• Tipe: <b>" + (t.tipe === "SSH" ? "SSH" : "Xray / V2Ray") + "</b>");
+  if (t.metode) baris.push("• Metode: <b>" + escapeHtml(labelMetode(t.tipe, t.metode)) + "</b>");
   baris.push("• Operator: " + escapeHtml(labelOperator(t.operator)) + " — " + escapeHtml(labelKategori(t.operator, t.kategori)));
   if (t.tipe === "SSH") {
     const s = t.ssh || {};
+    if (s.host) baris.push("• Host: <code>" + escapeHtml(s.host) + "</code>");
     if (s.port) baris.push("• Port: <code>" + s.port + "</code>");
     if (s.payload) baris.push("• Payload: <code>" + escapeHtml(String(s.payload).slice(0, 80)) + (String(s.payload).length > 80 ? "…" : "") + "</code>");
     if (s.proxyHost) baris.push("• Proxy: <code>" + escapeHtml(s.proxyHost) + (s.proxyPort ? ":" + s.proxyPort : "") + "</code>");
@@ -912,12 +1273,14 @@ export function ringkasanTemplate(t) {
     } else {
       baris.push("• SlowDNS: ❌ Tidak");
     }
+    if (t.metode === "SSH_UDP") baris.push("• Inject: ❌ Tidak dipakai (SSH UDP — hanya akun SSH)");
   } else {
     const x = t.xray || {};
     if (x.targetHost) baris.push("• Target: <code>" + escapeHtml(x.targetHost) + (x.targetPort ? ":" + x.targetPort : "") + "</code>");
     if (x.sni) baris.push("• SNI: <code>" + escapeHtml(x.sni) + "</code>");
     if (x.headerHost) baris.push("• Header Host: <code>" + escapeHtml(x.headerHost) + "</code>");
     if (x.payload) baris.push("• Payload: <code>" + escapeHtml(String(x.payload).slice(0, 80)) + (String(x.payload).length > 80 ? "…" : "") + "</code>");
+    if (x.proxyHost) baris.push("• Proxy: <code>" + escapeHtml(x.proxyHost) + (x.proxyPort ? ":" + x.proxyPort : "") + "</code>");
     if (x.sshHost) baris.push("• Akun SSH: <code>" + escapeHtml(x.sshHost + (x.sshPort ? ":" + x.sshPort : "") + "@" + (x.sshUser || "")) + "</code> (disimpan, tidak dipakai di config Xray)");
     if (xraySlowdnsAktif(t)) {
       baris.push("• SlowDNS: ✅ Ya (Name Server: <code>" + escapeHtml(x.nameServer || "") + "</code>, UDP: <code>" + escapeHtml(x.udpDnsHost || "1.1.1.1") + ":" + (x.udpDnsPort || 53) + "</code>)");
@@ -983,7 +1346,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.8.2";
+const VERSI_BOT = "v2.9.0";
 
 const PESAN_START =
   "👋 <b>Generator Config Dark Tunnel</b>\n\n" +
@@ -1888,12 +2251,21 @@ function keyboardTemplateTipe() {
   ];
 }
 
+function keyboardTemplateMetode(tipe) {
+  const daftar = METODE_TEMPLATE[tipe] || [];
+  const rows = baris2(daftar.map((m) => ({ text: m.label, callback_data: "tw:metode:" + m.id })));
+  rows.push([{ text: "⬅️ Kembali ke Tipe", callback_data: "tw:kembali:tipe" }]);
+  rows.push([{ text: "❌ Batal", callback_data: "admin:batal" }]);
+  return rows;
+}
+
 function keyboardTemplateOperator() {
   const ops = Object.entries(BUG_DB);
   const rows = [];
   for (let i = 0; i < ops.length; i += 2) {
     rows.push(ops.slice(i, i + 2).map(([k, v]) => ({ text: v.label, callback_data: "tw:op:" + k })));
   }
+  rows.push([{ text: "⬅️ Kembali ke Metode", callback_data: "tw:kembali:metode" }]);
   rows.push([{ text: "❌ Batal", callback_data: "admin:batal" }]);
   return rows;
 }
@@ -2418,7 +2790,7 @@ async function handleBugTeks(env, chatId, st, teks) {
   return false;
 }
 
-// pendingAdmin: {jenis: "template", tahap, tipe, op, kat, nama,
+// pendingAdmin: {jenis: "template", tahap, tipe, metode, op, kat, nama,
 // ssh: {...}, xray: {...}, ts}. Tiap langkah teks: jawab "lewati"
 // atau "-" untuk kosong. Tombol ❌ Batal di setiap langkah.
 
@@ -2456,26 +2828,41 @@ const TOMBOL_PILIH_BUG_TEMPLATE = [
   [{ text: "⏭️ Lewati", callback_data: "tw:lewati" }, { text: "❌ Batal", callback_data: "admin:batal" }],
 ];
 
+// Keyboard tahap teks yang isinya host/bug dan WAJIB diisi (tanpa Lewati):
+// pilih dari daftar bug + Batal saja.
+const TOMBOL_PILIH_BUG_WAJIB_TEMPLATE = [
+  [{ text: "📋 Pilih dari Daftar Bug", callback_data: "tw:bug" }],
+  [{ text: "❌ Batal", callback_data: "admin:batal" }],
+];
+
 // Tahap teks wizard yang bisa dikosongkan (tombol Lewati tampil).
 const TAHAP_LEWATI = new Set([
   "ssh_port", "ssh_payload", "ssh_proxy", "ssh_proxyport", "ssh_sni", "ssh_udphost", "ssh_udpport",
   "xray_target", "xray_sni", "xray_header", "xray_payload", "xray_ssh",
   "xray_ns", "xray_pubkey", "xray_udphost", "xray_udpport",
+  "xray_domain", "xray_server", "xray_bug", "xray_proxy", "xray_proxyport",
 ]);
 
 // Tahap yang isinya host/bug (tombol Pilih dari Daftar Bug tampil).
-const TAHAP_PILIH_BUG = new Set(["ssh_proxy", "ssh_sni", "xray_target", "xray_sni", "xray_header"]);
+const TAHAP_PILIH_BUG = new Set(["ssh_proxy", "ssh_sni", "xray_target", "xray_sni", "xray_header", "ssh_bug", "xray_domain", "xray_server", "xray_bug", "xray_bugserver", "xray_proxy"]);
+
+// Keyboard tahap wizard template: tahap host/bug dapat tombol Pilih dari
+// Daftar Bug (+ Lewati bila bisa dikosongkan); tahap lain yang bisa
+// dikosongkan dapat Lewati; tahap wajib cuma Batal.
+function keyboardTahapTemplate(t) {
+  if (TAHAP_PILIH_BUG.has(t)) return TAHAP_LEWATI.has(t) ? TOMBOL_PILIH_BUG_TEMPLATE : TOMBOL_PILIH_BUG_WAJIB_TEMPLATE;
+  if (TAHAP_LEWATI.has(t)) return TOMBOL_LEWATI_TEMPLATE;
+  return TOMBOL_BATAL_TEMPLATE;
+}
 
 // Kirim prompt untuk tahap wizard template saat ini.
 async function kirimLangkahTemplate(env, chatId, st) {
   const t = st.tahap;
-  // Keyboard per tahap teks: tahap host/bug dapat tombol Pilih dari
-  // Daftar Bug + Lewati; tahap lain yang bisa dikosongkan dapat Lewati;
-  // tahap wajib (nama, kategori_baru, ssh_ns, ssh_pubkey) cuma Batal.
-  const batal = TAHAP_PILIH_BUG.has(t) ? TOMBOL_PILIH_BUG_TEMPLATE
-    : TAHAP_LEWATI.has(t) ? TOMBOL_LEWATI_TEMPLATE : TOMBOL_BATAL_TEMPLATE;
+  const batal = keyboardTahapTemplate(t);
   if (t === "tipe") {
     await sendTelegram(env, chatId, "🧩 <b>Template Config Baru</b>\n\nPilih tipe config:", keyboardTemplateTipe());
+  } else if (t === "metode") {
+    await sendTelegram(env, chatId, "🧩 <b>Template Config Baru</b> (" + (st.tipe === "SSH" ? "SSH" : "Xray / V2Ray") + ")\n\nPilih metode:", keyboardTemplateMetode(st.tipe));
   } else if (t === "operator") {
     await sendTelegram(env, chatId, "🧩 <b>Template Config Baru</b> (" + (st.tipe === "SSH" ? "SSH" : "Xray / V2Ray") + ")\n\nPilih operator:", keyboardTemplateOperator());
   } else if (t === "kategori") {
@@ -2492,6 +2879,8 @@ async function kirimLangkahTemplate(env, chatId, st) {
     await sendTelegram(env, chatId, "🔀 <b>Proxy</b>\n\nKirim proxy — host saja (mis. <code>proxy.contoh.com</code>, port ditanya setelahnya) atau langsung format <code>host:port</code> (boleh dari daftar bug — atau ketuk 📋 Pilih dari Daftar Bug).\n\nKosong = tanpa proxy. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "ssh_proxyport") {
     await sendTelegram(env, chatId, "🔀 <b>Port Proxy</b>\n\nPort proxy untuk <code>" + escapeHtml(st.ssh?.proxyHost || "") + "</code>:\n\nKirim angka 1-65535 (mis. <code>80</code>, <code>443</code>, atau <code>8080</code>).\n\nKosong = default <code>8080</code>. Ketuk ⏭️ Lewati untuk kosong.", batal);
+  } else if (t === "ssh_bug") {
+    await sendTelegram(env, chatId, "🐛 <b>Bug / Host SSH</b>\n\nKirim bug format <code>host:port</code> (mis. <code>bug.contoh.com:443</code>) atau host saja — atau ketuk 📋 Pilih dari Daftar Bug.\n\nHost & port bug ini dipakai sebagai host SSH (username/password tetap dari akun pengguna).", batal);
   } else if (t === "ssh_sni") {
     await sendTelegram(env, chatId, "🎯 <b>SNI</b>\n\nKetik SNI manual (host, contoh: <code>edu.ruangguru.com</code>) — atau ketuk 📋 Pilih dari Daftar Bug.\n\nKosong = pakai bug/SNI dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "ssh_enhanced") {
@@ -2507,7 +2896,22 @@ async function kirimLangkahTemplate(env, chatId, st) {
   } else if (t === "ssh_udpport") {
     await sendTelegram(env, chatId, "🐢 <b>SlowDNS — UDP DNS Port</b>\n\nKirim UDP DNS port (angka 1-65535, mis. <code>53</code>).\n\nKosong = default <code>53</code>. Ketuk ⏭️ Lewati untuk default.", batal);
   } else if (t === "xray_target") {
-    await sendTelegram(env, chatId, "🎯 <b>Target Server</b>\n\nKirim target server format <code>host:port</code> (boleh dari daftar bug — atau ketuk 📋 Pilih dari Daftar Bug).\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
+    const judul = (st.metode === "WS" || st.metode === "WC") ? "🎯 <b>Target / Bug</b>" : "🎯 <b>Target Server</b>";
+    await sendTelegram(env, chatId, judul + "\n\nKirim target server format <code>host:port</code> (boleh dari daftar bug — atau ketuk 📋 Pilih dari Daftar Bug).\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
+  } else if (t === "xray_domain") {
+    await sendTelegram(env, chatId, "🌐 <b>Domain</b>\n\nKetik domain (host, contoh: <code>sg1.contoh.com</code>) — atau ketuk 📋 Pilih dari Daftar Bug.\n\nDomain ini dipakai sebagai SNI/TLS dan Header Host.\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
+  } else if (t === "xray_server") {
+    await sendTelegram(env, chatId, "🎯 <b>Server / Domain</b>\n\nKirim server format <code>host:port</code> (mis. <code>sg1.contoh.com:443</code>) — atau ketuk 📋 Pilih dari Daftar Bug.\n\nDipakai sebagai host server + Header Host.\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
+  } else if (t === "xray_bug") {
+    await sendTelegram(env, chatId, "🐛 <b>Bug</b>\n\nKetik bug (host, contoh: <code>api.quipper.com</code>) — atau ketuk 📋 Pilih dari Daftar Bug.\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
+  } else if (t === "xray_bugserver") {
+    await sendTelegram(env, chatId, "🐛 <b>Bug / Server</b>\n\nKirim bug — host saja (mis. <code>bug.contoh.com</code>, port default 443) atau format <code>host:port</code> — atau ketuk 📋 Pilih dari Daftar Bug.", batal);
+  } else if (t === "xray_host") {
+    await sendTelegram(env, chatId, "🌐 <b>Host</b>\n\nKirim host (mis. <code>www.yourdomain.com</code>).\n\nWajib diisi — dipakai di SNI (onering) dan Header Host.", batal);
+  } else if (t === "xray_proxy") {
+    await sendTelegram(env, chatId, "🔀 <b>Proxy</b>\n\nKirim proxy — host saja (mis. <code>proxy.contoh.com</code>, port ditanya setelahnya) atau langsung format <code>host:port</code> (boleh dari daftar bug — atau ketuk 📋 Pilih dari Daftar Bug).\n\nKosong = tanpa proxy. Ketuk ⏭️ Lewati untuk kosong.", batal);
+  } else if (t === "xray_proxyport") {
+    await sendTelegram(env, chatId, "🔀 <b>Port Proxy</b>\n\nPort proxy untuk <code>" + escapeHtml(st.xray?.proxyHost || "") + "</code>:\n\nKirim angka 1-65535 (mis. <code>80</code>, <code>443</code>, atau <code>8080</code>).\n\nKosong = default <code>8080</code>. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_sni") {
     await sendTelegram(env, chatId, "🎯 <b>Server Name / SNI</b>\n\nKetik SNI manual (host, contoh: <code>sg1.contoh.com</code>) — atau ketuk 📋 Pilih dari Daftar Bug.\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_header") {
@@ -2525,7 +2929,7 @@ async function kirimLangkahTemplate(env, chatId, st) {
   } else if (t === "xray_udpport") {
     await sendTelegram(env, chatId, "🐢 <b>SlowDNS — UDP DNS Port</b> (opsional)\n\nKirim UDP DNS port (angka 1-65535, mis. <code>53</code>).\n\nKosong = default <code>53</code>. Ketuk ⏭️ Lewati untuk default.", batal);
   } else if (t === "ringkasan") {
-    const tpl = { nama: st.nama, operator: st.op, kategori: st.kat, tipe: st.tipe, ssh: st.ssh, xray: st.xray };
+    const tpl = { nama: st.nama, operator: st.op, kategori: st.kat, tipe: st.tipe, metode: st.metode, ssh: st.ssh, xray: st.xray };
     await sendTelegram(env, chatId, "🧩 <b>Cek Template</b>\n\n" + ringkasanTemplate(tpl) + "\n\nSimpan template ini?", keyboardTemplateSimpan());
   }
 }
@@ -2537,8 +2941,7 @@ async function handleTemplateTeks(env, chatId, st, teks) {
   const t = st.tahap;
   // Pesan error validasi memakai keyboard tahap yang sama (tahap host
   // tetap bisa pilih bug / lewati dari pesan error).
-  const kbSalah = TAHAP_PILIH_BUG.has(t) ? TOMBOL_PILIH_BUG_TEMPLATE
-    : TAHAP_LEWATI.has(t) ? TOMBOL_LEWATI_TEMPLATE : TOMBOL_BATAL_TEMPLATE;
+  const kbSalah = keyboardTahapTemplate(t);
   const salah = async (pesan) => { await sendTelegram(env, chatId, pesan, kbSalah); return true; };
   if (t === "kategori_baru") {
     const kat = String(teks || "").trim().toLowerCase();
@@ -2552,7 +2955,7 @@ async function handleTemplateTeks(env, chatId, st, teks) {
     const nama = String(teks || "").trim();
     if (!nama) return salah("😕 Nama template belum diisi. Kirim nama template — mis. <code>Opok Tsel SSH 1</code>.");
     st.nama = nama;
-    st.tahap = st.tipe === "SSH" ? "ssh_port" : "xray_target";
+    st.tahap = tahapPertamaTemplate(st);
     st.ts = Date.now();
     await kirimLangkahTemplate(env, chatId, st);
     return true;
@@ -2561,13 +2964,24 @@ async function handleTemplateTeks(env, chatId, st, teks) {
     const v = kosongkan(teks);
     if (v !== null && !validPortNum(v)) return salah("😕 Port tidak valid. Kirim angka 1-65535, mis. <code>80</code> —  atau ketuk ⏭️ Lewati untuk kosong.");
     st.ssh.port = v === null ? null : Number(v);
-    st.tahap = "ssh_payload"; st.ts = Date.now();
+    st.tahap = tahapBerikutTemplate(st, t); st.ts = Date.now();
+    await kirimLangkahTemplate(env, chatId, st);
+    return true;
+  }
+  if (t === "ssh_bug") {
+    const v = kosongkan(teks);
+    if (v === null) return salah("😕 Bug wajib diisi untuk SSH DIRECT. Kirim <code>host:port</code>, mis. <code>bug.contoh.com:443</code> — atau ketuk 📋 Pilih dari Daftar Bug.");
+    const hp = parseHostPort(v);
+    if (hp) { st.ssh.host = hp.host; st.ssh.port = hp.port; }
+    else if (validHost(v.toLowerCase())) { st.ssh.host = v.toLowerCase(); st.ssh.port = null; }
+    else return salah("😕 Format bug salah. Pakai <code>host:port</code> atau host saja — atau ketuk 📋 Pilih dari Daftar Bug.");
+    st.tahap = tahapBerikutTemplate(st, t); st.ts = Date.now();
     await kirimLangkahTemplate(env, chatId, st);
     return true;
   }
   if (t === "ssh_payload") {
     st.ssh.payload = kosongkan(teks);
-    st.tahap = "ssh_proxy"; st.ts = Date.now();
+    st.tahap = tahapBerikutTemplate(st, t); st.ts = Date.now();
     await kirimLangkahTemplate(env, chatId, st);
     return true;
   }
@@ -2575,21 +2989,19 @@ async function handleTemplateTeks(env, chatId, st, teks) {
     const v = kosongkan(teks);
     if (v === null) {
       st.ssh.proxyHost = null; st.ssh.proxyPort = null;
-      st.tahap = "ssh_sni";
     } else {
       const hp = parseHostPort(v);
       if (hp) {
-        // host:port lengkap -> langsung ke SNI.
+        // host:port lengkap -> lanjut (tahap port dilewati).
         st.ssh.proxyHost = hp.host; st.ssh.proxyPort = hp.port;
-        st.tahap = "ssh_sni";
       } else if (validHost(v.toLowerCase())) {
         // Host saja (tanpa port): port ditanya di tahap berikutnya.
         st.ssh.proxyHost = v.toLowerCase(); st.ssh.proxyPort = null;
-        st.tahap = "ssh_proxyport";
       } else {
         return salah("😕 Format proxy salah. Pakai <code>host:port</code>, mis. <code>proxy.contoh.com:8080</code> —  atau ketuk ⏭️ Lewati untuk kosong.");
       }
     }
+    st.tahap = tahapBerikutTemplate(st, t);
     st.ts = Date.now();
     await kirimLangkahTemplate(env, chatId, st);
     return true;
@@ -2598,7 +3010,7 @@ async function handleTemplateTeks(env, chatId, st, teks) {
     const v = kosongkan(teks);
     if (v !== null && !validPortNum(v)) return salah("😕 Port proxy tidak valid. Kirim angka 1-65535, mis. <code>8080</code> —  atau ketuk ⏭️ Lewati untuk default.");
     st.ssh.proxyPort = v === null ? null : Number(v);
-    st.tahap = "ssh_sni"; st.ts = Date.now();
+    st.tahap = tahapBerikutTemplate(st, t); st.ts = Date.now();
     await kirimLangkahTemplate(env, chatId, st);
     return true;
   }
@@ -2606,7 +3018,7 @@ async function handleTemplateTeks(env, chatId, st, teks) {
     const v = kosongkan(teks);
     if (v !== null && !validHost(v.toLowerCase())) return salah("😕 SNI tidak valid. Kirim host yang benar, mis. <code>edu.ruangguru.com</code> —  atau ketuk ⏭️ Lewati untuk kosong.");
     st.ssh.sni = v === null ? null : v.toLowerCase();
-    st.tahap = "ssh_enhanced"; st.ts = Date.now();
+    st.tahap = tahapBerikutTemplate(st, t); st.ts = Date.now();
     await kirimLangkahTemplate(env, chatId, st);
     return true;
   }
@@ -2614,7 +3026,7 @@ async function handleTemplateTeks(env, chatId, st, teks) {
     const v = kosongkan(teks);
     if (v === null || !validHost(v.toLowerCase())) return salah("😕 Name Server wajib diisi untuk SlowDNS. Kirim host/IP yang benar, mis. <code>id1.dnsx.my.id</code>.");
     st.ssh.dnsNameServer = v.toLowerCase();
-    st.tahap = "ssh_pubkey"; st.ts = Date.now();
+    st.tahap = tahapBerikutTemplate(st, t); st.ts = Date.now();
     await kirimLangkahTemplate(env, chatId, st);
     return true;
   }
@@ -2622,7 +3034,7 @@ async function handleTemplateTeks(env, chatId, st, teks) {
     const v = kosongkan(teks);
     if (v === null) return salah("😕 Public Key wajib diisi untuk SlowDNS. Kirim teks kunci SlowDNS-nya.");
     st.ssh.dnsPublicKey = String(teks || "").trim();
-    st.tahap = "ssh_udphost"; st.ts = Date.now();
+    st.tahap = tahapBerikutTemplate(st, t); st.ts = Date.now();
     await kirimLangkahTemplate(env, chatId, st);
     return true;
   }
@@ -2630,7 +3042,7 @@ async function handleTemplateTeks(env, chatId, st, teks) {
     const v = kosongkan(teks);
     if (v !== null && !validHost(v.toLowerCase())) return salah("😕 UDP DNS Host tidak valid. Kirim host/IP yang benar, mis. <code>1.1.1.1</code> —  atau ketuk ⏭️ Lewati untuk default.");
     st.ssh.dnsUdpHost = v === null ? "1.1.1.1" : v.toLowerCase();
-    st.tahap = "ssh_udpport"; st.ts = Date.now();
+    st.tahap = tahapBerikutTemplate(st, t); st.ts = Date.now();
     await kirimLangkahTemplate(env, chatId, st);
     return true;
   }
@@ -2638,7 +3050,7 @@ async function handleTemplateTeks(env, chatId, st, teks) {
     const v = kosongkan(teks);
     if (v !== null && !validPortNum(v)) return salah("😕 UDP DNS Port tidak valid. Kirim angka 1-65535, mis. <code>53</code> —  atau ketuk ⏭️ Lewati untuk default.");
     st.ssh.dnsUdpPort = v === null ? 53 : Number(v);
-    st.tahap = "ringkasan"; st.ts = Date.now();
+    st.tahap = tahapBerikutTemplate(st, t); st.ts = Date.now();
     await kirimLangkahTemplate(env, chatId, st);
     return true;
   }
@@ -2649,7 +3061,55 @@ async function handleTemplateTeks(env, chatId, st, teks) {
       if (!hp) return salah("😕 Format target salah. Pakai <code>host:port</code>, mis. <code>sg1.contoh.com:443</code> —  atau ketuk ⏭️ Lewati untuk kosong.");
       st.xray.targetHost = hp.host; st.xray.targetPort = hp.port;
     } else { st.xray.targetHost = null; st.xray.targetPort = null; }
-    st.tahap = "xray_sni"; st.ts = Date.now();
+    st.tahap = tahapBerikutTemplate(st, t); st.ts = Date.now();
+    await kirimLangkahTemplate(env, chatId, st);
+    return true;
+  }
+  if (t === "xray_domain") {
+    const v = kosongkan(teks);
+    if (v !== null && !validHost(v.toLowerCase())) return salah("😕 Domain tidak valid. Kirim host yang benar, mis. <code>sg1.contoh.com</code> —  atau ketuk ⏭️ Lewati untuk kosong.");
+    st.xray.sni = v === null ? null : v.toLowerCase();
+    st.xray.headerHost = st.xray.sni;
+    st.tahap = tahapBerikutTemplate(st, t); st.ts = Date.now();
+    await kirimLangkahTemplate(env, chatId, st);
+    return true;
+  }
+  if (t === "xray_server") {
+    const v = kosongkan(teks);
+    if (v !== null) {
+      const hp = parseHostPort(v);
+      if (!hp) return salah("😕 Format server salah. Pakai <code>host:port</code>, mis. <code>sg1.contoh.com:443</code> —  atau ketuk ⏭️ Lewati untuk kosong.");
+      st.xray.targetHost = hp.host; st.xray.targetPort = hp.port; st.xray.headerHost = hp.host;
+    } else { st.xray.targetHost = null; st.xray.targetPort = null; st.xray.headerHost = null; }
+    st.tahap = tahapBerikutTemplate(st, t); st.ts = Date.now();
+    await kirimLangkahTemplate(env, chatId, st);
+    return true;
+  }
+  if (t === "xray_bug") {
+    const v = kosongkan(teks);
+    if (v !== null && !validHost(v.toLowerCase())) return salah("😕 Bug tidak valid. Kirim host yang benar —  atau ketuk ⏭️ Lewati untuk kosong.");
+    st.xray.targetHost = v === null ? null : v.toLowerCase();
+    st.xray.targetPort = null;
+    st.tahap = tahapBerikutTemplate(st, t); st.ts = Date.now();
+    await kirimLangkahTemplate(env, chatId, st);
+    return true;
+  }
+  if (t === "xray_bugserver") {
+    const v = kosongkan(teks);
+    if (v === null) return salah("😕 Bug/Server wajib diisi untuk WC ONERING. Kirim host atau <code>host:port</code> — atau ketuk 📋 Pilih dari Daftar Bug.");
+    const hp = parseHostPort(v);
+    if (hp) { st.xray.targetHost = hp.host; st.xray.targetPort = hp.port; }
+    else if (validHost(v.toLowerCase())) { st.xray.targetHost = v.toLowerCase(); st.xray.targetPort = null; }
+    else return salah("😕 Format bug salah. Pakai host atau <code>host:port</code> — atau ketuk 📋 Pilih dari Daftar Bug.");
+    st.tahap = tahapBerikutTemplate(st, t); st.ts = Date.now();
+    await kirimLangkahTemplate(env, chatId, st);
+    return true;
+  }
+  if (t === "xray_host") {
+    const v = kosongkan(teks);
+    if (v === null || !validHost(v.toLowerCase())) return salah("😕 Host wajib diisi untuk WC ONERING. Kirim host yang benar, mis. <code>www.yourdomain.com</code>.");
+    st.xray.headerHost = v.toLowerCase();
+    st.tahap = tahapBerikutTemplate(st, t); st.ts = Date.now();
     await kirimLangkahTemplate(env, chatId, st);
     return true;
   }
@@ -2657,7 +3117,7 @@ async function handleTemplateTeks(env, chatId, st, teks) {
     const v = kosongkan(teks);
     if (v !== null && !validHost(v.toLowerCase())) return salah("😕 SNI tidak valid. Kirim host yang benar, mis. <code>sg1.contoh.com</code> —  atau ketuk ⏭️ Lewati untuk kosong.");
     st.xray.sni = v === null ? null : v.toLowerCase();
-    st.tahap = "xray_header"; st.ts = Date.now();
+    st.tahap = tahapBerikutTemplate(st, t); st.ts = Date.now();
     await kirimLangkahTemplate(env, chatId, st);
     return true;
   }
@@ -2665,13 +3125,42 @@ async function handleTemplateTeks(env, chatId, st, teks) {
     const v = kosongkan(teks);
     if (v !== null && !validHost(v.toLowerCase())) return salah("😕 Header Host tidak valid. Kirim host yang benar —  atau ketuk ⏭️ Lewati untuk kosong.");
     st.xray.headerHost = v === null ? null : v.toLowerCase();
-    st.tahap = "xray_payload"; st.ts = Date.now();
+    st.tahap = tahapBerikutTemplate(st, t); st.ts = Date.now();
     await kirimLangkahTemplate(env, chatId, st);
     return true;
   }
   if (t === "xray_payload") {
     st.xray.payload = kosongkan(teks);
-    st.tahap = "xray_ssh"; st.ts = Date.now();
+    st.tahap = tahapBerikutTemplate(st, t); st.ts = Date.now();
+    await kirimLangkahTemplate(env, chatId, st);
+    return true;
+  }
+  if (t === "xray_proxy") {
+    const v = kosongkan(teks);
+    if (v === null) {
+      st.xray.proxyHost = null; st.xray.proxyPort = null;
+    } else {
+      const hp = parseHostPort(v);
+      if (hp) {
+        // host:port lengkap -> lanjut (tahap port dilewati).
+        st.xray.proxyHost = hp.host; st.xray.proxyPort = hp.port;
+      } else if (validHost(v.toLowerCase())) {
+        // Host saja (tanpa port): port ditanya di tahap berikutnya.
+        st.xray.proxyHost = v.toLowerCase(); st.xray.proxyPort = null;
+      } else {
+        return salah("😕 Format proxy salah. Pakai <code>host:port</code>, mis. <code>proxy.contoh.com:8080</code> —  atau ketuk ⏭️ Lewati untuk kosong.");
+      }
+    }
+    st.tahap = tahapBerikutTemplate(st, t);
+    st.ts = Date.now();
+    await kirimLangkahTemplate(env, chatId, st);
+    return true;
+  }
+  if (t === "xray_proxyport") {
+    const v = kosongkan(teks);
+    if (v !== null && !validPortNum(v)) return salah("😕 Port proxy tidak valid. Kirim angka 1-65535, mis. <code>8080</code> —  atau ketuk ⏭️ Lewati untuk default.");
+    st.xray.proxyPort = v === null ? null : Number(v);
+    st.tahap = tahapBerikutTemplate(st, t); st.ts = Date.now();
     await kirimLangkahTemplate(env, chatId, st);
     return true;
   }
@@ -2683,7 +3172,7 @@ async function handleTemplateTeks(env, chatId, st, teks) {
       const a = ssh.akunList[0];
       st.xray.sshHost = a.host; st.xray.sshPort = a.port; st.xray.sshUser = a.username; st.xray.sshPass = a.password;
     } else { st.xray.sshHost = null; st.xray.sshPort = null; st.xray.sshUser = null; st.xray.sshPass = null; }
-    st.tahap = "xray_ns"; st.ts = Date.now();
+    st.tahap = tahapBerikutTemplate(st, t); st.ts = Date.now();
     await kirimLangkahTemplate(env, chatId, st);
     return true;
   }
@@ -2691,13 +3180,13 @@ async function handleTemplateTeks(env, chatId, st, teks) {
     const v = kosongkan(teks);
     if (v !== null && !validHost(v.toLowerCase())) return salah("😕 Name Server tidak valid. Kirim host/IP yang benar, mis. <code>id1.dnsx.my.id</code> —  atau ketuk ⏭️ Lewati untuk kosong.");
     st.xray.nameServer = v === null ? null : v.toLowerCase();
-    st.tahap = "xray_pubkey"; st.ts = Date.now();
+    st.tahap = tahapBerikutTemplate(st, t); st.ts = Date.now();
     await kirimLangkahTemplate(env, chatId, st);
     return true;
   }
   if (t === "xray_pubkey") {
     st.xray.publicKey = kosongkan(teks);
-    st.tahap = "xray_udphost"; st.ts = Date.now();
+    st.tahap = tahapBerikutTemplate(st, t); st.ts = Date.now();
     await kirimLangkahTemplate(env, chatId, st);
     return true;
   }
@@ -2705,7 +3194,7 @@ async function handleTemplateTeks(env, chatId, st, teks) {
     const v = kosongkan(teks);
     if (v !== null && !validHost(v.toLowerCase())) return salah("😕 UDP DNS Host tidak valid. Kirim host/IP yang benar, mis. <code>1.1.1.1</code> —  atau ketuk ⏭️ Lewati untuk default.");
     st.xray.udpDnsHost = v === null ? "1.1.1.1" : v.toLowerCase();
-    st.tahap = "xray_udpport"; st.ts = Date.now();
+    st.tahap = tahapBerikutTemplate(st, t); st.ts = Date.now();
     await kirimLangkahTemplate(env, chatId, st);
     return true;
   }
@@ -2713,7 +3202,7 @@ async function handleTemplateTeks(env, chatId, st, teks) {
     const v = kosongkan(teks);
     if (v !== null && !validPortNum(v)) return salah("😕 UDP DNS Port tidak valid. Kirim angka 1-65535, mis. <code>53</code> —  atau ketuk ⏭️ Lewati untuk default.");
     st.xray.udpDnsPort = v === null ? 53 : Number(v);
-    st.tahap = "ringkasan"; st.ts = Date.now();
+    st.tahap = tahapBerikutTemplate(st, t); st.ts = Date.now();
     await kirimLangkahTemplate(env, chatId, st);
     return true;
   }
@@ -2868,7 +3357,7 @@ async function handleTemplateOperator(env, chatId, opKey, notice) {
   }
   const daftarTampil = daftar.slice(0, 20);
   const teks = awalan + judul + "\n\n" +
-    daftarTampil.map((e, i) => (i + 1) + ". <b>" + escapeHtml(e.nama) + "</b> (" + (e.tipe === "SSH" ? "SSH" : "Xray") + " · " + labelKategori(e.operator, e.kategori) + ") — " + e.tanggal).join("\n") +
+    daftarTampil.map((e, i) => (i + 1) + ". <b>" + escapeHtml(e.nama) + "</b> (" + (e.tipe === "SSH" ? "SSH" : "Xray") + (e.metode ? " · " + labelMetode(e.tipe, e.metode) : "") + " · " + labelKategori(e.operator, e.kategori) + ") — " + e.tanggal).join("\n") +
     "\n\nKetuk satu template buat generate pakai template itu.";
   const keyboard = [];
   for (const e of daftarTampil) {
@@ -3030,9 +3519,9 @@ async function handleTelegram(env, update) {
       // akun diambil dari pengguna saat template dipakai. Perintah teks
       // /tambahconfig (akun lengkap) tetap jalan seperti dulu.
       pendingAdmin.set(chatIdCb, {
-        jenis: "template", tahap: "tipe", tipe: null, op: null, kat: null, nama: "",
-        ssh: { port: null, payload: null, proxyHost: null, proxyPort: null, sni: null, enhanced: false, slowdns: false, dnsNameServer: null, dnsPublicKey: null, dnsUdpHost: null, dnsUdpPort: null },
-        xray: { targetHost: null, targetPort: null, sni: null, headerHost: null, payload: null, sshHost: null, sshPort: null, sshUser: null, sshPass: null, nameServer: null, publicKey: null, udpDnsHost: null, udpDnsPort: null },
+        jenis: "template", tahap: "tipe", tipe: null, metode: null, op: null, kat: null, nama: "",
+        ssh: { host: null, port: null, payload: null, proxyHost: null, proxyPort: null, sni: null, enhanced: false, slowdns: false, dnsNameServer: null, dnsPublicKey: null, dnsUdpHost: null, dnsUdpPort: null },
+        xray: { targetHost: null, targetPort: null, sni: null, headerHost: null, payload: null, sshHost: null, sshPort: null, sshUser: null, sshPass: null, nameServer: null, publicKey: null, udpDnsHost: null, udpDnsPort: null, proxyHost: null, proxyPort: null },
         ts: Date.now(),
       });
       await kirimLangkahTemplate(env, chatIdCb, pendingAdmin.get(chatIdCb));
@@ -3077,7 +3566,28 @@ async function handleTelegram(env, update) {
       if (aksi.startsWith("tipe:")) {
         const tipe = aksi.slice("tipe:".length);
         if (tipe !== "SSH" && tipe !== "XRAY") return;
-        st.tipe = tipe; st.tahap = "operator"; st.ts = Date.now();
+        st.tipe = tipe; st.tahap = "metode"; st.ts = Date.now();
+        await kirimLangkahTemplate(env, chatIdCb, st);
+        return;
+      }
+      // Pemilih METODE (v2.9.0): metode hanya berlaku untuk tipenya —
+      // metode Xray tidak bisa dipilih saat tipe SSH, dan sebaliknya.
+      if (aksi.startsWith("metode:")) {
+        const id = aksi.slice("metode:".length);
+        const daftar = METODE_TEMPLATE[st.tipe] || [];
+        if (!daftar.some((m) => m.id === id)) return;
+        st.metode = id; st.tahap = "operator"; st.ts = Date.now();
+        if (id === "SSH_SLOWDNS") st.ssh.slowdns = true;
+        await kirimLangkahTemplate(env, chatIdCb, st);
+        return;
+      }
+      if (aksi === "kembali:tipe") {
+        st.tahap = "tipe"; st.ts = Date.now();
+        await kirimLangkahTemplate(env, chatIdCb, st);
+        return;
+      }
+      if (aksi === "kembali:metode") {
+        st.tahap = "metode"; st.ts = Date.now();
         await kirimLangkahTemplate(env, chatIdCb, st);
         return;
       }
@@ -3172,22 +3682,30 @@ async function handleTelegram(env, update) {
         }
         const host = pb.hosts[idx];
         delete st.pilihBug;
-        // Isi field sesuai tahap asal lalu lanjut ke tahap berikutnya.
-        // host:port diisi host saja (port null): proxy lanjut ke tahap
-        // port (ssh_proxyport), target pakai port akun pengguna.
-        if (st.tahap === "ssh_sni") { st.ssh.sni = host; st.tahap = "ssh_enhanced"; }
-        else if (st.tahap === "xray_sni") { st.xray.sni = host; st.tahap = "xray_header"; }
-        else if (st.tahap === "xray_header") { st.xray.headerHost = host; st.tahap = "xray_payload"; }
-        else if (st.tahap === "ssh_proxy") { st.ssh.proxyHost = host; st.ssh.proxyPort = null; st.tahap = "ssh_proxyport"; }
-        else if (st.tahap === "xray_target") { st.xray.targetHost = host; st.xray.targetPort = null; st.tahap = "xray_sni"; }
+        // Isi field sesuai tahap asal lalu lanjut ke tahap berikutnya
+        // (sesuai urutan metode). host:port diisi host saja (port null):
+        // proxy lanjut ke tahap port, target pakai port akun pengguna.
+        const tahapAsal = st.tahap;
+        if (tahapAsal === "ssh_sni") st.ssh.sni = host;
+        else if (tahapAsal === "xray_sni") st.xray.sni = host;
+        else if (tahapAsal === "xray_header") st.xray.headerHost = host;
+        else if (tahapAsal === "ssh_proxy") { st.ssh.proxyHost = host; st.ssh.proxyPort = null; }
+        else if (tahapAsal === "xray_target") { st.xray.targetHost = host; st.xray.targetPort = null; }
+        else if (tahapAsal === "ssh_bug") { st.ssh.host = host; st.ssh.port = null; }
+        else if (tahapAsal === "xray_domain") { st.xray.sni = host; st.xray.headerHost = host; }
+        else if (tahapAsal === "xray_server") { st.xray.targetHost = host; st.xray.targetPort = null; st.xray.headerHost = host; }
+        else if (tahapAsal === "xray_bug") { st.xray.targetHost = host; st.xray.targetPort = null; }
+        else if (tahapAsal === "xray_bugserver") { st.xray.targetHost = host; st.xray.targetPort = null; }
+        else if (tahapAsal === "xray_proxy") { st.xray.proxyHost = host; st.xray.proxyPort = null; }
         else return;
+        st.tahap = tahapBerikutTemplate(st, tahapAsal);
         st.ts = Date.now();
         await kirimLangkahTemplate(env, chatIdCb, st);
         return;
       }
       if (aksi.startsWith("enhanced:")) {
         st.ssh.enhanced = aksi.slice("enhanced:".length) === "ya";
-        st.tahap = "ssh_slowdns"; st.ts = Date.now();
+        st.tahap = tahapBerikutTemplate(st, "ssh_enhanced"); st.ts = Date.now();
         await kirimLangkahTemplate(env, chatIdCb, st);
         return;
       }
@@ -3199,11 +3717,11 @@ async function handleTelegram(env, update) {
         return;
       }
       if (aksi === "simpan") {
-        if (!st.nama || !st.op || !st.kat || !st.tipe) {
+        if (!st.nama || !st.op || !st.kat || !st.tipe || !st.metode) {
           await sendTelegram(env, chatIdCb, "😕 Template belum lengkap — mulai lagi dari panel admin ya.");
           return;
         }
-        const tpl = { nama: st.nama, operator: st.op, kategori: st.kat, tipe: st.tipe, ssh: st.tipe === "SSH" ? st.ssh : null, xray: st.tipe === "XRAY" ? st.xray : null };
+        const tpl = { nama: st.nama, operator: st.op, kategori: st.kat, tipe: st.tipe, metode: st.metode, ssh: st.tipe === "SSH" ? st.ssh : null, xray: st.tipe === "XRAY" ? st.xray : null };
         const hasil = await simpanTemplate(env, tpl);
         if (!hasil) {
           await sendTelegram(env, chatIdCb, "⚠️ Gagal menyimpan template — coba lagi nanti ya.");
