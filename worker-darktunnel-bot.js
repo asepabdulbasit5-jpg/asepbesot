@@ -1370,7 +1370,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.1";
+const VERSI_BOT = "v2.9.2";
 
 const PESAN_START =
   "👋 <b>Generator Config Dark Tunnel</b>\n\n" +
@@ -1977,10 +1977,31 @@ async function jawabCallback(env, callbackQueryId) {
   await telegramApi(env, "answerCallbackQuery", { callback_query_id: callbackQueryId });
 }
 
-async function editTelegram(env, chatId, messageId, text, keyboard) {
-  const body = { chat_id: chatId, message_id: messageId, text: String(text).slice(0, 4000), parse_mode: "HTML" };
-  if (keyboard) body.reply_markup = { inline_keyboard: keyboard };
-  await telegramApi(env, "editMessageText", body);
+// Edit-di-tempat anti-numpuk (v2.9.2): coba edit pesan yang sama;
+// bila gagal karena teksnya sama ("message is not modified") anggap
+// sukses (konten sudah sesuai) dan kembalikan messageId lama; bila
+// gagal karena lain (pesan hilang/dihapus) fallback kirim pesan baru
+// dan kembalikan message_id barunya. Bila messageId kosong, langsung
+// kirim baru. Selalu kembalikan messageId yang kini memegang konten
+// (atau null bila kirim juga gagal).
+async function editAtauKirim(env, chatId, messageId, text, keyboard) {
+  if (messageId) {
+    const body = { chat_id: chatId, message_id: messageId, text: String(text).slice(0, 4000), parse_mode: "HTML" };
+    if (keyboard) body.reply_markup = { inline_keyboard: keyboard };
+    const r = await telegramApi(env, "editMessageText", body);
+    if (r && r.ok) return messageId;
+    if (r && !r.ok && /message is not modified/i.test(String(r.description || ""))) return messageId;
+    // Edit gagal karena lain -> fallback kirim baru di bawah.
+  }
+  const r2 = await sendTelegram(env, chatId, text, keyboard);
+  return r2?.result?.message_id || messageId || null;
+}
+
+// Hapus satu pesan bot (dipakai tombol ❌ Batal — pesan hilang, tanpa
+// pesan "dibatalkan"). Semua error diabaikan diam-diam.
+async function hapusTelegram(env, chatId, messageId) {
+  if (!messageId) return;
+  try { await telegramApi(env, "deleteMessage", { chat_id: chatId, message_id: messageId }); } catch { /* abaikan */ }
 }
 
 async function kabariAdmin(env, teks) {
@@ -2418,31 +2439,34 @@ async function tampilkanModeHapusBug(env, chatId, messageId, opKey, katKey, hal,
   const judul = "🗑️ <b>Hapus Bug — " + escapeHtml(labelOperator(opKey)) + " — " + escapeHtml(labelKategori(opKey, katKey)) + "</b>";
   const awalan = notice ? notice + "\n\n" : "";
   if (!hosts.length) {
-    await editTelegram(env, chatId, messageId, awalan + judul + "\n\nKategori ini sudah tidak ada bug lagi.", [
+    await editAtauKirim(env, chatId, messageId, awalan + judul + "\n\nKategori ini sudah tidak ada bug lagi.", [
       [{ text: "⬅️ Kembali ke Kategori", callback_data: "bug:op:" + opKey }],
       ...TOMBOL_KEMBALI,
     ]);
     return;
   }
-  await editTelegram(env, chatId, messageId,
+  await editAtauKirim(env, chatId, messageId,
     awalan + judul + "\n\nKetuk host yang mau dihapus" + (totalHal > 1 ? " (halaman " + (h + 1) + "/" + totalHal + ")" : "") + ":",
     keyboardHapusBug(hosts, opKey, katKey, h));
 }
 
 // Kirim daftar pemilih bug sesuai st.pilihBug.langkah.
 async function kirimPilihBug(env, chatId, st) {
+  // Pemilih bug di dalam wizard template (v2.9.2): edit pesan wizard
+  // yang sama (st.msgId), bukan kirim pesan baru tiap langkah picker.
+  const tampil = async (teks, kb) => { st.msgId = await editAtauKirim(env, chatId, st.msgId, teks, kb); };
   const pb = st.pilihBug;
   if (!pb) return;
   if (pb.langkah === "operator") {
-    await sendTelegram(env, chatId, "📋 <b>Pilih dari Daftar Bug</b>\n\nPilih operator:", keyboardPilihBugOperator());
+    await tampil("📋 <b>Pilih dari Daftar Bug</b>\n\nPilih operator:", keyboardPilihBugOperator());
   } else if (pb.langkah === "kategori") {
     const kv = await ambilBugsKv(env);
-    await sendTelegram(env, chatId, "📋 <b>Pilih dari Daftar Bug</b> (" + labelOperator(pb.op) + ")\n\nPilih kategori:", keyboardPilihBugKategori(pb.op, Object.keys(kv[pb.op] || {})));
+    await tampil("📋 <b>Pilih dari Daftar Bug</b> (" + labelOperator(pb.op) + ")\n\nPilih kategori:", keyboardPilihBugKategori(pb.op, Object.keys(kv[pb.op] || {})));
   } else if (pb.langkah === "host") {
     const per = PICKER_HOST_PER_HALAMAN;
     const totalHal = Math.max(1, Math.ceil(pb.hosts.length / per));
     const hal = Math.min(pb.page || 0, totalHal - 1);
-    await sendTelegram(env, chatId, "📋 <b>Pilih dari Daftar Bug</b> (" + labelOperator(pb.op) + " — " + labelKategori(pb.op, pb.kat) + ")\n\nKetuk host yang mau dipakai" + (totalHal > 1 ? " (halaman " + (hal + 1) + "/" + totalHal + ")" : "") + ":", keyboardPilihBugHost(st));
+    await tampil("📋 <b>Pilih dari Daftar Bug</b> (" + labelOperator(pb.op) + " — " + labelKategori(pb.op, pb.kat) + ")\n\nKetuk host yang mau dipakai" + (totalHal > 1 ? " (halaman " + (hal + 1) + "/" + totalHal + ")" : "") + ":", keyboardPilihBugHost(st));
   }
 }
 
@@ -2467,8 +2491,15 @@ const TEKS_PANEL_ADMIN = "⚙️ <b>Menu Admin</b>\n\nPilih yang mau dilakukan:"
 // Karena keyboard lama masih nempel di HP pengguna (Telegram menyimpan
 // reply keyboard sampai dihapus eksplisit), /start pertama kali juga
 // mengirim pesan remove_keyboard sekali per pengguna (dilacak KV KBRM).
-async function tampilkanMenuUtama(env, chatId) {
-  await sendTelegram(env, chatId, PESAN_START, keyboardStart(cekAdmin(env, chatId) === "ya"));
+// Menu utama: bila messageId diisi (dipicu tap tombol), EDIT pesan itu
+// jadi menu (anti-numpuk, v2.9.2); bila kosong (perintah /start),
+// kirim baru seperti biasa.
+async function tampilkanMenuUtama(env, chatId, messageId) {
+  if (messageId) {
+    await editAtauKirim(env, chatId, messageId, PESAN_START, keyboardStart(cekAdmin(env, chatId) === "ya"));
+  } else {
+    await sendTelegram(env, chatId, PESAN_START, keyboardStart(cekAdmin(env, chatId) === "ya"));
+  }
   await hapusKeyboardBawahSekali(env, chatId);
 }
 
@@ -2773,20 +2804,23 @@ function keyboardBugSimpan() {
 
 // Kirim prompt untuk tahap wizard Tambah Bug saat ini.
 async function kirimLangkahBug(env, chatId, st) {
+  // Satu pesan wizard yang diedit tiap langkah (v2.9.2): bila st.msgId
+  // ada, edit pesan itu; bila tidak, kirim baru dan simpan msgId-nya.
+  const tampil = async (teks, kb) => { st.msgId = await editAtauKirim(env, chatId, st.msgId, teks, kb); };
   const t = st.tahap;
   if (t === "operator") {
-    await sendTelegram(env, chatId, "➕ <b>Tambah Bug</b>\n\nPilih operator:", keyboardBugOperator());
+    await tampil("➕ <b>Tambah Bug</b>\n\nPilih operator:", keyboardBugOperator());
   } else if (t === "kategori") {
     const kv = await ambilBugsKv(env);
-    await sendTelegram(env, chatId, "➕ <b>Tambah Bug</b> (" + labelOperator(st.op) + ")\n\nPilih kategori:", keyboardBugKategori(st.op, Object.keys(kv[st.op] || {})));
+    await tampil("➕ <b>Tambah Bug</b> (" + labelOperator(st.op) + ")\n\nPilih kategori:", keyboardBugKategori(st.op, Object.keys(kv[st.op] || {})));
   } else if (t === "kategori_baru") {
-    await sendTelegram(env, chatId, "🆕 <b>Kategori Baru</b>\n\nKirim nama kategori baru — mis. <code>belajar</code>.\n\nHuruf kecil, tanpa spasi (boleh angka / tanda <code>-</code>). Kategori ini cuma dipakai di bug ini.", TOMBOL_BATAL_BUG);
+    await tampil("🆕 <b>Kategori Baru</b>\n\nKirim nama kategori baru — mis. <code>belajar</code>.\n\nHuruf kecil, tanpa spasi (boleh angka / tanda <code>-</code>). Kategori ini cuma dipakai di bug ini.", TOMBOL_BATAL_BUG);
   } else if (t === "host") {
-    await sendTelegram(env, chatId, "🐛 <b>Host Bug</b> (" + labelOperator(st.op) + " — " + labelKategori(st.op, st.kat) + ")\n\nKetik host bug-nya — mis. <code>edu.ruangguru.com</code> atau IP (boleh pakai port, mis. <code>1.2.3.4:8080</code>).", TOMBOL_BATAL_BUG);
+    await tampil("🐛 <b>Host Bug</b> (" + labelOperator(st.op) + " — " + labelKategori(st.op, st.kat) + ")\n\nKetik host bug-nya — mis. <code>edu.ruangguru.com</code> atau IP (boleh pakai port, mis. <code>1.2.3.4:8080</code>).", TOMBOL_BATAL_BUG);
   } else if (t === "catatan") {
-    await sendTelegram(env, chatId, "📝 <b>Catatan</b> (opsional)\n\nKetik catatan — mis. <code>opok tsel</code> atau <code>ws/wc</code>.\n\nKosong = tanpa catatan. Ketuk ⏭️ Lewati untuk kosong.", TOMBOL_LEWATI_BUG);
+    await tampil("📝 <b>Catatan</b> (opsional)\n\nKetik catatan — mis. <code>opok tsel</code> atau <code>ws/wc</code>.\n\nKosong = tanpa catatan. Ketuk ⏭️ Lewati untuk kosong.", TOMBOL_LEWATI_BUG);
   } else if (t === "ringkasan") {
-    await sendTelegram(env, chatId, "🐛 <b>Cek Bug</b>\n\n• Operator: <b>" + escapeHtml(labelOperator(st.op)) + "</b>\n• Kategori: <b>" + escapeHtml(labelKategori(st.op, st.kat)) + "</b>\n• Bug: <code>" + escapeHtml(st.host) + "</code>\n• Catatan: " + (st.catatan ? escapeHtml(st.catatan) : "—") + "\n\nSimpan bug ini?", keyboardBugSimpan());
+    await tampil("🐛 <b>Cek Bug</b>\n\n• Operator: <b>" + escapeHtml(labelOperator(st.op)) + "</b>\n• Kategori: <b>" + escapeHtml(labelKategori(st.op, st.kat)) + "</b>\n• Bug: <code>" + escapeHtml(st.host) + "</code>\n• Catatan: " + (st.catatan ? escapeHtml(st.catatan) : "—") + "\n\nSimpan bug ini?", keyboardBugSimpan());
   }
 }
 
@@ -2795,7 +2829,9 @@ async function kirimLangkahBug(env, chatId, st) {
 // tahap teks wizard bug (tahap tombol ditangani router callback "ab:").
 async function handleBugTeks(env, chatId, st, teks) {
   const t = st.tahap;
-  const salah = async (pesan, kb) => { await sendTelegram(env, chatId, pesan, kb || TOMBOL_BATAL_BUG); return true; };
+  // Error validasi mengedit prompt wizard yang sama (v2.9.2) —
+  // bukan kirim pesan error baru.
+  const salah = async (pesan, kb) => { st.msgId = await editAtauKirim(env, chatId, st.msgId, pesan, kb || TOMBOL_BATAL_BUG); return true; };
   if (t === "kategori_baru") {
     const kat = String(teks || "").trim().toLowerCase();
     if (!/^[a-z][a-z0-9_-]{0,19}$/.test(kat)) return salah("😕 Nama kategori tidak valid. Pakai huruf kecil tanpa spasi, mis. <code>belajar</code> — huruf pertama harus huruf.");
@@ -2888,80 +2924,83 @@ function keyboardTahapTemplate(t) {
 
 // Kirim prompt untuk tahap wizard template saat ini.
 async function kirimLangkahTemplate(env, chatId, st) {
+  // Satu pesan wizard yang diedit tiap langkah (v2.9.2): bila st.msgId
+  // ada, edit pesan itu; bila tidak, kirim baru dan simpan msgId-nya.
+  const tampil = async (teks, kb) => { st.msgId = await editAtauKirim(env, chatId, st.msgId, teks, kb); };
   const t = st.tahap;
   const batal = keyboardTahapTemplate(t);
   if (t === "tipe") {
-    await sendTelegram(env, chatId, "🧩 <b>Template Config Baru</b>\n\nPilih tipe config:", keyboardTemplateTipe());
+    await tampil("🧩 <b>Template Config Baru</b>\n\nPilih tipe config:", keyboardTemplateTipe());
   } else if (t === "metode") {
-    await sendTelegram(env, chatId, "🧩 <b>Template Config Baru</b> (" + (st.tipe === "SSH" ? "SSH" : "Xray / V2Ray") + ")\n\nPilih metode:", keyboardTemplateMetode(st.tipe));
+    await tampil("🧩 <b>Template Config Baru</b> (" + (st.tipe === "SSH" ? "SSH" : "Xray / V2Ray") + ")\n\nPilih metode:", keyboardTemplateMetode(st.tipe));
   } else if (t === "operator") {
-    await sendTelegram(env, chatId, "🧩 <b>Template Config Baru</b> (" + (st.tipe === "SSH" ? "SSH" : "Xray / V2Ray") + ")\n\nPilih operator:", keyboardTemplateOperator());
+    await tampil("🧩 <b>Template Config Baru</b> (" + (st.tipe === "SSH" ? "SSH" : "Xray / V2Ray") + ")\n\nPilih operator:", keyboardTemplateOperator());
   } else if (t === "kategori") {
-    await sendTelegram(env, chatId, "🧩 <b>Template Config Baru</b>\n\nPilih kategori (" + labelOperator(st.op) + "):", keyboardTemplateKategori(st.op));
+    await tampil("🧩 <b>Template Config Baru</b>\n\nPilih kategori (" + labelOperator(st.op) + "):", keyboardTemplateKategori(st.op));
   } else if (t === "kategori_baru") {
-    await sendTelegram(env, chatId, "🆕 <b>Kategori Baru</b>\n\nKirim nama kategori baru — mis. <code>belajar</code>.\n\nHuruf kecil, tanpa spasi (boleh angka / tanda <code>-</code>). Kategori ini cuma dipakai di template ini.", batal);
+    await tampil("🆕 <b>Kategori Baru</b>\n\nKirim nama kategori baru — mis. <code>belajar</code>.\n\nHuruf kecil, tanpa spasi (boleh angka / tanda <code>-</code>). Kategori ini cuma dipakai di template ini.", batal);
   } else if (t === "nama") {
-    await sendTelegram(env, chatId, "🧩 <b>Template Config Baru</b>\n\nKirim <b>nama template</b> — mis. <code>Opok Tsel SSH 1</code>.", batal);
+    await tampil("🧩 <b>Template Config Baru</b>\n\nKirim <b>nama template</b> — mis. <code>Opok Tsel SSH 1</code>.", batal);
   } else if (t === "ssh_port") {
-    await sendTelegram(env, chatId, "🔌 <b>Port SSH</b>\n\nKirim port (angka 1-65535, mis. <code>80</code> atau <code>443</code>).\n\nKosong = pakai port dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
+    await tampil("🔌 <b>Port SSH</b>\n\nKirim port (angka 1-65535, mis. <code>80</code> atau <code>443</code>).\n\nKosong = pakai port dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "ssh_payload") {
-    await sendTelegram(env, chatId, "📝 <b>Payload</b>\n\nKirim teks payload lengkap (boleh pakai <code>[host]</code> / <code>[bug]</code> / <code>[ua]</code>).\n\nKosong = tanpa payload. Ketuk ⏭️ Lewati untuk kosong.", batal);
+    await tampil("📝 <b>Payload</b>\n\nKirim teks payload lengkap (boleh pakai <code>[host]</code> / <code>[bug]</code> / <code>[ua]</code>).\n\nKosong = tanpa payload. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "ssh_proxy") {
-    await sendTelegram(env, chatId, "🔀 <b>Proxy</b>\n\nKirim proxy — host saja (mis. <code>proxy.contoh.com</code>, port ditanya setelahnya) atau langsung format <code>host:port</code> (boleh dari daftar bug — atau ketuk 📋 Pilih dari Daftar Bug).\n\nKosong = tanpa proxy. Ketuk ⏭️ Lewati untuk kosong.", batal);
+    await tampil("🔀 <b>Proxy</b>\n\nKirim proxy — host saja (mis. <code>proxy.contoh.com</code>, port ditanya setelahnya) atau langsung format <code>host:port</code> (boleh dari daftar bug — atau ketuk 📋 Pilih dari Daftar Bug).\n\nKosong = tanpa proxy. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "ssh_proxyport") {
-    await sendTelegram(env, chatId, "🔀 <b>Port Proxy</b>\n\nPort proxy untuk <code>" + escapeHtml(st.ssh?.proxyHost || "") + "</code>:\n\nKirim angka 1-65535 (mis. <code>80</code>, <code>443</code>, atau <code>8080</code>).\n\nKosong = default <code>8080</code>. Ketuk ⏭️ Lewati untuk kosong.", batal);
+    await tampil("🔀 <b>Port Proxy</b>\n\nPort proxy untuk <code>" + escapeHtml(st.ssh?.proxyHost || "") + "</code>:\n\nKirim angka 1-65535 (mis. <code>80</code>, <code>443</code>, atau <code>8080</code>).\n\nKosong = default <code>8080</code>. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "ssh_bug") {
-    await sendTelegram(env, chatId, "🐛 <b>Bug / Host SSH</b>\n\nKirim bug format <code>host:port</code> (mis. <code>bug.contoh.com:443</code>) atau host saja — atau ketuk 📋 Pilih dari Daftar Bug.\n\nHost & port bug ini dipakai sebagai host SSH (username/password tetap dari akun pengguna).", batal);
+    await tampil("🐛 <b>Bug / Host SSH</b>\n\nKirim bug format <code>host:port</code> (mis. <code>bug.contoh.com:443</code>) atau host saja — atau ketuk 📋 Pilih dari Daftar Bug.\n\nHost & port bug ini dipakai sebagai host SSH (username/password tetap dari akun pengguna).", batal);
   } else if (t === "ssh_sni") {
-    await sendTelegram(env, chatId, "🎯 <b>SNI</b>\n\nKetik SNI manual (host, contoh: <code>edu.ruangguru.com</code>) — atau ketuk 📋 Pilih dari Daftar Bug.\n\nKetik <code>[host]</code> supaya SNI ngikutin host akun pengguna.\n\nKosong = pakai bug/SNI dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
+    await tampil("🎯 <b>SNI</b>\n\nKetik SNI manual (host, contoh: <code>edu.ruangguru.com</code>) — atau ketuk 📋 Pilih dari Daftar Bug.\n\nKetik <code>[host]</code> supaya SNI ngikutin host akun pengguna.\n\nKosong = pakai bug/SNI dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "ssh_enhanced") {
-    await sendTelegram(env, chatId, "⚡ <b>Enhanced</b>\n\nAktifkan payload Enhanced?", keyboardTemplateYaTidak("tw:enhanced"));
+    await tampil("⚡ <b>Enhanced</b>\n\nAktifkan payload Enhanced?", keyboardTemplateYaTidak("tw:enhanced"));
   } else if (t === "ssh_slowdns") {
-    await sendTelegram(env, chatId, "🐢 <b>SlowDNS / DNSTT</b>\n\nPakai SlowDNS (UDP Custom + DNSTT)?", keyboardTemplateYaTidak("tw:slowdns"));
+    await tampil("🐢 <b>SlowDNS / DNSTT</b>\n\nPakai SlowDNS (UDP Custom + DNSTT)?", keyboardTemplateYaTidak("tw:slowdns"));
   } else if (t === "ssh_ns") {
-    await sendTelegram(env, chatId, "🐢 <b>SlowDNS — Name Server</b>\n\nKirim name server SlowDNS (host/IP, mis. <code>id1.dnsx.my.id</code>).\n\nWajib diisi untuk SlowDNS.", batal);
+    await tampil("🐢 <b>SlowDNS — Name Server</b>\n\nKirim name server SlowDNS (host/IP, mis. <code>id1.dnsx.my.id</code>).\n\nWajib diisi untuk SlowDNS.", batal);
   } else if (t === "ssh_pubkey") {
-    await sendTelegram(env, chatId, "🐢 <b>SlowDNS — Public Key</b>\n\nKirim public key SlowDNS (teks kunci).\n\nWajib diisi untuk SlowDNS.", batal);
+    await tampil("🐢 <b>SlowDNS — Public Key</b>\n\nKirim public key SlowDNS (teks kunci).\n\nWajib diisi untuk SlowDNS.", batal);
   } else if (t === "ssh_udphost") {
-    await sendTelegram(env, chatId, "🐢 <b>SlowDNS — UDP DNS Host</b>\n\nKirim UDP DNS host (mis. <code>1.1.1.1</code>).\n\nKosong = default <code>1.1.1.1</code>. Ketuk ⏭️ Lewati untuk default.", batal);
+    await tampil("🐢 <b>SlowDNS — UDP DNS Host</b>\n\nKirim UDP DNS host (mis. <code>1.1.1.1</code>).\n\nKosong = default <code>1.1.1.1</code>. Ketuk ⏭️ Lewati untuk default.", batal);
   } else if (t === "ssh_udpport") {
-    await sendTelegram(env, chatId, "🐢 <b>SlowDNS — UDP DNS Port</b>\n\nKirim UDP DNS port (angka 1-65535, mis. <code>53</code>).\n\nKosong = default <code>53</code>. Ketuk ⏭️ Lewati untuk default.", batal);
+    await tampil("🐢 <b>SlowDNS — UDP DNS Port</b>\n\nKirim UDP DNS port (angka 1-65535, mis. <code>53</code>).\n\nKosong = default <code>53</code>. Ketuk ⏭️ Lewati untuk default.", batal);
   } else if (t === "xray_target") {
     const judul = (st.metode === "WS" || st.metode === "WC") ? "🎯 <b>Target / Bug</b>" : "🎯 <b>Target Server</b>";
-    await sendTelegram(env, chatId, judul + "\n\nKirim target server format <code>host:port</code> (boleh dari daftar bug — atau ketuk 📋 Pilih dari Daftar Bug).\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
+    await tampil(judul + "\n\nKirim target server format <code>host:port</code> (boleh dari daftar bug — atau ketuk 📋 Pilih dari Daftar Bug).\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_domain") {
-    await sendTelegram(env, chatId, "🌐 <b>Domain</b>\n\nKetik domain (host, contoh: <code>sg1.contoh.com</code>) — atau ketuk 📋 Pilih dari Daftar Bug.\n\nDomain ini dipakai sebagai SNI/TLS dan Header Host.\n\nKetik <code>[host]</code> supaya SNI dan Header Host ngikutin host akun pengguna.\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
+    await tampil("🌐 <b>Domain</b>\n\nKetik domain (host, contoh: <code>sg1.contoh.com</code>) — atau ketuk 📋 Pilih dari Daftar Bug.\n\nDomain ini dipakai sebagai SNI/TLS dan Header Host.\n\nKetik <code>[host]</code> supaya SNI dan Header Host ngikutin host akun pengguna.\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_server") {
-    await sendTelegram(env, chatId, "🎯 <b>Server / Domain</b>\n\nKirim server format <code>host:port</code> (mis. <code>sg1.contoh.com:443</code>) — atau ketuk 📋 Pilih dari Daftar Bug.\n\nDipakai sebagai host server + Header Host.\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
+    await tampil("🎯 <b>Server / Domain</b>\n\nKirim server format <code>host:port</code> (mis. <code>sg1.contoh.com:443</code>) — atau ketuk 📋 Pilih dari Daftar Bug.\n\nDipakai sebagai host server + Header Host.\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_bug") {
-    await sendTelegram(env, chatId, "🐛 <b>Bug</b>\n\nKetik bug (host, contoh: <code>api.quipper.com</code>) — atau ketuk 📋 Pilih dari Daftar Bug.\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
+    await tampil("🐛 <b>Bug</b>\n\nKetik bug (host, contoh: <code>api.quipper.com</code>) — atau ketuk 📋 Pilih dari Daftar Bug.\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_bugserver") {
-    await sendTelegram(env, chatId, "🐛 <b>Bug / Server</b>\n\nKirim bug — host saja (mis. <code>bug.contoh.com</code>, port default 443) atau format <code>host:port</code> — atau ketuk 📋 Pilih dari Daftar Bug.", batal);
+    await tampil("🐛 <b>Bug / Server</b>\n\nKirim bug — host saja (mis. <code>bug.contoh.com</code>, port default 443) atau format <code>host:port</code> — atau ketuk 📋 Pilih dari Daftar Bug.", batal);
   } else if (t === "xray_host") {
-    await sendTelegram(env, chatId, "🌐 <b>Host</b>\n\nKirim host (mis. <code>www.yourdomain.com</code>).\n\nWajib diisi — dipakai di SNI (onering) dan Header Host.", batal);
+    await tampil("🌐 <b>Host</b>\n\nKirim host (mis. <code>www.yourdomain.com</code>).\n\nWajib diisi — dipakai di SNI (onering) dan Header Host.", batal);
   } else if (t === "xray_proxy") {
-    await sendTelegram(env, chatId, "🔀 <b>Proxy</b>\n\nKirim proxy — host saja (mis. <code>proxy.contoh.com</code>, port ditanya setelahnya) atau langsung format <code>host:port</code> (boleh dari daftar bug — atau ketuk 📋 Pilih dari Daftar Bug).\n\nKosong = tanpa proxy. Ketuk ⏭️ Lewati untuk kosong.", batal);
+    await tampil("🔀 <b>Proxy</b>\n\nKirim proxy — host saja (mis. <code>proxy.contoh.com</code>, port ditanya setelahnya) atau langsung format <code>host:port</code> (boleh dari daftar bug — atau ketuk 📋 Pilih dari Daftar Bug).\n\nKosong = tanpa proxy. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_proxyport") {
-    await sendTelegram(env, chatId, "🔀 <b>Port Proxy</b>\n\nPort proxy untuk <code>" + escapeHtml(st.xray?.proxyHost || "") + "</code>:\n\nKirim angka 1-65535 (mis. <code>80</code>, <code>443</code>, atau <code>8080</code>).\n\nKosong = default <code>8080</code>. Ketuk ⏭️ Lewati untuk kosong.", batal);
+    await tampil("🔀 <b>Port Proxy</b>\n\nPort proxy untuk <code>" + escapeHtml(st.xray?.proxyHost || "") + "</code>:\n\nKirim angka 1-65535 (mis. <code>80</code>, <code>443</code>, atau <code>8080</code>).\n\nKosong = default <code>8080</code>. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_sni") {
-    await sendTelegram(env, chatId, "🎯 <b>Server Name / SNI</b>\n\nKetik SNI manual (host, contoh: <code>sg1.contoh.com</code>) — atau ketuk 📋 Pilih dari Daftar Bug.\n\nKetik <code>[host]</code> supaya SNI ngikutin host akun pengguna.\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
+    await tampil("🎯 <b>Server Name / SNI</b>\n\nKetik SNI manual (host, contoh: <code>sg1.contoh.com</code>) — atau ketuk 📋 Pilih dari Daftar Bug.\n\nKetik <code>[host]</code> supaya SNI ngikutin host akun pengguna.\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_header") {
-    await sendTelegram(env, chatId, "🎯 <b>Header Host</b>\n\nKirim header host (host, boleh dari daftar bug — atau ketuk 📋 Pilih dari Daftar Bug).\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
+    await tampil("🎯 <b>Header Host</b>\n\nKirim header host (host, boleh dari daftar bug — atau ketuk 📋 Pilih dari Daftar Bug).\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_payload") {
-    await sendTelegram(env, chatId, "📝 <b>Payload</b> (opsional)\n\nKirim teks payload (boleh pakai <code>[host]</code> / <code>[bug]</code> / <code>[ua]</code>).\n\nKosong = tanpa payload. Ketuk ⏭️ Lewati untuk kosong.", batal);
+    await tampil("📝 <b>Payload</b> (opsional)\n\nKirim teks payload (boleh pakai <code>[host]</code> / <code>[bug]</code> / <code>[ua]</code>).\n\nKosong = tanpa payload. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_ssh") {
-    await sendTelegram(env, chatId, "🔑 <b>Akun SSH</b> (opsional)\n\nKirim akun SSH format <code>host:port@user:pass</code>.\n\nDisimpan di template tapi tidak dipakai di config Xray. Ketuk ⏭️ Lewati untuk kosong.", batal);
+    await tampil("🔑 <b>Akun SSH</b> (opsional)\n\nKirim akun SSH format <code>host:port@user:pass</code>.\n\nDisimpan di template tapi tidak dipakai di config Xray. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_ns") {
-    await sendTelegram(env, chatId, "🐢 <b>SlowDNS — Name Server</b> (opsional)\n\nKirim name server SlowDNS (host/IP, mis. <code>id1.dnsx.my.id</code>).\n\nSlowDNS aktif bila name server + public key sama-sama terisi. Ketuk ⏭️ Lewati untuk kosong.", batal);
+    await tampil("🐢 <b>SlowDNS — Name Server</b> (opsional)\n\nKirim name server SlowDNS (host/IP, mis. <code>id1.dnsx.my.id</code>).\n\nSlowDNS aktif bila name server + public key sama-sama terisi. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_pubkey") {
-    await sendTelegram(env, chatId, "🐢 <b>SlowDNS — Public Key</b> (opsional)\n\nKirim public key SlowDNS (teks kunci).\n\nSlowDNS aktif bila name server + public key sama-sama terisi. Ketuk ⏭️ Lewati untuk kosong.", batal);
+    await tampil("🐢 <b>SlowDNS — Public Key</b> (opsional)\n\nKirim public key SlowDNS (teks kunci).\n\nSlowDNS aktif bila name server + public key sama-sama terisi. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_udphost") {
-    await sendTelegram(env, chatId, "🐢 <b>SlowDNS — UDP DNS Host</b> (opsional)\n\nKirim UDP DNS host (mis. <code>1.1.1.1</code>).\n\nKosong = default <code>1.1.1.1</code>. Ketuk ⏭️ Lewati untuk default.", batal);
+    await tampil("🐢 <b>SlowDNS — UDP DNS Host</b> (opsional)\n\nKirim UDP DNS host (mis. <code>1.1.1.1</code>).\n\nKosong = default <code>1.1.1.1</code>. Ketuk ⏭️ Lewati untuk default.", batal);
   } else if (t === "xray_udpport") {
-    await sendTelegram(env, chatId, "🐢 <b>SlowDNS — UDP DNS Port</b> (opsional)\n\nKirim UDP DNS port (angka 1-65535, mis. <code>53</code>).\n\nKosong = default <code>53</code>. Ketuk ⏭️ Lewati untuk default.", batal);
+    await tampil("🐢 <b>SlowDNS — UDP DNS Port</b> (opsional)\n\nKirim UDP DNS port (angka 1-65535, mis. <code>53</code>).\n\nKosong = default <code>53</code>. Ketuk ⏭️ Lewati untuk default.", batal);
   } else if (t === "ringkasan") {
     const tpl = { nama: st.nama, operator: st.op, kategori: st.kat, tipe: st.tipe, metode: st.metode, ssh: st.ssh, xray: st.xray };
-    await sendTelegram(env, chatId, "🧩 <b>Cek Template</b>\n\n" + ringkasanTemplate(tpl) + "\n\nSimpan template ini?", keyboardTemplateSimpan());
+    await tampil("🧩 <b>Cek Template</b>\n\n" + ringkasanTemplate(tpl) + "\n\nSimpan template ini?", keyboardTemplateSimpan());
   }
 }
 
@@ -2971,9 +3010,10 @@ async function kirimLangkahTemplate(env, chatId, st) {
 async function handleTemplateTeks(env, chatId, st, teks) {
   const t = st.tahap;
   // Pesan error validasi memakai keyboard tahap yang sama (tahap host
-  // tetap bisa pilih bug / lewati dari pesan error).
+  // tetap bisa pilih bug / lewati dari pesan error). Error mengedit
+  // prompt wizard yang sama (v2.9.2) — bukan kirim pesan error baru.
   const kbSalah = keyboardTahapTemplate(t);
-  const salah = async (pesan) => { await sendTelegram(env, chatId, pesan, kbSalah); return true; };
+  const salah = async (pesan) => { st.msgId = await editAtauKirim(env, chatId, st.msgId, pesan, kbSalah); return true; };
   if (t === "kategori_baru") {
     const kat = String(teks || "").trim().toLowerCase();
     if (!/^[a-z][a-z0-9_-]{0,19}$/.test(kat)) return salah("😕 Nama kategori tidak valid. Pakai huruf kecil tanpa spasi, mis. <code>belajar</code> — huruf pertama harus huruf.");
@@ -3334,13 +3374,15 @@ async function handleUpdate(env, chatId) {
 // Bagian template TIDAK langsung daftar semua template: /config hanya
 // menampilkan tombol per OPERATOR yang punya minimal 1 template
 // (urutan BUG_DB). Ketuk operator -> daftar template operator itu.
-async function handleConfig(env, chatId, notice) {
+// messageId (opsional, v2.9.2): bila diisi (dibuka dari tap tombol),
+// EDIT pesan itu; bila kosong (perintah /config), kirim baru.
+async function handleConfig(env, chatId, notice, messageId) {
   const arr = await ambilConfigsKv(env);
   const templates = await ambilTemplatesKv(env);
   const isAdmin = cekAdmin(env, chatId) === "ya";
   const awalan = notice ? notice + "\n\n" : "";
   if (!arr.length && !templates.length) {
-    await sendTelegram(env, chatId, awalan + "📋 <b>Config & Template</b>\n\nBelum ada config contoh atau template.", TOMBOL_KEMBALI);
+    await editAtauKirim(env, chatId, messageId, awalan + "📋 <b>Config & Template</b>\n\nBelum ada config contoh atau template.", TOMBOL_KEMBALI);
     return;
   }
   const bagian = [];
@@ -3368,19 +3410,19 @@ async function handleConfig(env, chatId, notice) {
   if (arr.length) teks += "\n\nKetuk satu config buat ambil file-nya, atau satu operator buat lihat template config-nya.";
   else teks += "\n\nKetuk satu operator buat lihat template config-nya.";
   keyboard.push(...TOMBOL_KEMBALI);
-  await sendTelegram(env, chatId, teks, keyboard);
+  await editAtauKirim(env, chatId, messageId, teks, keyboard);
 }
 
 // ---- Daftar template config satu operator (dari /config) ----
 // notice = pesan tambahan di atas judul (misal konfirmasi hapus).
-async function handleTemplateOperator(env, chatId, opKey, notice) {
+async function handleTemplateOperator(env, chatId, opKey, notice, messageId) {
   const templates = await ambilTemplatesKv(env);
   const daftar = templates.filter((t) => t.operator === opKey);
   const isAdmin = cekAdmin(env, chatId) === "ya";
   const judul = "🧩 <b>Template Config — " + escapeHtml(labelOperator(opKey)) + "</b>";
   const awalan = notice ? notice + "\n\n" : "";
   if (!daftar.length) {
-    await sendTelegram(env, chatId, awalan + judul + "\n\nBelum ada template untuk operator ini.", [
+    await editAtauKirim(env, chatId, messageId, awalan + judul + "\n\nBelum ada template untuk operator ini.", [
       [{ text: "⬅️ Kembali", callback_data: "tpl:op:daftar" }],
       ...TOMBOL_KEMBALI,
     ]);
@@ -3398,7 +3440,7 @@ async function handleTemplateOperator(env, chatId, opKey, notice) {
   }
   keyboard.push([{ text: "⬅️ Kembali", callback_data: "tpl:op:daftar" }]);
   keyboard.push(...TOMBOL_KEMBALI);
-  await sendTelegram(env, chatId, teks, keyboard);
+  await editAtauKirim(env, chatId, messageId, teks, keyboard);
 }
 
 // ---- Pengguna kirim akun untuk template yang dipilih di /config ----
@@ -3466,13 +3508,13 @@ async function handleTelegram(env, update) {
     // itu sendiri).
     if (!data.startsWith("tpl:")) pendingTemplate.delete(chatIdCb);
     // Tombol "⬅️ Kembali ke Menu" — edit pesan ini jadi menu utama.
+    // (v2.9.2: lewat tampilkanMenuUtama + hapus state wizard yang
+    // tertunda, supaya ketikan berikutnya tidak masuk ke wizard lama.)
     if (data === "menu:utama") {
       await jawabCallback(env, cb.id);
-      try {
-        await editTelegram(env, chatIdCb, cb.message.message_id, PESAN_START, keyboardStart(cekAdmin(env, chatIdCb) === "ya"));
-      } catch {
-        await sendTelegram(env, chatIdCb, PESAN_START, keyboardStart(cekAdmin(env, chatIdCb) === "ya"));
-      }
+      pendingAdmin.delete(chatIdCb);
+      pendingConfig.delete(chatIdCb);
+      await tampilkanMenuUtama(env, chatIdCb, cb.message.message_id);
       return;
     }
     // Tombol "⚡ Buat Config" di /start — langsung auto-detect, tanpa
@@ -3487,15 +3529,17 @@ async function handleTelegram(env, update) {
     }
     // Tombol "🧩 Template Config" di alur Buat Config — buka daftar
     // config contoh + template yang sudah ada (sama seperti /config).
+    // (v2.9.2: edit pesan prompt Buat Config jadi daftar.)
     if (data === "buat:template") {
       await jawabCallback(env, cb.id);
-      await handleConfig(env, chatIdCb);
+      await handleConfig(env, chatIdCb, undefined, cb.message.message_id);
       return;
     }
     // Tombol "🔍 Cari Bug" di /start — pintu masuk kedua alur /bug.
+    // (v2.9.2: edit pesan menu jadi daftar operator.)
     if (data === "bug:menu") {
       await jawabCallback(env, cb.id);
-      await sendTelegram(env, chatIdCb, "🐛 <b>Daftar Bug Host</b>\n\nPilih operator dulu:", keyboardOperatorBug());
+      await editAtauKirim(env, chatIdCb, cb.message.message_id, "🐛 <b>Daftar Bug Host</b>\n\nPilih operator dulu:", keyboardOperatorBug());
       return;
     }
     // Tombol "🌐 Cek Domain" di /start — minta domain, lalu cek.
@@ -3518,6 +3562,10 @@ async function handleTelegram(env, update) {
       if (key === "auto") key = await pilihMetodeOtomatis(env, pending.teks);
       pendingMetode.delete(chatIdCb);
       await jawabCallback(env, cb.id);
+      // (v2.9.2: picker diedit jadi konfirmasi ringkas — tombolnya mati,
+      // tanpa pesan status baru; file .dark tetap dikirim terpisah.)
+      const labelDipilih = PAYLOAD_METODE[key]?.label || key;
+      await editAtauKirim(env, chatIdCb, cb.message.message_id, "🔧 Metode payload: <b>" + escapeHtml(labelDipilih) + "</b>", TOMBOL_KEMBALI);
       await handlePesanAkun(env, chatIdCb, pending.teks, { metodePayload: key });
       return;
     }
@@ -3528,10 +3576,11 @@ async function handleTelegram(env, update) {
       return;
     }
     // Panel admin (tombol "⚙️ Admin" di menu utama) — admin saja.
+    // (v2.9.2: edit pesan yang diketuk jadi panel, bukan kirim baru.)
     if (data === "admin:panel") {
       if (cekAdmin(env, chatIdCb) !== "ya") { await jawabAlert(env, cb.id, "⛔ Perintah ini khusus admin."); return; }
       await jawabCallback(env, cb.id);
-      await sendTelegram(env, chatIdCb, TEKS_PANEL_ADMIN, keyboardAdmin());
+      await editAtauKirim(env, chatIdCb, cb.message.message_id, TEKS_PANEL_ADMIN, keyboardAdmin());
       return;
     }
     if (data === "admin:tambahbug") {
@@ -3539,7 +3588,8 @@ async function handleTelegram(env, update) {
       await jawabCallback(env, cb.id);
       // Wizard Tambah Bug (v2.8.1): operator -> kategori -> host ->
       // catatan -> ringkasan. Perintah teks /tambahbug tetap jalan.
-      pendingAdmin.set(chatIdCb, { jenis: "bug", tahap: "operator", op: null, kat: null, host: "", catatan: "", ts: Date.now() });
+      // (v2.9.2: msgId = pesan panel — langkah wizard mengeditnya.)
+      pendingAdmin.set(chatIdCb, { jenis: "bug", tahap: "operator", op: null, kat: null, host: "", catatan: "", ts: Date.now(), msgId: cb.message.message_id });
       await kirimLangkahBug(env, chatIdCb, pendingAdmin.get(chatIdCb));
       return;
     }
@@ -3549,11 +3599,12 @@ async function handleTelegram(env, update) {
       // Wizard Template Config (v2.7): admin isi setting template,
       // akun diambil dari pengguna saat template dipakai. Perintah teks
       // /tambahconfig (akun lengkap) tetap jalan seperti dulu.
+      // (v2.9.2: msgId = pesan panel — langkah wizard mengeditnya.)
       pendingAdmin.set(chatIdCb, {
         jenis: "template", tahap: "tipe", tipe: null, metode: null, op: null, kat: null, nama: "",
         ssh: { host: null, port: null, payload: null, proxyHost: null, proxyPort: null, sni: null, enhanced: false, slowdns: false, dnsNameServer: null, dnsPublicKey: null, dnsUdpHost: null, dnsUdpPort: null },
         xray: { targetHost: null, targetPort: null, sni: null, headerHost: null, payload: null, sshHost: null, sshPort: null, sshUser: null, sshPass: null, nameServer: null, publicKey: null, udpDnsHost: null, udpDnsPort: null, proxyHost: null, proxyPort: null },
-        ts: Date.now(),
+        ts: Date.now(), msgId: cb.message.message_id,
       });
       await kirimLangkahTemplate(env, chatIdCb, pendingAdmin.get(chatIdCb));
       return;
@@ -3576,11 +3627,8 @@ async function handleTelegram(env, update) {
       pendingAdmin.delete(chatIdCb);
       pendingConfig.delete(chatIdCb);
       await jawabCallback(env, cb.id);
-      try {
-        await editTelegram(env, chatIdCb, cb.message.message_id, TEKS_PANEL_ADMIN, keyboardAdmin());
-      } catch {
-        await sendTelegram(env, chatIdCb, TEKS_PANEL_ADMIN, keyboardAdmin());
-      }
+      // (v2.9.2: pesan wizard/prompt DIHAPUS — tanpa pesan "dibatalkan".)
+      await hapusTelegram(env, chatIdCb, cb.message.message_id);
       return;
     }
     // ---- Wizard Template Config (v2.7): langkah tombol ----
@@ -3686,7 +3734,8 @@ async function handleTelegram(env, update) {
         if (parts.length !== 2 || !normalisasiOperator(op) || !TAHAP_PILIH_BUG.has(st.tahap) || !st.pilihBug || st.tahap !== st.pilihBug.tahap || st.pilihBug.op !== op) return;
         const hosts = await daftarHostKategori(env, op, kat);
         if (!hosts.length) {
-          await sendTelegram(env, chatIdCb, "😕 Kategori <b>" + escapeHtml(labelKategori(op, kat)) + "</b> belum ada bug-nya. Pilih kategori lain ya.", [[{ text: "⬅️ Ganti kategori", callback_data: "tw:bug:op:" + op }], [{ text: "⬅️ Kembali", callback_data: "tw:bug:kembali" }]]);
+          // (v2.9.2: error mengedit pesan picker yang sama.)
+          st.msgId = await editAtauKirim(env, chatIdCb, st.msgId, "😕 Kategori <b>" + escapeHtml(labelKategori(op, kat)) + "</b> belum ada bug-nya. Pilih kategori lain ya.", [[{ text: "⬅️ Ganti kategori", callback_data: "tw:bug:op:" + op }], [{ text: "⬅️ Kembali", callback_data: "tw:bug:kembali" }]]);
           return;
         }
         st.pilihBug = { langkah: "host", tahap: st.tahap, op, kat, hosts, page: 0 }; st.ts = Date.now();
@@ -3708,7 +3757,8 @@ async function handleTelegram(env, update) {
         const op = parts[0]; const kat = parts[1]; const idx = Number(parts[2]);
         const pb = st.pilihBug;
         if (parts.length !== 3 || !TAHAP_PILIH_BUG.has(st.tahap) || !pb || pb.langkah !== "host" || st.tahap !== pb.tahap || pb.op !== op || pb.kat !== kat || !Number.isInteger(idx) || idx < 0 || idx >= pb.hosts.length) {
-          await sendTelegram(env, chatIdCb, "😕 Pilihan itu sudah tidak berlaku — pilih lagi dari daftar terbaru ya.");
+          // (v2.9.2: error mengedit pesan picker yang sama + tombol Kembali.)
+          st.msgId = await editAtauKirim(env, chatIdCb, st.msgId, "😕 Pilihan itu sudah tidak berlaku — pilih lagi dari daftar terbaru ya.", [[{ text: "⬅️ Kembali", callback_data: "tw:bug:kembali" }]]);
           return;
         }
         const host = pb.hosts[idx];
@@ -3749,17 +3799,22 @@ async function handleTelegram(env, update) {
       }
       if (aksi === "simpan") {
         if (!st.nama || !st.op || !st.kat || !st.tipe || !st.metode) {
-          await sendTelegram(env, chatIdCb, "😕 Template belum lengkap — mulai lagi dari panel admin ya.");
+          // (v2.9.2: error mengedit pesan wizard yang sama.)
+          st.msgId = await editAtauKirim(env, chatIdCb, st.msgId, "😕 Template belum lengkap — mulai lagi dari panel admin ya.", TOMBOL_KEMBALI);
           return;
         }
         const tpl = { nama: st.nama, operator: st.op, kategori: st.kat, tipe: st.tipe, metode: st.metode, ssh: st.tipe === "SSH" ? st.ssh : null, xray: st.tipe === "XRAY" ? st.xray : null };
         const hasil = await simpanTemplate(env, tpl);
         if (!hasil) {
-          await sendTelegram(env, chatIdCb, "⚠️ Gagal menyimpan template — coba lagi nanti ya.");
+          st.msgId = await editAtauKirim(env, chatIdCb, st.msgId, "⚠️ Gagal menyimpan template — coba lagi nanti ya.", keyboardTemplateSimpan());
           return;
         }
         pendingAdmin.delete(chatIdCb);
-        await sendTelegram(env, chatIdCb, "✅ Template " + hasil.aksi + ": <b>" + escapeHtml(hasil.entri.nama) + "</b>.\n\n" + ringkasanTemplate(hasil.entri) + "\n\nPengguna bisa pakai lewat /config.", TOMBOL_KEMBALI);
+        // (v2.9.2: sukses mengedit pesan wizard jadi pesan sukses —
+        // tombol Tambah Lagi / Kembali ke Panel, tanpa pesan baru.)
+        await editAtauKirim(env, chatIdCb, st.msgId, "✅ Template " + hasil.aksi + ": <b>" + escapeHtml(hasil.entri.nama) + "</b>.\n\n" + ringkasanTemplate(hasil.entri) + "\n\nPengguna bisa pakai lewat /config.",
+          [[{ text: "➕ Tambah Template Lagi", callback_data: "admin:tambahconfig" }],
+           [{ text: "⬅️ Kembali ke Panel Admin", callback_data: "admin:panel" }]]);
         await catatUpdate(env, "Template " + (hasil.aksi === "diupdate" ? "diupdate" : "baru") + ": " + hasil.entri.nama + " (" + labelOperator(hasil.entri.operator) + " — " + labelKategori(hasil.entri.operator, hasil.entri.kategori) + ")");
         return;
       }
@@ -3824,18 +3879,19 @@ async function handleTelegram(env, update) {
       }
       if (aksi === "simpan") {
         if (st.tahap !== "ringkasan" || !st.op || !st.kat || !st.host) {
-          await sendTelegram(env, chatIdCb, "😕 Bug belum lengkap — mulai lagi dari panel admin ya.");
+          // (v2.9.2: error mengedit pesan wizard yang sama.)
+          st.msgId = await editAtauKirim(env, chatIdCb, st.msgId, "😕 Bug belum lengkap — mulai lagi dari panel admin ya.", keyboardBugSimpan());
           return;
         }
         if (!env.DATA) {
-          await sendTelegram(env, chatIdCb, "⚠️ Fitur admin belum aktif — KV belum dipasang di Worker.");
+          st.msgId = await editAtauKirim(env, chatIdCb, st.msgId, "⚠️ Fitur admin belum aktif — KV belum dipasang di Worker.", keyboardBugSimpan());
           return;
         }
         // Jalur simpan yang sama seperti /tambahbug: KV BUGS +
         // bersihkan BUG_DELETED + catat update + broadcast.
         const hasil = await simpanBug(env, st.op, st.kat, st.host, st.catatan || "");
         if (!hasil) {
-          await sendTelegram(env, chatIdCb, "⚠️ Gagal menyimpan bug — coba lagi nanti ya.");
+          st.msgId = await editAtauKirim(env, chatIdCb, st.msgId, "⚠️ Gagal menyimpan bug — coba lagi nanti ya.", keyboardBugSimpan());
           return;
         }
         const host = st.host, op = st.op, kat = st.kat;
@@ -3843,7 +3899,9 @@ async function handleTelegram(env, update) {
         const teksSukses = hasil.aksi === "diupdate"
           ? "✅ Bug <code>" + escapeHtml(host) + "</code> diupdate di " + labelOperator(op) + " — " + labelKategori(op, kat) + "."
           : "✅ Bug <code>" + escapeHtml(host) + "</code> ditambahkan ke " + labelOperator(op) + " — " + labelKategori(op, kat) + ".";
-        await sendTelegram(env, chatIdCb, teksSukses + "\n\n📣 Update terkirim ke " + hasil.terkirim + " pengguna.",
+        // (v2.9.2: sukses mengedit pesan wizard jadi pesan sukses —
+        // tanpa pesan baru. Broadcast update tetap terkirim terpisah.)
+        await editAtauKirim(env, chatIdCb, st.msgId, teksSukses + "\n\n📣 Update terkirim ke " + hasil.terkirim + " pengguna.",
           [[{ text: "➕ Tambah Bug Lagi", callback_data: "admin:tambahbug" }],
            [{ text: "⬅️ Kembali ke Panel Admin", callback_data: "admin:panel" }]]);
         return;
@@ -3864,13 +3922,13 @@ async function handleTelegram(env, update) {
       // operatornya sudah tidak punya template lagi).
       const notice = "✅ Template <b>" + escapeHtml(t.nama) + "</b> dihapus.";
       const sisa = (await ambilTemplatesKv(env)).filter((e) => e.operator === t.operator);
-      if (sisa.length) await handleTemplateOperator(env, chatIdCb, t.operator, notice);
-      else await handleConfig(env, chatIdCb, notice);
+      if (sisa.length) await handleTemplateOperator(env, chatIdCb, t.operator, notice, cb.message.message_id);
+      else await handleConfig(env, chatIdCb, notice, cb.message.message_id);
       return;
     }
     if (data.startsWith("tpl:del:batal")) {
       await jawabCallback(env, cb.id);
-      await handleConfig(env, chatIdCb);
+      await handleConfig(env, chatIdCb, undefined, cb.message.message_id);
       return;
     }
     if (data.startsWith("tpl:del:")) {
@@ -3880,7 +3938,7 @@ async function handleTelegram(env, update) {
       const t = templates.find((e) => e.id === id);
       await jawabCallback(env, cb.id);
       if (!t) { await sendTelegram(env, chatIdCb, "😕 Template itu sudah tidak ada."); return; }
-      await sendTelegram(env, chatIdCb, "🗑️ Hapus template <b>" + escapeHtml(t.nama) + "</b>?", [
+      await editAtauKirim(env, chatIdCb, cb.message.message_id, "🗑️ Hapus template <b>" + escapeHtml(t.nama) + "</b>?", [
         [{ text: "✅ Ya, hapus", callback_data: "tpl:del:ya:" + id }, { text: "❌ Batal", callback_data: "tpl:del:batal" }],
       ]);
       return;
@@ -3888,14 +3946,14 @@ async function handleTelegram(env, update) {
     // ---- Kembali ke daftar operator template (tpl:op:daftar) ----
     if (data === "tpl:op:daftar") {
       await jawabCallback(env, cb.id);
-      await handleConfig(env, chatIdCb);
+      await handleConfig(env, chatIdCb, undefined, cb.message.message_id);
       return;
     }
     // ---- Daftar template satu operator (tpl:op:<operator>) ----
     if (data.startsWith("tpl:op:")) {
       const op = data.slice("tpl:op:".length);
       await jawabCallback(env, cb.id);
-      await handleTemplateOperator(env, chatIdCb, op);
+      await handleTemplateOperator(env, chatIdCb, op, undefined, cb.message.message_id);
       return;
     }
     // ---- Pakai template (tpl:pakai:<id>) ----
@@ -3910,7 +3968,8 @@ async function handleTelegram(env, update) {
       }
       pendingTemplate.set(chatIdCb, { templateId: id, ts: Date.now() });
       const butuh = t.tipe === "SSH" ? "akun SSH (<code>host:port@user:pass</code>)" : "link Xray (<b>VLESS / VMess / Trojan / Shadowsocks</b>)";
-      await sendTelegram(env, chatIdCb, "🧩 <b>Template: " + escapeHtml(t.nama) + "</b>\n\n" + ringkasanTemplate(t) + "\n\nKirim " + butuh + " kamu — bot akan buatkan config pakai setting template ini.", [[{ text: "❌ Batal", callback_data: "tpl:batal" }]]);
+      // (v2.9.2: edit pesan daftar jadi prompt kirim akun.)
+      await editAtauKirim(env, chatIdCb, cb.message.message_id, "🧩 <b>Template: " + escapeHtml(t.nama) + "</b>\n\n" + ringkasanTemplate(t) + "\n\nKirim " + butuh + " kamu — bot akan buatkan config pakai setting template ini.", [[{ text: "❌ Batal", callback_data: "tpl:batal" }]]);
       return;
     }
     // ---- Batal pakai template (tpl:batal) ----
@@ -3920,7 +3979,8 @@ async function handleTelegram(env, update) {
     if (data === "tpl:batal") {
       pendingTemplate.delete(chatIdCb);
       await jawabCallback(env, cb.id);
-      await sendTelegram(env, chatIdCb, "Template dibatalkan. Ketik /config buat pilih template lain.", TOMBOL_KEMBALI);
+      // (v2.9.2: pesan prompt DIHAPUS — tanpa pesan "dibatalkan".)
+      await hapusTelegram(env, chatIdCb, cb.message.message_id);
       return;
     }
     // Ketuk satu config contoh dari /config -> kirim file .dark-nya.
@@ -3943,7 +4003,7 @@ async function handleTelegram(env, update) {
     // Alur /bug: pilih operator -> pilih kategori -> daftar bug (KV + bawaan).
     if (data === "bug:back") {
       await jawabCallback(env, cb.id);
-      await editTelegram(env, chatIdCb, cb.message.message_id,
+      await editAtauKirim(env, chatIdCb, cb.message.message_id,
         "🐛 <b>Daftar Bug Host</b>\n\nPilih operator dulu:", keyboardOperatorBug());
       return;
     }
@@ -3953,7 +4013,7 @@ async function handleTelegram(env, update) {
       if (!op) { await jawabCallback(env, cb.id); return; }
       await jawabCallback(env, cb.id);
       const kv = await ambilBugsKv(env);
-      await editTelegram(env, chatIdCb, cb.message.message_id,
+      await editAtauKirim(env, chatIdCb, cb.message.message_id,
         "🐛 <b>Bug " + op.label + "</b>\n\nPilih kategori:", keyboardKategoriBug(opKey, Object.keys(kv[opKey] || {})));
       return;
     }
@@ -3966,7 +4026,11 @@ async function handleTelegram(env, update) {
         return;
       }
       for (let i = 0; i < daftar.length; i++) {
-        await sendTelegram(env, chatIdCb, daftar[i], i === daftar.length - 1 ? keyboardKembaliBug(parts[0], parts[1], cekAdmin(env, chatIdCb) === "ya") : undefined);
+        const kbDaftar = i === daftar.length - 1 ? keyboardKembaliBug(parts[0], parts[1], cekAdmin(env, chatIdCb) === "ya") : undefined;
+        // (v2.9.2: potongan pertama mengedit pesan kategori; sisanya
+        // kirim baru — daftar besar tetap terpecah seperti dulu.)
+        if (i === 0) await editAtauKirim(env, chatIdCb, cb.message.message_id, daftar[i], kbDaftar);
+        else await sendTelegram(env, chatIdCb, daftar[i], kbDaftar);
       }
       return;
     }
@@ -4018,7 +4082,7 @@ async function handleTelegram(env, update) {
         await tampilkanModeHapusBug(env, chatIdCb, cb.message.message_id, opKey, katKey, 0, "😕 Daftar bug sudah berubah — pilih lagi ya.");
         return;
       }
-      await editTelegram(env, chatIdCb, cb.message.message_id,
+      await editAtauKirim(env, chatIdCb, cb.message.message_id,
         "🗑️ Hapus bug <code>" + escapeHtml(host) + "</code> dari " + escapeHtml(labelOperator(opKey)) + " — " + escapeHtml(labelKategori(opKey, katKey)) + "?",
         [
           [{ text: "✅ Ya, Hapus", callback_data: "bug:hapus:ya:" + opKey + ":" + katKey + ":" + idx + ":" + hash }, { text: "❌ Batal", callback_data: "bug:hapus:batal:" + opKey + ":" + katKey }],
