@@ -523,6 +523,38 @@ async function ambilConfigsKv(env) {
   return Array.isArray(d) ? d : [];
 }
 
+// ---- Template config admin (v2.7, KV key TEMPLATE:<id>) ----
+// Template = setting config tanpa akun; akun (host/username/password)
+// diambil dari pengguna saat template dipakai. Upsert menurut nama.
+async function ambilTemplatesKv(env) {
+  const keys = await kvList(env, "TEMPLATE:");
+  const out = [];
+  for (const k of keys) {
+    const t = await kvGet(env, k);
+    if (t && t.id) out.push(t);
+  }
+  out.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  return out;
+}
+
+async function simpanTemplate(env, tpl) {
+  const semua = await ambilTemplatesKv(env);
+  const namaLower = String(tpl.nama || "").toLowerCase();
+  const ada = semua.find((e) => String(e.nama || "").toLowerCase() === namaLower);
+  const id = ada ? ada.id : (Date.now().toString(36) + Math.random().toString(36).slice(2, 6));
+  const entri = { ...tpl, id, tanggal: tanggalWib(), ts: Date.now() };
+  if (!await kvPut(env, "TEMPLATE:" + id, entri)) return null;
+  return { entri, aksi: ada ? "diupdate" : "ditambahkan" };
+}
+
+async function hapusTemplateKv(env, id) {
+  try {
+    if (!env.DATA) return false;
+    await env.DATA.delete("TEMPLATE:" + id);
+    return true;
+  } catch { return false; }
+}
+
 // ---- Feed update (KV key UPDATES, array maks 20, terbaru dulu) ----
 async function ambilUpdatesKv(env) {
   const d = await kvGet(env, "UPDATES");
@@ -578,9 +610,10 @@ async function catatanBugUntuk(env, hasil) {
 // TIDAK menampilkan password, UUID, atau kredensial lain.
 export function ringkasanConfig(c) {
   if (!c || typeof c !== "object") return "";
-  const sub = c.sshTunnelConfig || c.vmessTunnelConfig || c.vlessTunnelConfig || c.trojanTunnelConfig || c.shadowsocksTunnelConfig;
+  const sub = c.sshTunnelConfig || c.sshDnsttTunnelConfig || c.vmessTunnelConfig || c.vlessTunnelConfig || c.trojanTunnelConfig || c.shadowsocksTunnelConfig;
   const ssh = sub?.sshConfig;
   const v2 = sub?.v2rayConfig;
+  const dnstt = sub?.dnsttConfig;
   const host = ssh?.host || v2?.host || "";
   const port = ssh?.port || v2?.port || "";
   const inj = sub?.injectConfig;
@@ -595,10 +628,190 @@ export function ringkasanConfig(c) {
   if (sni) baris.push("• SNI/Bug: <code>" + escapeHtml(sni) + "</code>" + (adalahWc ? " (WC)" : ""));
   baris.push("• Inject: " + (inj ? "✅ ON (" + escapeHtml(inj.mode || "DIRECT_SNI") + ")" : "❌ OFF"));
   if (adalahWc) baris.push("• Mode: WC (wildcard)");
+  // SlowDNS (v2.7): tipe SSH_DNSTT atau inject mode DNSTT.
+  if (dnstt || inj?.mode === "DNSTT") {
+    const ns = dnstt?.serverName || inj?.dnsttServerName || "";
+    baris.push("• SlowDNS: ✅ Ya" + (ns ? " (Name Server: <code>" + escapeHtml(ns) + "</code>)" : ""));
+  }
   if (v2) {
     const trans = v2.transportNetwork ? String(v2.transportNetwork) : "";
     const tls = v2.tls === true ? "Aktif" : v2.tls === false ? "Mati" : "";
     if (trans || tls) baris.push("• Transport: " + escapeHtml(trans || "-") + (tls ? " · TLS: " + tls : ""));
+  }
+  return baris.join("\n");
+}
+
+// ================= TEMPLATE CONFIG (v2.7) =================
+// Template = setting config tanpa akun. Field template yang terisi
+// MENANG atas hasil auto-detect; field kosong diambil dari akun pengguna.
+
+// SlowDNS Xray aktif bila name server + public key sama-sama terisi.
+export function xraySlowdnsAktif(t) {
+  const x = t?.xray || {};
+  return !!(String(x.nameServer || "").trim() && String(x.publicKey || "").trim());
+}
+
+// Ganti placeholder payload template: [host] = host server,
+// [bug] = SNI/bug efektif, [ua] = User-Agent standar.
+function isiPlaceholderPayload(tpl, host, bug) {
+  return String(tpl || "")
+    .replaceAll("[host]", host || "")
+    .replaceAll("[ua]", UA_STANDAR)
+    .replaceAll("[bug]", bug || "");
+}
+
+// Cari info bug untuk SNI efektif + terapkan aturan WC (v2.6) bila
+// bug ber-tag wc. Return SNI efektif (WC host atau bug asli).
+async function sniEfektifTemplate(env, bug, serverHost) {
+  if (!bug) return "";
+  let info = null;
+  try { info = env ? await cariBugGabungan(env, bug) : cariBug(bug); } catch { info = cariBug(bug); }
+  if (info && dukungWildcard(info.note)) return hostWildcard(bug, serverHost);
+  return bug;
+}
+
+// Terapkan template SSH ke satu config SSH hasil parsePesan.
+// Mengubah cfg di tempat, return cfg yang sama.
+async function terapkanTemplateSsh(env, cfg, template, bugAkun) {
+  const ssh = cfg.sshTunnelConfig?.sshConfig;
+  if (!ssh) return cfg;
+  const t = template.ssh || {};
+  if (t.port) ssh.port = t.port;
+  // Bug/SNI efektif: SNI template > bug akun > SNI inject lama.
+  const bugAsli = t.sni || bugAkun || cfg.sshTunnelConfig.injectConfig?.serverNameIndication || null;
+  const sniEfektif = await sniEfektifTemplate(env, bugAsli, ssh.host);
+  const butuhInject = !!(sniEfektif || t.payload || t.proxyHost);
+  let inj = cfg.sshTunnelConfig.injectConfig;
+  if (butuhInject && !inj) {
+    inj = injectConfigAktif(sniEfektif || "", "SSH", {
+      metode: t.enhanced ? "enhanced" : undefined,
+      sshHost: ssh.host,
+      dnstt: t.slowdns ? { udpDnsHost: t.dnsUdpHost, udpDnsPort: t.dnsUdpPort, serverName: t.dnsNameServer, publicKey: t.dnsPublicKey } : undefined,
+    });
+    cfg.sshTunnelConfig.injectConfig = inj;
+  }
+  if (inj) {
+    if (sniEfektif) inj.serverNameIndication = sniEfektif;
+    if (t.payload) {
+      inj.payload = isiPlaceholderPayload(t.payload, ssh.host, sniEfektif);
+    } else if (t.enhanced) {
+      inj.payload = isiPlaceholderPayload(PAYLOAD_METODE.enhanced.template, ssh.host, sniEfektif);
+    }
+    if (t.proxyHost) {
+      inj.proxyHost = t.proxyHost;
+      if (t.proxyPort) inj.proxyPort = t.proxyPort;
+      inj.mode = "PROXY_SNI";
+    }
+    if (t.slowdns) {
+      inj.mode = "DNSTT";
+      inj.dnsttUdpDnsHost = t.dnsUdpHost || "1.1.1.1";
+      inj.dnsttUdpDnsPort = t.dnsUdpPort || 53;
+      inj.dnsttServerName = t.dnsNameServer || "";
+      inj.dnsttPublicKey = t.dnsPublicKey || "";
+    }
+  }
+  // SlowDNS: ubah tipe jadi SSH_DNSTT + dnsttConfig.
+  if (t.slowdns) {
+    const dnstt = {
+      udpDnsHost: t.dnsUdpHost || "1.1.1.1",
+      udpDnsPort: t.dnsUdpPort || 53,
+      serverName: t.dnsNameServer || "",
+      publicKey: t.dnsPublicKey || "",
+    };
+    const sub = { sshConfig: ssh, dnsttConfig: dnstt };
+    if (inj) sub.injectConfig = inj;
+    cfg.type = "SSH_DNSTT";
+    cfg.sshDnsttTunnelConfig = sub;
+    delete cfg.sshTunnelConfig;
+  }
+  return cfg;
+}
+
+// Terapkan template Xray ke satu config V2Ray hasil parsePesan.
+// Akun SSH di template Xray DISIMPAN tapi TIDAK dipakai di config
+// (jangan campur sshTunnelConfig ke config V2Ray).
+async function terapkanTemplateXray(env, cfg, template, bugAkun) {
+  const subKey = ["vmessTunnelConfig", "vlessTunnelConfig", "trojanTunnelConfig", "shadowsocksTunnelConfig"].find((k) => cfg[k]);
+  if (!subKey) return cfg;
+  const v2 = cfg[subKey].v2rayConfig;
+  if (!v2) return cfg;
+  const t = template.xray || {};
+  if (t.targetHost) v2.host = t.targetHost;
+  if (t.targetPort) v2.port = t.targetPort;
+  if (t.sni) v2.serverNameIndication = t.sni;
+  if (t.headerHost) v2.wsHeaderHost = t.headerHost;
+  // SNI efektif untuk inject: SNI template > SNI v2ray > bug akun.
+  const bugAsli = t.sni || v2.serverNameIndication || bugAkun || null;
+  const sniEfektif = await sniEfektifTemplate(env, bugAsli, v2.host);
+  const slowdns = xraySlowdnsAktif(template);
+  const butuhInject = !!(sniEfektif || t.payload || slowdns);
+  let inj = cfg[subKey].injectConfig;
+  if (butuhInject && !inj) {
+    inj = injectConfigAktif(sniEfektif || "", cfg.type, {
+      dnstt: slowdns ? { udpDnsHost: t.udpDnsHost, udpDnsPort: t.udpDnsPort, serverName: t.nameServer, publicKey: t.publicKey } : undefined,
+    });
+    cfg[subKey].injectConfig = inj;
+  }
+  if (inj) {
+    if (sniEfektif) inj.serverNameIndication = sniEfektif;
+    if (t.payload) inj.payload = isiPlaceholderPayload(t.payload, v2.host, sniEfektif);
+    if (slowdns) {
+      inj.mode = "DNSTT";
+      inj.dnsttUdpDnsHost = t.udpDnsHost || "1.1.1.1";
+      inj.dnsttUdpDnsPort = t.udpDnsPort || 53;
+      inj.dnsttServerName = t.nameServer;
+      inj.dnsttPublicKey = t.publicKey;
+    }
+  }
+  return cfg;
+}
+
+// Terapkan template ke hasil parsePesan. Return array config yang
+// cocok dengan tipe template (sudah disesuaikan); kosong bila tidak
+// ada config yang cocok (template SSH + akun Xray, atau sebaliknya).
+export async function terapkanTemplate(env, hasil, template) {
+  const out = [];
+  for (const c of hasil?.configs || []) {
+    if (template.tipe === "SSH" && c.type === "SSH") {
+      out.push(await terapkanTemplateSsh(env, c, template, hasil.bug));
+    } else if (template.tipe === "XRAY" && ["VLESS", "VMESS", "TROJAN", "SHADOWSOCKS"].includes(c.type)) {
+      out.push(await terapkanTemplateXray(env, c, template, hasil.bug));
+    }
+  }
+  return out;
+}
+
+// Ringkasan template untuk pesan ringkasan wizard + /config.
+// Hanya field yang terisi yang ditampilkan.
+export function ringkasanTemplate(t) {
+  if (!t) return "";
+  const baris = ["🧩 <b>Template: " + escapeHtml(t.nama || "-") + "</b>"];
+  baris.push("• Tipe: <b>" + (t.tipe === "SSH" ? "SSH" : "Xray / V2Ray") + "</b>");
+  baris.push("• Operator: " + escapeHtml(labelOperator(t.operator)) + " — " + escapeHtml(labelKategori(t.operator, t.kategori)));
+  if (t.tipe === "SSH") {
+    const s = t.ssh || {};
+    if (s.port) baris.push("• Port: <code>" + s.port + "</code>");
+    if (s.payload) baris.push("• Payload: <code>" + escapeHtml(String(s.payload).slice(0, 80)) + (String(s.payload).length > 80 ? "…" : "") + "</code>");
+    if (s.proxyHost) baris.push("• Proxy: <code>" + escapeHtml(s.proxyHost) + (s.proxyPort ? ":" + s.proxyPort : "") + "</code>");
+    if (s.sni) baris.push("• SNI: <code>" + escapeHtml(s.sni) + "</code>");
+    baris.push("• Enhanced: " + (s.enhanced ? "✅ Ya" : "❌ Tidak"));
+    if (s.slowdns) {
+      baris.push("• SlowDNS: ✅ Ya (Name Server: <code>" + escapeHtml(s.dnsNameServer || "") + "</code>, UDP: <code>" + escapeHtml(s.dnsUdpHost || "1.1.1.1") + ":" + (s.dnsUdpPort || 53) + "</code>)");
+    } else {
+      baris.push("• SlowDNS: ❌ Tidak");
+    }
+  } else {
+    const x = t.xray || {};
+    if (x.targetHost) baris.push("• Target: <code>" + escapeHtml(x.targetHost) + (x.targetPort ? ":" + x.targetPort : "") + "</code>");
+    if (x.sni) baris.push("• SNI: <code>" + escapeHtml(x.sni) + "</code>");
+    if (x.headerHost) baris.push("• Header Host: <code>" + escapeHtml(x.headerHost) + "</code>");
+    if (x.payload) baris.push("• Payload: <code>" + escapeHtml(String(x.payload).slice(0, 80)) + (String(x.payload).length > 80 ? "…" : "") + "</code>");
+    if (x.sshHost) baris.push("• Akun SSH: <code>" + escapeHtml(x.sshHost + (x.sshPort ? ":" + x.sshPort : "") + "@" + (x.sshUser || "")) + "</code> (disimpan, tidak dipakai di config Xray)");
+    if (xraySlowdnsAktif(t)) {
+      baris.push("• SlowDNS: ✅ Ya (Name Server: <code>" + escapeHtml(x.nameServer || "") + "</code>, UDP: <code>" + escapeHtml(x.udpDnsHost || "1.1.1.1") + ":" + (x.udpDnsPort || 53) + "</code>)");
+    } else {
+      baris.push("• SlowDNS: ❌ Tidak");
+    }
   }
   return baris.join("\n");
 }
@@ -656,7 +869,9 @@ export async function pilihMetodeOtomatis(env, teks) {
 // v2.5.1 = Telkomsel ilped jadi kategori sendiri (bukan edu).
 // v2.6 = mode WC (wildcard) otomatis: bug bertag wc -> SNI inject =
 // bug + "." + host server.
-const VERSI_BOT = "v2.6";
+// v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
+// Xray; akun dari pengguna saat template dipakai).
+const VERSI_BOT = "v2.7";
 
 const PESAN_START =
   "👋 <b>Generator Config Dark Tunnel</b>\n\n" +
@@ -742,13 +957,21 @@ function injectConfigAktif(bug, service, opts = {}) {
   }
   const inj = {
     enabled: true,
-    mode: "DIRECT_SNI",
+    // SlowDNS/DNSTT (v2.7): bila opts.dnstt terisi (name server +
+    // public key), mode jadi DNSTT + sertakan keempat field DNSTT.
+    mode: opts.dnstt ? "DNSTT" : "DIRECT_SNI",
     serverNameIndication: bug,
     payload,
   };
   if (opts.proxy) {
     inj.proxyHost = opts.proxy.host;
     inj.proxyPort = opts.proxy.port;
+  }
+  if (opts.dnstt) {
+    inj.dnsttUdpDnsHost = opts.dnstt.udpDnsHost || "1.1.1.1";
+    inj.dnsttUdpDnsPort = opts.dnstt.udpDnsPort || 53;
+    inj.dnsttServerName = opts.dnstt.serverName || "";
+    inj.dnsttPublicKey = opts.dnstt.publicKey || "";
   }
   return inj;
 }
@@ -1423,6 +1646,47 @@ function keyboardAdmin() {
   ];
 }
 
+// ---- Keyboard wizard Template Config (v2.7) ----
+function keyboardTemplateTipe() {
+  return [
+    [{ text: "SSH", callback_data: "tw:tipe:SSH" }, { text: "Xray / V2Ray", callback_data: "tw:tipe:XRAY" }],
+    [{ text: "❌ Batal", callback_data: "admin:batal" }],
+  ];
+}
+
+function keyboardTemplateOperator() {
+  const ops = Object.entries(BUG_DB);
+  const rows = [];
+  for (let i = 0; i < ops.length; i += 2) {
+    rows.push(ops.slice(i, i + 2).map(([k, v]) => ({ text: v.label, callback_data: "tw:op:" + k })));
+  }
+  rows.push([{ text: "❌ Batal", callback_data: "admin:batal" }]);
+  return rows;
+}
+
+function keyboardTemplateKategori(opKey) {
+  const op = BUG_DB[opKey];
+  const kats = op ? Object.keys(op.kategori) : [];
+  const rows = kats.map((k) => ([{ text: labelKategori(opKey, k), callback_data: "tw:kat:" + k }]));
+  rows.push([{ text: "⬅️ Kembali ke Operator", callback_data: "tw:kembali:op" }]);
+  rows.push([{ text: "❌ Batal", callback_data: "admin:batal" }]);
+  return rows;
+}
+
+function keyboardTemplateYaTidak(prefix) {
+  return [
+    [{ text: "Ya", callback_data: prefix + ":ya" }, { text: "Tidak", callback_data: prefix + ":tidak" }],
+    [{ text: "❌ Batal", callback_data: "admin:batal" }],
+  ];
+}
+
+function keyboardTemplateSimpan() {
+  return [
+    [{ text: "💾 Simpan", callback_data: "tw:simpan" }],
+    [{ text: "❌ Batal", callback_data: "admin:batal" }],
+  ];
+}
+
 const TEKS_PANEL_ADMIN = "⚙️ <b>Menu Admin</b>\n\nPilih yang mau dilakukan:";
 
 // Tombol "▶️ Start" bawah (reply keyboard Telegram, TIDAK permanen —
@@ -1463,6 +1727,11 @@ const pendingMetode = new Map();
 // sementara di memori saja). Isi: {op, kat, nama, ts}.
 const pendingConfig = new Map();
 
+// Template yang sedang dipakai pengguna (per chat, sementara di
+// memori saja — bukan KV). Isi: {templateId, ts}. Dipakai alur
+// /config -> ketuk template -> kirim akun -> generate pakai template.
+const pendingTemplate = new Map();
+
 // Pilihan jenis config yang sedang menunggu (per chat, sementara di
 // memori saja — bukan KV). Isi: {type, ts}. Dipakai alur "⚡ Buat
 // Config": pengguna memilih jenis dulu, baru kirim akun.
@@ -1477,8 +1746,9 @@ function ambilPilihan(chatId) {
 }
 
 // State admin tertunda dari tombol panel admin (per chat admin,
-// sementara di memori saja). Isi: {jenis: "bug"|"config"|"broadcast",
-// tahap: "nama" (untuk config), ts}.
+// sementara di memori saja). Isi: {jenis: "bug"|"config"|"broadcast"|
+// "template", tahap, ...}. Untuk "template": wizard Template Config
+// v2.7 — {tahap, tipe, op, kat, nama, ssh: {...}, xray: {...}, ts}.
 const pendingAdmin = new Map();
 
 async function handlePesanAkun(env, chatId, teks, opts = {}) {
@@ -1700,6 +1970,249 @@ async function handleDokumenConfig(env, msg) {
   await simpanConfigContoh(env, chatId, pending, cfg);
 }
 
+// ================= WIZARD TEMPLATE CONFIG (v2.7) =================
+// Wizard bertahap di panel admin ("➕ Tambah Config"). State di
+// pendingAdmin: {jenis: "template", tahap, tipe, op, kat, nama,
+// ssh: {...}, xray: {...}, ts}. Tiap langkah teks: jawab "lewati"
+// atau "-" untuk kosong. Tombol ❌ Batal di setiap langkah.
+
+// "lewati" / "-" / kosong -> null (field kosong).
+function kosongkan(s) {
+  const v = String(s || "").trim();
+  if (!v || v === "-" || v.toLowerCase() === "lewati") return null;
+  return v;
+}
+
+function validPortNum(n) {
+  const p = Number(n);
+  return Number.isInteger(p) && p >= 1 && p <= 65535;
+}
+
+// "host:port" -> {host, port} atau null bila format salah.
+function parseHostPort(s) {
+  const m = String(s || "").trim().match(/^(.+):(\d{1,5})$/);
+  if (!m || !validHost(m[1])) return null;
+  const port = Number(m[2]);
+  if (!validPortNum(port)) return null;
+  return { host: m[1].toLowerCase(), port };
+}
+
+const TOMBOL_BATAL_TEMPLATE = [[{ text: "❌ Batal", callback_data: "admin:batal" }]];
+
+// Kirim prompt untuk tahap wizard template saat ini.
+async function kirimLangkahTemplate(env, chatId, st) {
+  const t = st.tahap;
+  const batal = TOMBOL_BATAL_TEMPLATE;
+  if (t === "tipe") {
+    await sendTelegram(env, chatId, "🧩 <b>Template Config Baru</b>\n\nPilih tipe config:", keyboardTemplateTipe());
+  } else if (t === "operator") {
+    await sendTelegram(env, chatId, "🧩 <b>Template Config Baru</b> (" + (st.tipe === "SSH" ? "SSH" : "Xray / V2Ray") + ")\n\nPilih operator:", keyboardTemplateOperator());
+  } else if (t === "kategori") {
+    await sendTelegram(env, chatId, "🧩 <b>Template Config Baru</b>\n\nPilih kategori (" + labelOperator(st.op) + "):", keyboardTemplateKategori(st.op));
+  } else if (t === "nama") {
+    await sendTelegram(env, chatId, "🧩 <b>Template Config Baru</b>\n\nKirim <b>nama template</b> — mis. <code>Opok Tsel SSH 1</code>.", batal);
+  } else if (t === "ssh_port") {
+    await sendTelegram(env, chatId, "🔌 <b>Port SSH</b>\n\nKirim port (angka 1-65535, mis. <code>80</code> atau <code>443</code>).\n\nKosong = pakai port dari akun pengguna. Ketik <code>lewati</code> untuk kosong.", batal);
+  } else if (t === "ssh_payload") {
+    await sendTelegram(env, chatId, "📝 <b>Payload</b>\n\nKirim teks payload lengkap (boleh pakai <code>[host]</code> / <code>[bug]</code> / <code>[ua]</code>).\n\nKosong = pakai metode payload kategori otomatis. Ketik <code>lewati</code> untuk kosong.", batal);
+  } else if (t === "ssh_proxy") {
+    await sendTelegram(env, chatId, "🔀 <b>Proxy</b>\n\nKirim proxy format <code>host:port</code> (boleh dari daftar bug).\n\nKosong = tanpa proxy. Ketik <code>lewati</code> untuk kosong.", batal);
+  } else if (t === "ssh_sni") {
+    await sendTelegram(env, chatId, "🎯 <b>SNI</b>\n\nKirim SNI (host, boleh dari daftar bug).\n\nKosong = pakai bug/SNI dari akun pengguna. Ketik <code>lewati</code> untuk kosong.", batal);
+  } else if (t === "ssh_enhanced") {
+    await sendTelegram(env, chatId, "⚡ <b>Enhanced</b>\n\nAktifkan payload Enhanced?", keyboardTemplateYaTidak("tw:enhanced"));
+  } else if (t === "ssh_slowdns") {
+    await sendTelegram(env, chatId, "🐢 <b>SlowDNS / DNSTT</b>\n\nPakai SlowDNS (UDP Custom + DNSTT)?", keyboardTemplateYaTidak("tw:slowdns"));
+  } else if (t === "ssh_ns") {
+    await sendTelegram(env, chatId, "🐢 <b>SlowDNS — Name Server</b>\n\nKirim name server SlowDNS (host/IP, mis. <code>id1.dnsx.my.id</code>).\n\nWajib diisi untuk SlowDNS.", batal);
+  } else if (t === "ssh_pubkey") {
+    await sendTelegram(env, chatId, "🐢 <b>SlowDNS — Public Key</b>\n\nKirim public key SlowDNS (teks kunci).\n\nWajib diisi untuk SlowDNS.", batal);
+  } else if (t === "ssh_udphost") {
+    await sendTelegram(env, chatId, "🐢 <b>SlowDNS — UDP DNS Host</b>\n\nKirim UDP DNS host (mis. <code>1.1.1.1</code>).\n\nKosong = default <code>1.1.1.1</code>. Ketik <code>lewati</code> untuk default.", batal);
+  } else if (t === "ssh_udpport") {
+    await sendTelegram(env, chatId, "🐢 <b>SlowDNS — UDP DNS Port</b>\n\nKirim UDP DNS port (angka 1-65535, mis. <code>53</code>).\n\nKosong = default <code>53</code>. Ketik <code>lewati</code> untuk default.", batal);
+  } else if (t === "xray_target") {
+    await sendTelegram(env, chatId, "🎯 <b>Target Server</b>\n\nKirim target server format <code>host:port</code> (boleh dari daftar bug).\n\nKosong = dari akun pengguna. Ketik <code>lewati</code> untuk kosong.", batal);
+  } else if (t === "xray_sni") {
+    await sendTelegram(env, chatId, "🎯 <b>Server Name / SNI</b>\n\nKirim SNI (host, boleh dari daftar bug).\n\nKosong = dari akun pengguna. Ketik <code>lewati</code> untuk kosong.", batal);
+  } else if (t === "xray_header") {
+    await sendTelegram(env, chatId, "🎯 <b>Header Host</b>\n\nKirim header host (host, boleh dari daftar bug).\n\nKosong = dari akun pengguna. Ketik <code>lewati</code> untuk kosong.", batal);
+  } else if (t === "xray_payload") {
+    await sendTelegram(env, chatId, "📝 <b>Payload</b> (opsional)\n\nKirim teks payload (boleh pakai <code>[host]</code> / <code>[bug]</code> / <code>[ua]</code>).\n\nKosong = tanpa payload khusus. Ketik <code>lewati</code> untuk kosong.", batal);
+  } else if (t === "xray_ssh") {
+    await sendTelegram(env, chatId, "🔑 <b>Akun SSH</b> (opsional)\n\nKirim akun SSH format <code>host:port@user:pass</code>.\n\nDisimpan di template tapi tidak dipakai di config Xray. Ketik <code>lewati</code> untuk kosong.", batal);
+  } else if (t === "xray_ns") {
+    await sendTelegram(env, chatId, "🐢 <b>SlowDNS — Name Server</b> (opsional)\n\nKirim name server SlowDNS (host/IP, mis. <code>id1.dnsx.my.id</code>).\n\nSlowDNS aktif bila name server + public key sama-sama terisi. Ketik <code>lewati</code> untuk kosong.", batal);
+  } else if (t === "xray_pubkey") {
+    await sendTelegram(env, chatId, "🐢 <b>SlowDNS — Public Key</b> (opsional)\n\nKirim public key SlowDNS (teks kunci).\n\nSlowDNS aktif bila name server + public key sama-sama terisi. Ketik <code>lewati</code> untuk kosong.", batal);
+  } else if (t === "xray_udphost") {
+    await sendTelegram(env, chatId, "🐢 <b>SlowDNS — UDP DNS Host</b> (opsional)\n\nKirim UDP DNS host (mis. <code>1.1.1.1</code>).\n\nKosong = default <code>1.1.1.1</code>. Ketik <code>lewati</code> untuk default.", batal);
+  } else if (t === "xray_udpport") {
+    await sendTelegram(env, chatId, "🐢 <b>SlowDNS — UDP DNS Port</b> (opsional)\n\nKirim UDP DNS port (angka 1-65535, mis. <code>53</code>).\n\nKosong = default <code>53</code>. Ketik <code>lewati</code> untuk default.", batal);
+  } else if (t === "ringkasan") {
+    const tpl = { nama: st.nama, operator: st.op, kategori: st.kat, tipe: st.tipe, ssh: st.ssh, xray: st.xray };
+    await sendTelegram(env, chatId, "🧩 <b>Cek Template</b>\n\n" + ringkasanTemplate(tpl) + "\n\nSimpan template ini?", keyboardTemplateSimpan());
+  }
+}
+
+// Tangani pesan teks untuk wizard template (satu tahap per pesan).
+// Return true bila ditangani (state tetap / maju), false bila bukan
+// wizard template.
+async function handleTemplateTeks(env, chatId, st, teks) {
+  const t = st.tahap;
+  const salah = async (pesan) => { await sendTelegram(env, chatId, pesan, TOMBOL_BATAL_TEMPLATE); return true; };
+  if (t === "nama") {
+    const nama = String(teks || "").trim();
+    if (!nama) return salah("😕 Nama template belum diisi. Kirim nama template — mis. <code>Opok Tsel SSH 1</code>.");
+    st.nama = nama;
+    st.tahap = st.tipe === "SSH" ? "ssh_port" : "xray_target";
+    st.ts = Date.now();
+    await kirimLangkahTemplate(env, chatId, st);
+    return true;
+  }
+  if (t === "ssh_port") {
+    const v = kosongkan(teks);
+    if (v !== null && !validPortNum(v)) return salah("😕 Port tidak valid. Kirim angka 1-65535, mis. <code>80</code> — atau ketik <code>lewati</code> untuk kosong.");
+    st.ssh.port = v === null ? null : Number(v);
+    st.tahap = "ssh_payload"; st.ts = Date.now();
+    await kirimLangkahTemplate(env, chatId, st);
+    return true;
+  }
+  if (t === "ssh_payload") {
+    st.ssh.payload = kosongkan(teks);
+    st.tahap = "ssh_proxy"; st.ts = Date.now();
+    await kirimLangkahTemplate(env, chatId, st);
+    return true;
+  }
+  if (t === "ssh_proxy") {
+    const v = kosongkan(teks);
+    if (v !== null) {
+      const hp = parseHostPort(v);
+      if (!hp) return salah("😕 Format proxy salah. Pakai <code>host:port</code>, mis. <code>proxy.contoh.com:8080</code> — atau ketik <code>lewati</code> untuk kosong.");
+      st.ssh.proxyHost = hp.host; st.ssh.proxyPort = hp.port;
+    } else { st.ssh.proxyHost = null; st.ssh.proxyPort = null; }
+    st.tahap = "ssh_sni"; st.ts = Date.now();
+    await kirimLangkahTemplate(env, chatId, st);
+    return true;
+  }
+  if (t === "ssh_sni") {
+    const v = kosongkan(teks);
+    if (v !== null && !validHost(v.toLowerCase())) return salah("😕 SNI tidak valid. Kirim host yang benar, mis. <code>edu.ruangguru.com</code> — atau ketik <code>lewati</code> untuk kosong.");
+    st.ssh.sni = v === null ? null : v.toLowerCase();
+    st.tahap = "ssh_enhanced"; st.ts = Date.now();
+    await kirimLangkahTemplate(env, chatId, st);
+    return true;
+  }
+  if (t === "ssh_ns") {
+    const v = kosongkan(teks);
+    if (v === null || !validHost(v.toLowerCase())) return salah("😕 Name Server wajib diisi untuk SlowDNS. Kirim host/IP yang benar, mis. <code>id1.dnsx.my.id</code>.");
+    st.ssh.dnsNameServer = v.toLowerCase();
+    st.tahap = "ssh_pubkey"; st.ts = Date.now();
+    await kirimLangkahTemplate(env, chatId, st);
+    return true;
+  }
+  if (t === "ssh_pubkey") {
+    const v = kosongkan(teks);
+    if (v === null) return salah("😕 Public Key wajib diisi untuk SlowDNS. Kirim teks kunci SlowDNS-nya.");
+    st.ssh.dnsPublicKey = String(teks || "").trim();
+    st.tahap = "ssh_udphost"; st.ts = Date.now();
+    await kirimLangkahTemplate(env, chatId, st);
+    return true;
+  }
+  if (t === "ssh_udphost") {
+    const v = kosongkan(teks);
+    if (v !== null && !validHost(v.toLowerCase())) return salah("😕 UDP DNS Host tidak valid. Kirim host/IP yang benar, mis. <code>1.1.1.1</code> — atau ketik <code>lewati</code> untuk default.");
+    st.ssh.dnsUdpHost = v === null ? "1.1.1.1" : v.toLowerCase();
+    st.tahap = "ssh_udpport"; st.ts = Date.now();
+    await kirimLangkahTemplate(env, chatId, st);
+    return true;
+  }
+  if (t === "ssh_udpport") {
+    const v = kosongkan(teks);
+    if (v !== null && !validPortNum(v)) return salah("😕 UDP DNS Port tidak valid. Kirim angka 1-65535, mis. <code>53</code> — atau ketik <code>lewati</code> untuk default.");
+    st.ssh.dnsUdpPort = v === null ? 53 : Number(v);
+    st.tahap = "ringkasan"; st.ts = Date.now();
+    await kirimLangkahTemplate(env, chatId, st);
+    return true;
+  }
+  if (t === "xray_target") {
+    const v = kosongkan(teks);
+    if (v !== null) {
+      const hp = parseHostPort(v);
+      if (!hp) return salah("😕 Format target salah. Pakai <code>host:port</code>, mis. <code>sg1.contoh.com:443</code> — atau ketik <code>lewati</code> untuk kosong.");
+      st.xray.targetHost = hp.host; st.xray.targetPort = hp.port;
+    } else { st.xray.targetHost = null; st.xray.targetPort = null; }
+    st.tahap = "xray_sni"; st.ts = Date.now();
+    await kirimLangkahTemplate(env, chatId, st);
+    return true;
+  }
+  if (t === "xray_sni") {
+    const v = kosongkan(teks);
+    if (v !== null && !validHost(v.toLowerCase())) return salah("😕 SNI tidak valid. Kirim host yang benar, mis. <code>sg1.contoh.com</code> — atau ketik <code>lewati</code> untuk kosong.");
+    st.xray.sni = v === null ? null : v.toLowerCase();
+    st.tahap = "xray_header"; st.ts = Date.now();
+    await kirimLangkahTemplate(env, chatId, st);
+    return true;
+  }
+  if (t === "xray_header") {
+    const v = kosongkan(teks);
+    if (v !== null && !validHost(v.toLowerCase())) return salah("😕 Header Host tidak valid. Kirim host yang benar — atau ketik <code>lewati</code> untuk kosong.");
+    st.xray.headerHost = v === null ? null : v.toLowerCase();
+    st.tahap = "xray_payload"; st.ts = Date.now();
+    await kirimLangkahTemplate(env, chatId, st);
+    return true;
+  }
+  if (t === "xray_payload") {
+    st.xray.payload = kosongkan(teks);
+    st.tahap = "xray_ssh"; st.ts = Date.now();
+    await kirimLangkahTemplate(env, chatId, st);
+    return true;
+  }
+  if (t === "xray_ssh") {
+    const v = kosongkan(teks);
+    if (v !== null) {
+      const ssh = parseSshTeks(v);
+      if (!ssh.akunList.length) return salah("😕 Format akun SSH salah. Pakai <code>host:port@user:pass</code>, mis. <code>sg1.contoh.com:22@user1:pass1</code> — atau ketik <code>lewati</code> untuk kosong.");
+      const a = ssh.akunList[0];
+      st.xray.sshHost = a.host; st.xray.sshPort = a.port; st.xray.sshUser = a.username; st.xray.sshPass = a.password;
+    } else { st.xray.sshHost = null; st.xray.sshPort = null; st.xray.sshUser = null; st.xray.sshPass = null; }
+    st.tahap = "xray_ns"; st.ts = Date.now();
+    await kirimLangkahTemplate(env, chatId, st);
+    return true;
+  }
+  if (t === "xray_ns") {
+    const v = kosongkan(teks);
+    if (v !== null && !validHost(v.toLowerCase())) return salah("😕 Name Server tidak valid. Kirim host/IP yang benar, mis. <code>id1.dnsx.my.id</code> — atau ketik <code>lewati</code> untuk kosong.");
+    st.xray.nameServer = v === null ? null : v.toLowerCase();
+    st.tahap = "xray_pubkey"; st.ts = Date.now();
+    await kirimLangkahTemplate(env, chatId, st);
+    return true;
+  }
+  if (t === "xray_pubkey") {
+    st.xray.publicKey = kosongkan(teks);
+    st.tahap = "xray_udphost"; st.ts = Date.now();
+    await kirimLangkahTemplate(env, chatId, st);
+    return true;
+  }
+  if (t === "xray_udphost") {
+    const v = kosongkan(teks);
+    if (v !== null && !validHost(v.toLowerCase())) return salah("😕 UDP DNS Host tidak valid. Kirim host/IP yang benar, mis. <code>1.1.1.1</code> — atau ketik <code>lewati</code> untuk default.");
+    st.xray.udpDnsHost = v === null ? "1.1.1.1" : v.toLowerCase();
+    st.tahap = "xray_udpport"; st.ts = Date.now();
+    await kirimLangkahTemplate(env, chatId, st);
+    return true;
+  }
+  if (t === "xray_udpport") {
+    const v = kosongkan(teks);
+    if (v !== null && !validPortNum(v)) return salah("😕 UDP DNS Port tidak valid. Kirim angka 1-65535, mis. <code>53</code> — atau ketik <code>lewati</code> untuk default.");
+    st.xray.udpDnsPort = v === null ? 53 : Number(v);
+    st.tahap = "ringkasan"; st.ts = Date.now();
+    await kirimLangkahTemplate(env, chatId, st);
+    return true;
+  }
+  return false;
+}
+
 // Pesan teks admin saat ada state tertunda dari tombol panel admin.
 // Return true bila pesan ditangani di sini (router tidak lanjut ke
 // handlePesanAkun). State kedaluwarsa (>15 menit) diabaikan.
@@ -1707,6 +2220,12 @@ async function handleAdminTertunda(env, chatId, teks) {
   const st = pendingAdmin.get(chatId);
   if (!st) return false;
   if (Date.now() - st.ts > 15 * 60 * 1000) { pendingAdmin.delete(chatId); return false; }
+  // Wizard Template Config (v2.7): langkah teks ditangani
+  // handleTemplateTeks; langkah tombol (tipe/operator/kategori/
+  // enhanced/slowdns/simpan) ditangani di router callback.
+  if (st.jenis === "template") {
+    return await handleTemplateTeks(env, chatId, st, teks);
+  }
   if (st.jenis === "bug") {
     const bagian = teks.split("|").map((s) => s.trim());
     const [opRaw, katRaw, hostRaw, ...catatanParts] = bagian;
@@ -1780,10 +2299,12 @@ async function handleStatus(env, chatId) {
     const pengguna = (await kvList(env, "USER:")).length;
     const tambahan = await hitungBugKv(env);
     const configs = await ambilConfigsKv(env);
+    const templates = await ambilTemplatesKv(env);
     const updates = await ambilUpdatesKv(env);
     baris.push("• Pengguna tercatat: <b>" + pengguna + "</b>");
     baris.push("• Bug host: <b>" + (bawaan + tambahan) + "</b> (" + bawaan + " bawaan + " + tambahan + " tambahan)");
     baris.push("• Config contoh: <b>" + configs.length + "</b>");
+    baris.push("• Template config: <b>" + templates.length + "</b>");
     baris.push("• Update terbaru: <b>" + updates.length + "</b>");
   } else {
     baris.push("• Pengguna tercatat: tidak tersedia");
@@ -1805,20 +2326,114 @@ async function handleUpdate(env, chatId) {
   await sendTelegram(env, chatId, "🆕 <b>Update Terbaru</b>\n\n" + baris.join("\n"), TOMBOL_KEMBALI);
 }
 
-// ---- /config: daftar config contoh ----
-async function handleConfig(env, chatId) {
+// ---- /config: daftar config contoh + template config per operator (v2.7) ----
+// Bagian template TIDAK langsung daftar semua template: /config hanya
+// menampilkan tombol per OPERATOR yang punya minimal 1 template
+// (urutan BUG_DB). Ketuk operator -> daftar template operator itu.
+async function handleConfig(env, chatId, notice) {
   const arr = await ambilConfigsKv(env);
-  if (!arr.length) {
-    await sendTelegram(env, chatId, "📋 <b>Config Contoh</b>\n\nBelum ada config contoh.", TOMBOL_KEMBALI);
+  const templates = await ambilTemplatesKv(env);
+  const isAdmin = cekAdmin(env, chatId) === "ya";
+  const awalan = notice ? notice + "\n\n" : "";
+  if (!arr.length && !templates.length) {
+    await sendTelegram(env, chatId, awalan + "📋 <b>Config & Template</b>\n\nBelum ada config contoh atau template.", TOMBOL_KEMBALI);
     return;
   }
-  const daftar = arr.slice(0, 10);
-  const teks = "📋 <b>Config Contoh</b>\n\n" +
-    daftar.map((e, i) => (i + 1) + ". <b>" + escapeHtml(e.nama) + "</b> (" + labelOperator(e.operator) + " — " + labelKategori(e.operator, e.kategori) + ") — " + e.tanggal).join("\n") +
-    "\n\nKetuk satu config buat ambil file-nya.";
-  const keyboard = daftar.map((e) => ([{ text: String(e.nama).slice(0, 40), callback_data: "cfg:" + e.id }]));
+  const bagian = [];
+  const keyboard = [];
+  if (arr.length) {
+    const daftar = arr.slice(0, 10);
+    bagian.push("📋 <b>Config Contoh</b>\n\n" +
+      daftar.map((e, i) => (i + 1) + ". <b>" + escapeHtml(e.nama) + "</b> (" + labelOperator(e.operator) + " — " + labelKategori(e.operator, e.kategori) + ") — " + e.tanggal).join("\n"));
+    for (const e of daftar) keyboard.push([{ text: String(e.nama).slice(0, 40), callback_data: "cfg:" + e.id }]);
+  }
+  if (templates.length) {
+    const opDenganTemplate = Object.keys(BUG_DB).filter((op) => templates.some((t) => t.operator === op));
+    // Template yang operatornya tidak ada di BUG_DB (misal operator lama)
+    // tetap ditampilkan di bawah label operatornya.
+    const opLain = [...new Set(templates.map((t) => t.operator))].filter((op) => !BUG_DB[op]);
+    bagian.push("🧩 <b>Template Config</b>\n\nPilih operator buat lihat template config-nya:");
+    for (const op of [...opDenganTemplate, ...opLain]) {
+      const n = templates.filter((t) => t.operator === op).length;
+      keyboard.push([{ text: labelOperator(op) + " (" + n + ")", callback_data: "tpl:op:" + op }]);
+    }
+  } else {
+    bagian.push("🧩 <b>Template Config</b>\n\nBelum ada template. Admin bisa buat lewat panel admin.");
+  }
+  let teks = awalan + bagian.join("\n\n");
+  if (arr.length) teks += "\n\nKetuk satu config buat ambil file-nya, atau satu operator buat lihat template config-nya.";
+  else teks += "\n\nKetuk satu operator buat lihat template config-nya.";
   keyboard.push(...TOMBOL_KEMBALI);
   await sendTelegram(env, chatId, teks, keyboard);
+}
+
+// ---- Daftar template config satu operator (dari /config) ----
+// notice = pesan tambahan di atas judul (misal konfirmasi hapus).
+async function handleTemplateOperator(env, chatId, opKey, notice) {
+  const templates = await ambilTemplatesKv(env);
+  const daftar = templates.filter((t) => t.operator === opKey);
+  const isAdmin = cekAdmin(env, chatId) === "ya";
+  const judul = "🧩 <b>Template Config — " + escapeHtml(labelOperator(opKey)) + "</b>";
+  const awalan = notice ? notice + "\n\n" : "";
+  if (!daftar.length) {
+    await sendTelegram(env, chatId, awalan + judul + "\n\nBelum ada template untuk operator ini.", [
+      [{ text: "⬅️ Kembali", callback_data: "tpl:op:daftar" }],
+      ...TOMBOL_KEMBALI,
+    ]);
+    return;
+  }
+  const daftarTampil = daftar.slice(0, 20);
+  const teks = awalan + judul + "\n\n" +
+    daftarTampil.map((e, i) => (i + 1) + ". <b>" + escapeHtml(e.nama) + "</b> (" + (e.tipe === "SSH" ? "SSH" : "Xray") + " · " + labelKategori(e.operator, e.kategori) + ") — " + e.tanggal).join("\n") +
+    "\n\nKetuk satu template buat generate pakai template itu.";
+  const keyboard = [];
+  for (const e of daftarTampil) {
+    const row = [{ text: "🧩 " + String(e.nama).slice(0, 36), callback_data: "tpl:pakai:" + e.id }];
+    if (isAdmin) row.push({ text: "🗑️", callback_data: "tpl:del:" + e.id });
+    keyboard.push(row);
+  }
+  keyboard.push([{ text: "⬅️ Kembali", callback_data: "tpl:op:daftar" }]);
+  keyboard.push(...TOMBOL_KEMBALI);
+  await sendTelegram(env, chatId, teks, keyboard);
+}
+
+// ---- Pengguna kirim akun untuk template yang dipilih di /config ----
+// Return true bila pesan ditangani (state template aktif). Bila tipe
+// akun tidak cocok dengan template, balas ramah dan TETAP menunggu.
+async function handlePakaiTemplate(env, chatId, teks) {
+  const pending = pendingTemplate.get(chatId);
+  if (!pending) return false;
+  if (Date.now() - pending.ts > 15 * 60 * 1000) { pendingTemplate.delete(chatId); return false; }
+  const templates = await ambilTemplatesKv(env);
+  const template = templates.find((t) => t.id === pending.templateId);
+  if (!template) {
+    pendingTemplate.delete(chatId);
+    await sendTelegram(env, chatId, "😕 Template itu sudah tidak tersedia. Ketik /config buat lihat daftar terbaru.");
+    return true;
+  }
+  let hasil;
+  try { hasil = await parsePesan(teks, { env }); } catch { hasil = { configs: [], kurangSsh: [], adaSsh: false }; }
+  if (!hasil.configs.length) {
+    let alasan = "tidak ditemukan akun di pesan itu";
+    if (hasil.adaSsh && hasil.kurangSsh.length) alasan = "akun SSH belum lengkap — tidak ketemu: " + hasil.kurangSsh.join(", ");
+    await sendTelegram(env, chatId, "😕 Template tidak bisa dipakai: <b>" + escapeHtml(alasan) + "</b>. Kirim ulang akunnya.");
+    return true; // tetap menunggu
+  }
+  const configs = await terapkanTemplate(env, hasil, template);
+  if (!configs.length) {
+    const butuh = template.tipe === "SSH" ? "SSH" : "Xray (VLESS / VMess / Trojan / Shadowsocks)";
+    await sendTelegram(env, chatId, "⚠️ Template <b>" + escapeHtml(template.nama) + "</b> ini untuk " + butuh + ". Kirim akun " + butuh + " ya.");
+    return true; // tetap menunggu
+  }
+  pendingTemplate.delete(chatId);
+  const catatanBug = await catatanBugUntuk(env, hasil);
+  for (const c of configs) {
+    const rincian = ringkasanConfig(c);
+    const caption = "✅ <b>Config Dark Tunnel jadi (template: " + escapeHtml(template.nama) + "):</b> " + escapeHtml(c.type + " — " + c.name) +
+      (rincian ? "\n\n" + rincian : "") + "\n\n" + CARA_IMPOR + catatanBug;
+    await sendDocument(env, chatId, namaFileDark(c.name, c.type), toDarktunnelLink(c) + "\n", caption, TOMBOL_APK);
+  }
+  return true;
 }
 
 async function handleTelegram(env, update) {
@@ -1844,8 +2459,11 @@ async function handleTelegram(env, update) {
     if (!chatIdCb) { await jawabCallback(env, cb.id); return; }
     // Ketuk tombol menu apa pun membatalkan pilihan jenis config yang
     // tertunda — kecuali memilih metode payload (pilihan harus tetap
-    // hidup sampai file config terkirim).
+    // hidup sampai file config terkirim). Template yang sedang dipakai
+    // juga dibatalkan bila pengguna ketuk tombol lain (kecuali alur
+    // template itu sendiri).
     if (!data.startsWith("metode:")) pendingPilih.delete(chatIdCb);
+    if (!data.startsWith("tpl:")) pendingTemplate.delete(chatIdCb);
     // Tombol "⬅️ Kembali ke Menu" — edit pesan ini jadi menu utama.
     if (data === "menu:utama") {
       await jawabCallback(env, cb.id);
@@ -1927,8 +2545,16 @@ async function handleTelegram(env, update) {
     if (data === "admin:tambahconfig") {
       if (cekAdmin(env, chatIdCb) !== "ya") { await jawabAlert(env, cb.id, "⛔ Perintah ini khusus admin."); return; }
       await jawabCallback(env, cb.id);
-      pendingAdmin.set(chatIdCb, { jenis: "config", tahap: "nama", ts: Date.now() });
-      await sendTelegram(env, chatIdCb, "➕ <b>Tambah Config</b>\n\nKirim dengan format:\n<code>operator | kategori | nama</code>\n\nContoh: <code>telkomsel | opok | Opok Tsel 1</code>", [[{ text: "❌ Batal", callback_data: "admin:batal" }]]);
+      // Wizard Template Config (v2.7): admin isi setting template,
+      // akun diambil dari pengguna saat template dipakai. Perintah teks
+      // /tambahconfig (akun lengkap) tetap jalan seperti dulu.
+      pendingAdmin.set(chatIdCb, {
+        jenis: "template", tahap: "tipe", tipe: null, op: null, kat: null, nama: "",
+        ssh: { port: null, payload: null, proxyHost: null, proxyPort: null, sni: null, enhanced: false, slowdns: false, dnsNameServer: null, dnsPublicKey: null, dnsUdpHost: null, dnsUdpPort: null },
+        xray: { targetHost: null, targetPort: null, sni: null, headerHost: null, payload: null, sshHost: null, sshPort: null, sshUser: null, sshPass: null, nameServer: null, publicKey: null, udpDnsHost: null, udpDnsPort: null },
+        ts: Date.now(),
+      });
+      await kirimLangkahTemplate(env, chatIdCb, pendingAdmin.get(chatIdCb));
       return;
     }
     if (data === "admin:broadcast") {
@@ -1954,6 +2580,147 @@ async function handleTelegram(env, update) {
       } catch {
         await sendTelegram(env, chatIdCb, TEKS_PANEL_ADMIN, keyboardAdmin());
       }
+      return;
+    }
+    // ---- Wizard Template Config (v2.7): langkah tombol ----
+    if (data.startsWith("tw:")) {
+      if (cekAdmin(env, chatIdCb) !== "ya") { await jawabAlert(env, cb.id, "⛔ Perintah ini khusus admin."); return; }
+      const st = pendingAdmin.get(chatIdCb);
+      if (!st || st.jenis !== "template" || Date.now() - st.ts > 15 * 60 * 1000) {
+        pendingAdmin.delete(chatIdCb);
+        await jawabAlert(env, cb.id, "Wizard sudah kedaluwarsa — buka lagi dari panel admin ya.");
+        return;
+      }
+      await jawabCallback(env, cb.id);
+      const aksi = data.slice("tw:".length);
+      if (aksi.startsWith("tipe:")) {
+        const tipe = aksi.slice("tipe:".length);
+        if (tipe !== "SSH" && tipe !== "XRAY") return;
+        st.tipe = tipe; st.tahap = "operator"; st.ts = Date.now();
+        await kirimLangkahTemplate(env, chatIdCb, st);
+        return;
+      }
+      if (aksi.startsWith("op:")) {
+        const op = normalisasiOperator(aksi.slice("op:".length));
+        if (!op) return;
+        st.op = op; st.tahap = "kategori"; st.ts = Date.now();
+        await kirimLangkahTemplate(env, chatIdCb, st);
+        return;
+      }
+      if (aksi === "kembali:op") {
+        st.tahap = "operator"; st.ts = Date.now();
+        await kirimLangkahTemplate(env, chatIdCb, st);
+        return;
+      }
+      if (aksi.startsWith("kat:")) {
+        const kat = normalisasiKategori(aksi.slice("kat:".length));
+        if (!kat || !BUG_DB[st.op]?.kategori?.[kat]) return;
+        st.kat = kat; st.tahap = "nama"; st.ts = Date.now();
+        await kirimLangkahTemplate(env, chatIdCb, st);
+        return;
+      }
+      if (aksi.startsWith("enhanced:")) {
+        st.ssh.enhanced = aksi.slice("enhanced:".length) === "ya";
+        st.tahap = "ssh_slowdns"; st.ts = Date.now();
+        await kirimLangkahTemplate(env, chatIdCb, st);
+        return;
+      }
+      if (aksi.startsWith("slowdns:")) {
+        const ya = aksi.slice("slowdns:".length) === "ya";
+        st.ssh.slowdns = ya;
+        st.tahap = ya ? "ssh_ns" : "ringkasan"; st.ts = Date.now();
+        await kirimLangkahTemplate(env, chatIdCb, st);
+        return;
+      }
+      if (aksi === "simpan") {
+        if (!st.nama || !st.op || !st.kat || !st.tipe) {
+          await sendTelegram(env, chatIdCb, "😕 Template belum lengkap — mulai lagi dari panel admin ya.");
+          return;
+        }
+        const tpl = { nama: st.nama, operator: st.op, kategori: st.kat, tipe: st.tipe, ssh: st.tipe === "SSH" ? st.ssh : null, xray: st.tipe === "XRAY" ? st.xray : null };
+        const hasil = await simpanTemplate(env, tpl);
+        if (!hasil) {
+          await sendTelegram(env, chatIdCb, "⚠️ Gagal menyimpan template — coba lagi nanti ya.");
+          return;
+        }
+        pendingAdmin.delete(chatIdCb);
+        await sendTelegram(env, chatIdCb, "✅ Template " + hasil.aksi + ": <b>" + escapeHtml(hasil.entri.nama) + "</b>.\n\n" + ringkasanTemplate(hasil.entri) + "\n\nPengguna bisa pakai lewat /config.", TOMBOL_KEMBALI);
+        await catatUpdate(env, "Template " + (hasil.aksi === "diupdate" ? "diupdate" : "baru") + ": " + hasil.entri.nama + " (" + labelOperator(hasil.entri.operator) + " — " + labelKategori(hasil.entri.operator, hasil.entri.kategori) + ")");
+        return;
+      }
+      return;
+    }
+    // ---- Hapus template (tpl:del:ya:<id>) ----
+    if (data.startsWith("tpl:del:ya:")) {
+      if (cekAdmin(env, chatIdCb) !== "ya") { await jawabAlert(env, cb.id, "⛔ Perintah ini khusus admin."); return; }
+      const id = data.slice("tpl:del:ya:".length);
+      const templates = await ambilTemplatesKv(env);
+      const t = templates.find((e) => e.id === id);
+      await jawabCallback(env, cb.id);
+      if (!t) { await sendTelegram(env, chatIdCb, "😕 Template itu sudah tidak ada."); return; }
+      const ok = await hapusTemplateKv(env, id);
+      if (!ok) { await sendTelegram(env, chatIdCb, "😕 Gagal menghapus template, coba lagi nanti ya."); return; }
+      // Kembali ke daftar template operator itu (atau /config bila
+      // operatornya sudah tidak punya template lagi).
+      const notice = "✅ Template <b>" + escapeHtml(t.nama) + "</b> dihapus.";
+      const sisa = (await ambilTemplatesKv(env)).filter((e) => e.operator === t.operator);
+      if (sisa.length) await handleTemplateOperator(env, chatIdCb, t.operator, notice);
+      else await handleConfig(env, chatIdCb, notice);
+      return;
+    }
+    if (data.startsWith("tpl:del:batal")) {
+      await jawabCallback(env, cb.id);
+      await handleConfig(env, chatIdCb);
+      return;
+    }
+    if (data.startsWith("tpl:del:")) {
+      if (cekAdmin(env, chatIdCb) !== "ya") { await jawabAlert(env, cb.id, "⛔ Perintah ini khusus admin."); return; }
+      const id = data.slice("tpl:del:".length);
+      const templates = await ambilTemplatesKv(env);
+      const t = templates.find((e) => e.id === id);
+      await jawabCallback(env, cb.id);
+      if (!t) { await sendTelegram(env, chatIdCb, "😕 Template itu sudah tidak ada."); return; }
+      await sendTelegram(env, chatIdCb, "🗑️ Hapus template <b>" + escapeHtml(t.nama) + "</b>?", [
+        [{ text: "✅ Ya, hapus", callback_data: "tpl:del:ya:" + id }, { text: "❌ Batal", callback_data: "tpl:del:batal" }],
+      ]);
+      return;
+    }
+    // ---- Kembali ke daftar operator template (tpl:op:daftar) ----
+    if (data === "tpl:op:daftar") {
+      await jawabCallback(env, cb.id);
+      await handleConfig(env, chatIdCb);
+      return;
+    }
+    // ---- Daftar template satu operator (tpl:op:<operator>) ----
+    if (data.startsWith("tpl:op:")) {
+      const op = data.slice("tpl:op:".length);
+      await jawabCallback(env, cb.id);
+      await handleTemplateOperator(env, chatIdCb, op);
+      return;
+    }
+    // ---- Pakai template (tpl:pakai:<id>) ----
+    if (data.startsWith("tpl:pakai:")) {
+      const id = data.slice("tpl:pakai:".length);
+      const templates = await ambilTemplatesKv(env);
+      const t = templates.find((e) => e.id === id);
+      await jawabCallback(env, cb.id);
+      if (!t) {
+        await sendTelegram(env, chatIdCb, "😕 Template itu sudah tidak tersedia. Ketik /config buat lihat daftar terbaru.");
+        return;
+      }
+      pendingTemplate.set(chatIdCb, { templateId: id, ts: Date.now() });
+      const butuh = t.tipe === "SSH" ? "akun SSH (<code>host:port@user:pass</code>)" : "link Xray (<b>VLESS / VMess / Trojan / Shadowsocks</b>)";
+      await sendTelegram(env, chatIdCb, "🧩 <b>Template: " + escapeHtml(t.nama) + "</b>\n\n" + ringkasanTemplate(t) + "\n\nKirim " + butuh + " kamu — bot akan buatkan config pakai setting template ini.", [[{ text: "❌ Batal", callback_data: "tpl:batal" }]]);
+      return;
+    }
+    // ---- Batal pakai template (tpl:batal) ----
+    // (Harus dicek SETELAH tpl:pakai: — "tpl:batal" tidak diawali
+    // "tpl:pakai:", jadi aman; dulu handler ini mati karena tertangkap
+    // handler generik "tpl:" — diperbaiki di sini.)
+    if (data === "tpl:batal") {
+      pendingTemplate.delete(chatIdCb);
+      await jawabCallback(env, cb.id);
+      await sendTelegram(env, chatIdCb, "Template dibatalkan. Ketik /config buat pilih template lain.", TOMBOL_KEMBALI);
       return;
     }
     // Ketuk satu config contoh dari /config -> kirim file .dark-nya.
@@ -2042,6 +2809,7 @@ async function handleTelegram(env, update) {
   if (teks.startsWith("/") || teks === "▶️ Start") {
     pendingAdmin.delete(chatId);
     pendingPilih.delete(chatId);
+    pendingTemplate.delete(chatId);
   }
 
   if (teks === "/start" || teks === "/menu" || teks === "/help" || teks === "▶️ Start" ||
@@ -2129,6 +2897,11 @@ async function handleTelegram(env, update) {
   if (pendingConfig.has(chatId)) {
     await handleTambahConfigAkun(env, chatId, teks);
     return;
+  }
+
+  // Akun yang ditunggu untuk template yang dipilih di /config.
+  if (pendingTemplate.has(chatId)) {
+    if (await handlePakaiTemplate(env, chatId, teks)) return;
   }
 
   // Cek domain yang tertunda (setelah /cek atau tombol "🌐 Cek Domain").
