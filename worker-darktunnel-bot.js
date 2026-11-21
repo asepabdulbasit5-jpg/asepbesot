@@ -966,7 +966,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.8.0";
+const VERSI_BOT = "v2.8.1";
 
 const PESAN_START =
   "👋 <b>Generator Config Dark Tunnel</b>\n\n" +
@@ -2294,6 +2294,105 @@ async function handleDokumenConfig(env, msg) {
 
 // ================= WIZARD TEMPLATE CONFIG (v2.7) =================
 // Wizard bertahap di panel admin ("➕ Tambah Config"). State di
+// ---- Wizard Tambah Bug (v2.8.1) ----
+// Panel admin "➕ Tambah Bug" kini wizard langkah-demi-langkah (bukan
+// lagi format satu baris "operator | kategori | host | catatan"):
+// operator -> kategori -> host -> catatan -> ringkasan -> simpan.
+// Perintah teks /tambahbug tetap jalan seperti biasa (jalur cepat).
+// pendingAdmin: {jenis: "bug", tahap, op, kat, host, catatan, ts}.
+// Tahap teks (kategori_baru, host, catatan) ditangani handleBugTeks;
+// tahap tombol (operator, kategori, ringkasan) di router callback "ab:".
+const TOMBOL_BATAL_BUG = [[{ text: "❌ Batal", callback_data: "admin:batal" }]];
+
+// Keyboard tahap catatan yang bisa dikosongkan: Lewati + Batal.
+const TOMBOL_LEWATI_BUG = [
+  [{ text: "⏭️ Lewati", callback_data: "ab:lewati" }, { text: "❌ Batal", callback_data: "admin:batal" }],
+];
+
+function keyboardBugOperator() {
+  const ops = Object.entries(BUG_DB);
+  const rows = [];
+  for (let i = 0; i < ops.length; i += 2) {
+    rows.push(ops.slice(i, i + 2).map(([k, v]) => ({ text: v.label, callback_data: "ab:op:" + k })));
+  }
+  rows.push([{ text: "❌ Batal", callback_data: "admin:batal" }]);
+  return rows;
+}
+
+// Kategori operator itu (bawaan + yang cuma ada di KV), urutan
+// URUTAN_KATEGORI seperti keyboardKategoriBug. kvKats = daftar kunci
+// kategori dari KV BUGS untuk operator itu (boleh kosong).
+function keyboardBugKategori(opKey, kvKats) {
+  const op = BUG_DB[opKey];
+  const katsBawaan = op ? Object.keys(op.kategori) : [];
+  const semua = [...new Set([...katsBawaan, ...(kvKats || [])])].sort((a, b) => {
+    const ia = URUTAN_KATEGORI.indexOf(a), ib = URUTAN_KATEGORI.indexOf(b);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+  });
+  const rows = baris2(semua.map((k) => ({ text: labelKategori(opKey, k), callback_data: "ab:kat:" + opKey + ":" + k })));
+  rows.push([{ text: "➕ Kategori Baru", callback_data: "ab:kat:baru" }]);
+  rows.push([{ text: "⬅️ Ganti operator", callback_data: "ab:kembali:op" }]);
+  rows.push([{ text: "❌ Batal", callback_data: "admin:batal" }]);
+  return rows;
+}
+
+function keyboardBugSimpan() {
+  return [
+    [{ text: "💾 Simpan", callback_data: "ab:simpan" }],
+    [{ text: "❌ Batal", callback_data: "admin:batal" }],
+  ];
+}
+
+// Kirim prompt untuk tahap wizard Tambah Bug saat ini.
+async function kirimLangkahBug(env, chatId, st) {
+  const t = st.tahap;
+  if (t === "operator") {
+    await sendTelegram(env, chatId, "➕ <b>Tambah Bug</b>\n\nPilih operator:", keyboardBugOperator());
+  } else if (t === "kategori") {
+    const kv = await ambilBugsKv(env);
+    await sendTelegram(env, chatId, "➕ <b>Tambah Bug</b> (" + labelOperator(st.op) + ")\n\nPilih kategori:", keyboardBugKategori(st.op, Object.keys(kv[st.op] || {})));
+  } else if (t === "kategori_baru") {
+    await sendTelegram(env, chatId, "🆕 <b>Kategori Baru</b>\n\nKirim nama kategori baru — mis. <code>belajar</code>.\n\nHuruf kecil, tanpa spasi (boleh angka / tanda <code>-</code>). Kategori ini cuma dipakai di bug ini.", TOMBOL_BATAL_BUG);
+  } else if (t === "host") {
+    await sendTelegram(env, chatId, "🐛 <b>Host Bug</b> (" + labelOperator(st.op) + " — " + labelKategori(st.op, st.kat) + ")\n\nKetik host bug-nya — mis. <code>edu.ruangguru.com</code> atau IP (boleh pakai port, mis. <code>1.2.3.4:8080</code>).", TOMBOL_BATAL_BUG);
+  } else if (t === "catatan") {
+    await sendTelegram(env, chatId, "📝 <b>Catatan</b> (opsional)\n\nKetik catatan — mis. <code>opok tsel</code> atau <code>ws/wc</code>.\n\nKosong = tanpa catatan. Ketuk ⏭️ Lewati untuk kosong.", TOMBOL_LEWATI_BUG);
+  } else if (t === "ringkasan") {
+    await sendTelegram(env, chatId, "🐛 <b>Cek Bug</b>\n\n• Operator: <b>" + escapeHtml(labelOperator(st.op)) + "</b>\n• Kategori: <b>" + escapeHtml(labelKategori(st.op, st.kat)) + "</b>\n• Bug: <code>" + escapeHtml(st.host) + "</code>\n• Catatan: " + (st.catatan ? escapeHtml(st.catatan) : "—") + "\n\nSimpan bug ini?", keyboardBugSimpan());
+  }
+}
+
+// Tangani pesan teks untuk wizard Tambah Bug (satu tahap per pesan).
+// Return true bila ditangani (state tetap / maju), false bila bukan
+// tahap teks wizard bug (tahap tombol ditangani router callback "ab:").
+async function handleBugTeks(env, chatId, st, teks) {
+  const t = st.tahap;
+  const salah = async (pesan, kb) => { await sendTelegram(env, chatId, pesan, kb || TOMBOL_BATAL_BUG); return true; };
+  if (t === "kategori_baru") {
+    const kat = String(teks || "").trim().toLowerCase();
+    if (!/^[a-z][a-z0-9_-]{0,19}$/.test(kat)) return salah("😕 Nama kategori tidak valid. Pakai huruf kecil tanpa spasi, mis. <code>belajar</code> — huruf pertama harus huruf.");
+    st.kat = normalisasiKategori(kat) || kat;
+    st.tahap = "host"; st.ts = Date.now();
+    await kirimLangkahBug(env, chatId, st);
+    return true;
+  }
+  if (t === "host") {
+    const host = String(teks || "").trim().toLowerCase();
+    if (!host || !validBugHost(host)) return salah("😕 Host tidak valid. Kirim host yang benar, mis. <code>edu.ruangguru.com</code> atau IP — boleh pakai port.");
+    st.host = host;
+    st.tahap = "catatan"; st.ts = Date.now();
+    await kirimLangkahBug(env, chatId, st);
+    return true;
+  }
+  if (t === "catatan") {
+    st.catatan = kosongkan(teks) || "";
+    st.tahap = "ringkasan"; st.ts = Date.now();
+    await kirimLangkahBug(env, chatId, st);
+    return true;
+  }
+  return false;
+}
+
 // pendingAdmin: {jenis: "template", tahap, tipe, op, kat, nama,
 // ssh: {...}, xray: {...}, ts}. Tiap langkah teks: jawab "lewati"
 // atau "-" untuk kosong. Tombol ❌ Batal di setiap langkah.
@@ -2588,37 +2687,11 @@ async function handleAdminTertunda(env, chatId, teks) {
     return await handleTemplateTeks(env, chatId, st, teks);
   }
   if (st.jenis === "bug") {
-    const bagian = teks.split("|").map((s) => s.trim());
-    const [opRaw, katRaw, hostRaw, ...catatanParts] = bagian;
-    const op = normalisasiOperator(opRaw);
-    if (!op) {
-      await sendTelegram(env, chatId, "😕 Operator tidak dikenal. Pakai salah satu: <b>xl, axis, telkomsel, indosat, smartfren, tri, byu</b>.");
-      return true;
-    }
-    const kat = normalisasiKategori(katRaw);
-    if (!kat) {
-      await sendTelegram(env, chatId, "😕 Kategori tidak dikenal. Pakai salah satu: <b>edu, opok, wa, game, sosmed, musik, nonton, conference, appfun</b>.");
-      return true;
-    }
-    if (!hostRaw || !validBugHost(hostRaw)) {
-      await sendTelegram(env, chatId, "😕 Host tidak valid. Isi host yang benar, mis. <code>edu.ruangguru.com</code>.");
-      return true;
-    }
-    const host = hostRaw.toLowerCase();
-    if (!env.DATA) {
-      await sendTelegram(env, chatId, "⚠️ Fitur admin belum aktif — KV belum dipasang di Worker.");
-      return true;
-    }
-    const catatan = catatanParts.join(" | ").trim();
-    const hasil = await simpanBug(env, op, kat, host, catatan);
-    if (!hasil) {
-      await sendTelegram(env, chatId, "⚠️ Gagal menyimpan bug — coba lagi nanti ya.");
-      return true;
-    }
-    pendingAdmin.delete(chatId);
-    await sendTelegram(env, chatId, "✅ Bug " + hasil.aksi + ": <code>" + escapeHtml(host) + "</code> (" + labelOperator(op) + " — " + labelKategori(op, kat) + ").");
-    await sendTelegram(env, chatId, "📣 Update terkirim ke " + hasil.terkirim + " pengguna.");
-    return true;
+    // Wizard Tambah Bug (v2.8.1): tahap teks (kategori_baru, host,
+    // catatan) ditangani handleBugTeks; tahap tombol di router "ab:".
+    // Format satu baris "operator | kategori | host | catatan" dari
+    // panel DIHAPUS — perintah teks /tambahbug tetap jalan.
+    return await handleBugTeks(env, chatId, st, teks);
   }
   if (st.jenis === "config" && st.tahap === "nama") {
     const bagian = teks.split("|").map((s) => s.trim());
@@ -2897,8 +2970,10 @@ async function handleTelegram(env, update) {
     if (data === "admin:tambahbug") {
       if (cekAdmin(env, chatIdCb) !== "ya") { await jawabAlert(env, cb.id, "⛔ Perintah ini khusus admin."); return; }
       await jawabCallback(env, cb.id);
-      pendingAdmin.set(chatIdCb, { jenis: "bug", ts: Date.now() });
-      await sendTelegram(env, chatIdCb, "➕ <b>Tambah Bug</b>\n\nKirim bug dengan format:\n<code>operator | kategori | host | catatan</code>\n\nCatatan boleh kosong. Contoh: <code>telkomsel | opok | bug.contoh.com | opok tsel</code>", [[{ text: "❌ Batal", callback_data: "admin:batal" }]]);
+      // Wizard Tambah Bug (v2.8.1): operator -> kategori -> host ->
+      // catatan -> ringkasan. Perintah teks /tambahbug tetap jalan.
+      pendingAdmin.set(chatIdCb, { jenis: "bug", tahap: "operator", op: null, kat: null, host: "", catatan: "", ts: Date.now() });
+      await kirimLangkahBug(env, chatIdCb, pendingAdmin.get(chatIdCb));
       return;
     }
     if (data === "admin:tambahconfig") {
@@ -3090,6 +3165,91 @@ async function handleTelegram(env, update) {
         pendingAdmin.delete(chatIdCb);
         await sendTelegram(env, chatIdCb, "✅ Template " + hasil.aksi + ": <b>" + escapeHtml(hasil.entri.nama) + "</b>.\n\n" + ringkasanTemplate(hasil.entri) + "\n\nPengguna bisa pakai lewat /config.", TOMBOL_KEMBALI);
         await catatUpdate(env, "Template " + (hasil.aksi === "diupdate" ? "diupdate" : "baru") + ": " + hasil.entri.nama + " (" + labelOperator(hasil.entri.operator) + " — " + labelKategori(hasil.entri.operator, hasil.entri.kategori) + ")");
+        return;
+      }
+      return;
+    }
+    // ---- Wizard Tambah Bug (v2.8.1): langkah tombol ----
+    // Prefix "ab:" (admin-bug) supaya tidak bentrok dengan "bug:op:"
+    // (daftar bug) dan "tw:" (wizard template).
+    if (data.startsWith("ab:")) {
+      if (cekAdmin(env, chatIdCb) !== "ya") { await jawabAlert(env, cb.id, "⛔ Perintah ini khusus admin."); return; }
+      const st = pendingAdmin.get(chatIdCb);
+      if (!st || st.jenis !== "bug" || Date.now() - st.ts > 15 * 60 * 1000) {
+        pendingAdmin.delete(chatIdCb);
+        await jawabAlert(env, cb.id, "Wizard sudah kedaluwarsa — buka lagi dari panel admin ya.");
+        return;
+      }
+      await jawabCallback(env, cb.id);
+      const aksi = data.slice("ab:".length);
+      if (aksi.startsWith("op:")) {
+        if (st.tahap !== "operator") return;
+        const op = normalisasiOperator(aksi.slice("op:".length));
+        if (!op) return;
+        st.op = op; st.kat = null; st.tahap = "kategori"; st.ts = Date.now();
+        await kirimLangkahBug(env, chatIdCb, st);
+        return;
+      }
+      if (aksi === "kembali:op") {
+        if (st.tahap !== "kategori") return;
+        st.op = null; st.kat = null; st.tahap = "operator"; st.ts = Date.now();
+        await kirimLangkahBug(env, chatIdCb, st);
+        return;
+      }
+      if (aksi.startsWith("kat:")) {
+        // "kat:baru" harus dicek dulu — diawali "kat:" juga.
+        if (aksi === "kat:baru") {
+          if (st.tahap !== "kategori") return;
+          st.tahap = "kategori_baru"; st.ts = Date.now();
+          await kirimLangkahBug(env, chatIdCb, st);
+          return;
+        }
+        if (st.tahap !== "kategori") return;
+        const parts = aksi.slice("kat:".length).split(":");
+        const op = parts[0]; const katRaw = parts[1];
+        if (parts.length !== 2 || op !== st.op) return;
+        // Kategori harus ada di BUG_DB operator itu atau di KV BUGS
+        // (kategori baru dari wizard sebelumnya) — selain itu tolak.
+        const kv = await ambilBugsKv(env);
+        const ada = !!BUG_DB[op]?.kategori?.[katRaw] || !!(kv[op] && kv[op][katRaw]);
+        if (!ada) return;
+        st.kat = normalisasiKategori(katRaw) || katRaw;
+        st.tahap = "host"; st.ts = Date.now();
+        await kirimLangkahBug(env, chatIdCb, st);
+        return;
+      }
+      // ---- Tombol Lewati: hanya tahap catatan yang bisa dikosongkan.
+      // Callback nyasar (tombol pesan lama) diabaikan diam-diam.
+      if (aksi === "lewati") {
+        if (st.tahap !== "catatan") return;
+        st.ts = Date.now();
+        await handleBugTeks(env, chatIdCb, st, "lewati");
+        return;
+      }
+      if (aksi === "simpan") {
+        if (st.tahap !== "ringkasan" || !st.op || !st.kat || !st.host) {
+          await sendTelegram(env, chatIdCb, "😕 Bug belum lengkap — mulai lagi dari panel admin ya.");
+          return;
+        }
+        if (!env.DATA) {
+          await sendTelegram(env, chatIdCb, "⚠️ Fitur admin belum aktif — KV belum dipasang di Worker.");
+          return;
+        }
+        // Jalur simpan yang sama seperti /tambahbug: KV BUGS +
+        // bersihkan BUG_DELETED + catat update + broadcast.
+        const hasil = await simpanBug(env, st.op, st.kat, st.host, st.catatan || "");
+        if (!hasil) {
+          await sendTelegram(env, chatIdCb, "⚠️ Gagal menyimpan bug — coba lagi nanti ya.");
+          return;
+        }
+        const host = st.host, op = st.op, kat = st.kat;
+        pendingAdmin.delete(chatIdCb);
+        const teksSukses = hasil.aksi === "diupdate"
+          ? "✅ Bug <code>" + escapeHtml(host) + "</code> diupdate di " + labelOperator(op) + " — " + labelKategori(op, kat) + "."
+          : "✅ Bug <code>" + escapeHtml(host) + "</code> ditambahkan ke " + labelOperator(op) + " — " + labelKategori(op, kat) + ".";
+        await sendTelegram(env, chatIdCb, teksSukses + "\n\n📣 Update terkirim ke " + hasil.terkirim + " pengguna.",
+          [[{ text: "➕ Tambah Bug Lagi", callback_data: "admin:tambahbug" }],
+           [{ text: "⬅️ Kembali ke Panel Admin", callback_data: "admin:panel" }]]);
         return;
       }
       return;
