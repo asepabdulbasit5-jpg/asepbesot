@@ -666,9 +666,11 @@ async function hapusTemplateKv(env, id) {
 // 9 template dikte Asep 22 Nov 2026 (00:52–00:58 WIB) + 2 template
 // starter (XL Edu SSH, by.U Opok SSH — dari template-starter-3.json,
 // draf 21 Nov 2026, dari bahan grup) + 4 template Ilped (api.quipper.com
-// + wp-assets.ovo.id, masing-masing SSH + Xray WS, dikte Asep 01:18–
-// 01:19 WIB) + 2 template by.U Opok 500mb (SSH PAYLOAD_PROXY_SNI +
-// Xray WS, dikte Asep 01:20 WIB) + 2 template Iflix Timur (bug
+// + wpassets.kuncie.com, masing-masing SSH + Xray WS, dikte Asep
+// 01:18–01:19 WIB; koreksi Asep 22 Nov 05:57 WIB: bug-nya
+// wpassets.kuncie.com, BUKAN wp-assets.ovo.id (v2.9.10)) + 2 template
+// by.U Opok 500mb (SSH PAYLOAD_PROXY_SNI + Xray WS, dikte Asep
+// 01:20 WIB) + 2 template Iflix Timur (bug
 // www.iflix.com, SSH PAYLOAD_PROXY_SNI + Xray WS, dikte Asep 01:22 WIB)
 // + 1 template Iflix Barat TLS (Xray SSL_TLS, SNI live.iflix.com, dikte
 // Asep 01:22 WIB; SSH-nya = "XL Iflix Barat", ganti nama dari "XL Iflix"
@@ -707,12 +709,12 @@ export const TEMPLATE_BAWAAN = [
   { nama: "by.U Opok SSH", operator: "byu", kategori: "opok", tipe: "SSH", metode: null, ssh: sshBawaan({ sni: "tdwcontent.telkomsel.com", payload: "GET / HTTP/1.1[crlf]Host: [host][crlf]Connection: Upgrade[crlf]User-Agent: [ua][crlf]Upgrade: websocket[crlf][crlf]", proxyHost: "space.byu.id", proxyPort: 443 }), xray: null },
   { nama: "by.U Opok WS TLS", operator: "byu", kategori: "opok", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY_SNI", ssh: sshBawaan({ port: 443, proxyHost: "space.byu.id", proxyPort: 443, sni: "[host]" }), xray: null },
   { nama: "Tsel Ilped Proxy", operator: "telkomsel", kategori: "ilped", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY", ssh: sshBawaan({ port: 80, proxyHost: "api.quipper.com", proxyPort: 80 }), xray: null },
-  { nama: "Tsel Ilped WS TLS", operator: "telkomsel", kategori: "ilped", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY_SNI", ssh: sshBawaan({ port: 443, proxyHost: "wp-assets.ovo.id", proxyPort: 443, sni: "wp-assets.ovo.id" }), xray: null },
+  { nama: "Tsel Ilped WS TLS", operator: "telkomsel", kategori: "ilped", tipe: "SSH", metode: "SSH_PAYLOAD_PROXY_SNI", ssh: sshBawaan({ port: 443, proxyHost: "wpassets.kuncie.com", proxyPort: 443, sni: "wpassets.kuncie.com" }), xray: null },
   { nama: "XL Spotify WC", operator: "xl", kategori: "musik", tipe: "XRAY", metode: "WC", ssh: null, xray: xrayBawaan({ targetHost: "investors.spotify.com", targetPort: 443 }) },
   { nama: "XL Conference WC", operator: "xl", kategori: "conference", tipe: "XRAY", metode: "WC", ssh: null, xray: xrayBawaan({ targetHost: "support.zoom.us", targetPort: 443 }) },
   { nama: "XL Vidio", operator: "xl", kategori: "nonton", tipe: "XRAY", metode: "WS", ssh: null, xray: xrayBawaan({ targetHost: "quiz.int.vidio.com", targetPort: 80 }) },
   { nama: "Tsel Ilped WS Quipper", operator: "telkomsel", kategori: "ilped", tipe: "XRAY", metode: "WS", ssh: null, xray: xrayBawaan({ targetHost: "api.quipper.com", targetPort: 443 }) },
-  { nama: "Tsel Ilped WS Wpassets", operator: "telkomsel", kategori: "ilped", tipe: "XRAY", metode: "WS", ssh: null, xray: xrayBawaan({ targetHost: "wp-assets.ovo.id", targetPort: 443 }) },
+  { nama: "Tsel Ilped WS Wpassets", operator: "telkomsel", kategori: "ilped", tipe: "XRAY", metode: "WS", ssh: null, xray: xrayBawaan({ targetHost: "wpassets.kuncie.com", targetPort: 443 }) },
   { nama: "by.U Opok WS", operator: "byu", kategori: "opok", tipe: "XRAY", metode: "WS", ssh: null, xray: xrayBawaan({ targetHost: "tdwcontent.telkomsel.com", targetPort: 443 }) },
   { nama: "XL Iflix Timur WS", operator: "xl", kategori: "nonton", tipe: "XRAY", metode: "WS", ssh: null, xray: xrayBawaan({ targetHost: "www.iflix.com", targetPort: 443 }) },
   { nama: "XL Iflix Barat TLS", operator: "xl", kategori: "nonton", tipe: "XRAY", metode: "SSL_TLS", ssh: null, xray: xrayBawaan({ targetPort: 443, sni: "live.iflix.com" }) },
@@ -1542,7 +1544,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.9";
+const VERSI_BOT = "v2.9.10";
 
 const PESAN_START =
   "👋 <b>Generator Config Dark Tunnel</b>\n\n" +
@@ -3781,15 +3783,18 @@ async function handleTemplateTipe(env, chatId, tipe, notice, messageId) {
   const daftarTampil = daftar.slice(0, 20);
   const teks = awalan + judul + "\n\n" +
     daftarTampil.map((e, i) => (i + 1) + ". <b>" + escapeHtml(e.nama) + "</b> (" + escapeHtml(labelOperator(e.operator)) + " · " + escapeHtml(labelKategori(e.operator, e.kategori)) + (e.metode ? " · " + escapeHtml(labelMetode(e.tipe, e.metode)) : "") + ") — " + e.tanggal).join("\n") +
-    "\n\nKetuk satu template buat generate pakai template itu.";
+    "\n\nKetuk satu template buat generate pakai template itu." + (isAdmin ? " (Admin: tombol ✏️ Edit / 🗑️ Hapus ada di bawah tiap nama.)" : "");
   const keyboard = [];
   for (const e of daftarTampil) {
-    const row = [{ text: "🧩 " + String(e.nama).slice(0, 36), callback_data: "tpl:pakai:" + e.id }];
-    // (v2.9.9) Admin: ✏️ edit template (wizard terisi nilai lama),
-    // 🗑️ hapus template.
-    if (isAdmin) row.push({ text: "✏️", callback_data: "tpl:edit:" + e.id });
-    if (isAdmin) row.push({ text: "🗑️", callback_data: "tpl:del:" + e.id });
-    keyboard.push(row);
+    // (v2.9.10) Nama template SELALU satu baris penuh — tombol ✏️/🗑️
+    // tidak boleh sebaris dengan nama (Telegram membagi lebar baris
+    // rata ke semua tombol, nama jadi terpotong). Admin: baris ke-2
+    // berisi ✏️ Edit + 🗑️ Hapus. Pengguna biasa: cuma baris nama.
+    keyboard.push([{ text: "🧩 " + String(e.nama).slice(0, 60), callback_data: "tpl:pakai:" + e.id }]);
+    if (isAdmin) keyboard.push([
+      { text: "✏️ Edit", callback_data: "tpl:edit:" + e.id },
+      { text: "🗑️ Hapus", callback_data: "tpl:del:" + e.id },
+    ]);
   }
   keyboard.push([{ text: "⬅️ Kembali", callback_data: "tpl:tipe:daftar" }]);
   keyboard.push(...TOMBOL_KEMBALI);
