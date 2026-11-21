@@ -892,7 +892,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.7.7";
+const VERSI_BOT = "v2.7.8";
 
 const PESAN_START =
   "👋 <b>Generator Config Dark Tunnel</b>\n\n" +
@@ -1599,6 +1599,8 @@ export const DAFTAR_CDN = [
 
 // Deteksi provider CDN dari header respons + hostname edge (PTR).
 // Return { cdn, server } — keduanya "" bila tidak ada sinyal yang cocok.
+// `headers` boleh null (deteksi subdomain — hanya hostname PTR yang
+// tersedia); bila begitu, hanya cek hostname yang jalan.
 // Urutan: (1) hostname edge; (2) header khas provider; (3) cf-ray /
 // cf-cache-status → Cloudflare (jalan terakhir; dari Worker cf-ray
 // selalu ada, jadi ini hanya benar bila tidak ada provider lain yang
@@ -1606,13 +1608,13 @@ export const DAFTAR_CDN = [
 // Cloudflare, itu keterbatasan yang diterima).
 export function deteksiCDN(headers, edgeHostname) {
   const kosong = { cdn: "", server: "" };
-  if (!headers || typeof headers.get !== "function") return kosong;
   const host = String(edgeHostname || "").toLowerCase();
   if (host) {
     for (const p of DAFTAR_CDN) {
       if (p.host.some((pola) => host.includes(pola))) return { cdn: p.nama, server: p.server };
     }
   }
+  if (!headers || typeof headers.get !== "function") return kosong;
   const s = sinyalHeader(headers);
   for (const p of DAFTAR_CDN) {
     let kena = false;
@@ -1627,7 +1629,8 @@ export function deteksiCDN(headers, edgeHostname) {
 // Ditambah: resolve IP (A), reverse DNS (PTR) untuk input IP maupun IP
 // pertama hasil resolve domain, dan cek subdomain umum. Return
 // {domain, ok, status, ms, cdn, server, ips, hostname, subdomains} —
-// subdomains = null bila DNS gagal total.
+// subdomains = null bila DNS gagal total; tiap subdomain
+// {nama, ip, server} (server = provider CDN atau "" bila tak terdeteksi).
 export async function cekDomain(domain) {
   const t0 = Date.now();
   const ambil = (url, method) =>
@@ -1672,7 +1675,19 @@ export async function cekDomain(domain) {
       const j = await dohQuery(sub + "." + domain, "A");
       if (j) dnsOk = true;
       const ips = ipsDariDoh(j);
-      return ips.length ? { nama: sub + "." + domain, ip: ips[0] } : null;
+      if (!ips.length) return null;
+      // Provider subdomain: PTR IP pertama → hostname edge → deteksi
+      // dari hostname saja (tanpa header — tidak ada fetch ke tiap
+      // subdomain). PTR gagal → server "" (tetap tampil dengan IP saja).
+      // Jalan paralel di dalam map yang sama, tidak menambah round-trip
+      // berurutan.
+      let server = "";
+      const ipParts = ips[0].split(".");
+      if (ipParts.length === 4) {
+        const ptrSub = await dohQuery(ipParts.reverse().join(".") + ".in-addr.arpa", "PTR");
+        if (ptrSub) server = deteksiCDN(null, hostnameDariPtr(ptrSub)).cdn;
+      }
+      return { nama: sub + "." + domain, ip: ips[0], server };
     }));
     if (ptrP) hasil.hostname = hostnameDariPtr(await ptrP);
     if (dnsOk) hasil.subdomains = cekSub.filter(Boolean);
@@ -1702,9 +1717,11 @@ export function formatHasilCek(r) {
     ? "\n🌐 IP: " + r.ips.map((ip) => escapeHtml(ip)).join(", ") : "";
   const barisHost = r.hostname
     ? "\n🔁 Hostname: <code>" + escapeHtml(r.hostname) + "</code>" : "";
+  // Subdomain: satu per baris, format nama/ip (Provider) — provider
+  // dalam kurung bila terdeteksi, tanpa kurung bila tidak.
   const barisSub = r.subdomains
     ? (r.subdomains.length
-      ? "\n🔎 Subdomain yang ditemukan: " + r.subdomains.map((s) => escapeHtml(s.nama) + " (" + escapeHtml(s.ip) + ")").join(", ")
+      ? "\n🔎 Subdomain yang ditemukan:\n" + r.subdomains.map((s) => "• " + escapeHtml(s.nama) + "/" + escapeHtml(s.ip) + (s.server ? " (" + escapeHtml(s.server) + ")" : "")).join("\n")
       : "\n🔎 Subdomain: tidak ditemukan")
     : "";
   if (!r.ok) {
