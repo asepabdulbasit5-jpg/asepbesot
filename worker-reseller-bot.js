@@ -1845,9 +1845,19 @@ async function selesaikanOrder(env, orderId, order) {
 // buka sekaligus tidak bisa — handoff ini gantinya.
 async function simpanHandoffBuatConfig(env, chatId, teksConfig) {
   if (!env.DATA || !teksConfig) return null;
+  // (22 Nov 2026) Akun Xray punya 5 link (TLS, NONE, GRPC, UPTLS,
+  // UPNTLS) — semuanya akun yang SAMA (UUID + server sama). Kalau
+  // kelimanya disimpan, autodark mengirim 5 file .dark dengan nama
+  // yang sama persis — pembeli bingung. Jadi handoff cuma menyimpan
+  // SATU link (yang pertama = TLS, varian utama) supaya pembeli
+  // dapat 1 file. Varian lain tetap ada di pesan config — tinggal
+  // disalin manual kalau perlu. Akun SSH (tanpa link) disimpan utuh.
+  let akun = teksConfig;
+  const link = teksConfig.match(/^(?:vless|vmess|trojan|ss):\/\/\S+/m);
+  if (link) akun = link[0];
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   try {
-    await env.DATA.put("HANDOFF:" + id, JSON.stringify({ chatId, config: teksConfig, ts: Date.now() }), { expirationTtl: 86400 });
+    await env.DATA.put("HANDOFF:" + id, JSON.stringify({ chatId, config: akun, ts: Date.now() }), { expirationTtl: 86400 });
     return id;
   } catch { return null; }
 }
