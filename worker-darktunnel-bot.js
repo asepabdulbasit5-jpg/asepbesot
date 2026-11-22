@@ -1600,7 +1600,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.18";
+const VERSI_BOT = "v2.9.19";
 
 const PESAN_START =
   "👋 <b>Selamat datang di Generator Config Dark Tunnel</b>\n\n" +
@@ -2961,6 +2961,9 @@ const CATATAN_PEMICU =
   "😤 <code>gak bisa</code> / <code>gabisa</code> — bot nyuruh belajar\n" +
   "😴 <code>males</code> / <code>mls</code> — bot nyuruh usaha\n\n" +
   "🌐 <code>/cek</code> / <code>/cekdomain</code> / <code>/cekrespon</code> — cek domain\n\n" +
+  "🚀 <code>/start@autosetdark_bot</code> / <code>/menu@autosetdark_bot</code> — menu bot ini (buat config)\n" +
+  "🛡️ <code>/start@sandekalavpn_bot</code> — promo toko VPN\n" +
+  "ℹ️ <code>/start</code> polos di grup — promo toko, bot ini diam\n\n" +
   "Satu kata yang sama cuma dibalas sekali per 60 detik biar nggak spam.";
 
 // Jalankan cek domain lalu kirim hasilnya (dipakai mulaiCekDomain
