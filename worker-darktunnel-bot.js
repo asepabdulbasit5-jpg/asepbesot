@@ -1600,7 +1600,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.19";
+const VERSI_BOT = "v2.9.20";
 
 const PESAN_START =
   "👋 <b>Selamat datang di Generator Config Dark Tunnel</b>\n\n" +
@@ -5045,6 +5045,36 @@ async function handleTelegram(env, update) {
     pendingManualAkun.delete(chatId);
   }
 
+  // (22 Nov 2026) Handoff dari @sandekalavpn_bot: /start dark_<id> —
+  // akun pembeli sudah menunggu di KV DATA (disimpan reseller saat
+  // config dikirim, berlaku 24 jam). Ambil, hapus (sekali pakai),
+  // langsung generate file .dark-nya — tanpa salin-tempel. Cuma
+  // pemilik akun (chatId sama dengan yang menyimpan) yang bisa
+  // memakai link ini; yang lain / sudah dipakai / kedaluwarsa →
+  // menu biasa + arahan kirim akun manual.
+  const mHandoff = teks.match(/^\/start(?:@\S+)?\s+(dark_[A-Za-z0-9]+)/);
+  if (mHandoff) {
+    pendingCek.delete(chatId);
+    pendingConfig.delete(chatId);
+    const idHandoff = mHandoff[1].slice(5);
+    let akunHandoff = null, pemilikHandoff = null;
+    if (env.DATA) {
+      const raw = await env.DATA.get("HANDOFF:" + idHandoff).catch(() => null);
+      if (raw) {
+        try { const d = JSON.parse(raw); akunHandoff = d.config; pemilikHandoff = d.chatId; } catch { akunHandoff = raw; }
+      }
+    }
+    if (akunHandoff && (pemilikHandoff === null || pemilikHandoff === undefined || String(pemilikHandoff) === String(chatId))) {
+      // Sekali pakai: hapus begitu pemiliknya memakai — link yang
+      // dibuka orang lain (pemilik beda) dibiarkan tetap berlaku.
+      if (env.DATA) await env.DATA.delete("HANDOFF:" + idHandoff).catch(() => {});
+      await handlePesanAkun(env, chatId, akunHandoff);
+      return;
+    }
+    await tampilkanMenuUtama(env, chatId);
+    await sendTelegram(env, chatId, akunHandoff ? "⛔ Link buat config ini khusus pemilik akunnya — kirim langsung akun VPN kamu ke sini, bot akan buatkan file .dark-nya." : "ℹ️ Link buat config-nya sudah dipakai atau kedaluwarsa (berlaku 1 hari). Kirim langsung akun VPN kamu ke sini, bot akan buatkan file .dark-nya.");
+    return;
+  }
   if (teks === "/start" || teks === "/menu" || teks === "▶️ Start" ||
       teks.startsWith("/start ") || teks.startsWith("/start@") ||
       teks.startsWith("/menu ") || teks.startsWith("/menu@")) {
