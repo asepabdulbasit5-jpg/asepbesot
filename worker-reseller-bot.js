@@ -258,16 +258,18 @@ export default {
     return new Response("Bot jualan SANDEKALA aktif");
   },
 
-  // ---- Cron Trigger: auto-cek Nadia tiap pagi (07:00 WIB) ----
-  // Dipasang di dashboard / wrangler.toml: crons = ["0 0 * * *"].
-  // Jalan di dalam jaringan Cloudflare (seperti /ceknadia yang
-  // terbukti bisa ambil data Nadia) — tidak lewat GitHub Actions,
-  // jadi tidak kena blokir IP seperti relay (20 Nov 2026: relay
-  // via GitHub gagal HTTP 502 dari colo ORD/LAX).
-  // Diam bila tidak ada perubahan; alert ke admin bila ada
-  // perubahan atau gagal ambil data.
+  // ---- Cron Trigger (v2.9.14 reseller) ----
+  // Jadwal di wrangler.toml: ["5 * * * *", "0 0 * * *"].
+  // - Tiap jam lewat 5 menit: cek grup sepi -> roast autodark
+  //   ("brisik banget sih lu!") 5 menit sesudah nudge autodark.
+  // - 07:00 WIB (00:00 UTC, menit 0): auto-cek Nadia seperti biasa.
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(jalankanCekNadiaOtomatis(env));
+    ctx.waitUntil((async () => {
+      const d = new Date(event.scheduledTime || Date.now());
+      const jamWib = (d.getUTCHours() + 7) % 24;
+      if (jamWib === 7 && d.getUTCMinutes() === 0) await jalankanCekNadiaOtomatis(env);
+      await cekGrupSepiReseller(env);
+    })());
   },
 };
 
@@ -288,9 +290,9 @@ async function setToko(env, buka) {
 }
 function adalahAdmin(env, chatId) { return String(chatId) === String(env.ADMIN_CHAT_ID); }
 const PESAN_TUTUP = "🔴 Toko lagi tutup. Lihat-lihat dulu aja, order dibuka lagi nanti ya.";
-// Siarkan status buka/tutup ke semua pembeli (yang pernah order lewat
-// bot). Dipanggil setiap admin buka/tutup toko — lewat tombol menu
-// maupun perintah /buka dan /tutup.
+// Siarkan status buka/tutup ke semua pengguna bot + semua grup
+// tempat bot berada (22 Nov 2026). Dipanggil setiap admin buka/tutup
+// toko — lewat tombol menu maupun perintah /buka dan /tutup.
 async function siarkanStatusToko(env, buka) {
   await siarkanKeSemuaPengguna(env, buka
     ? "🟢 SANDEKALA VPN sudah BUKA!\n\nSilakan order VPN lewat bot ini. Ketik /start untuk mulai.\n\nHarga: 1 hari Rp1.000 • 7 hari Rp5.000 • 30 hari Rp10.000"
@@ -323,17 +325,120 @@ async function daftarSemuaPengguna(env) {
   return hasil;
 }
 
-// Broadcast buka/tutup toko ke SEMUA pengguna yang pernah membuka bot.
-// Yang memblokir bot otomatis gagal dikirimi (dihitung di laporan).
+// ---- Grup: catat ID, aktivitas, pemicu kata, roast sepi ----
+// (22 Nov 2026) Grup SANDEKALA biar rame:
+// - ID grup dicatat (GRUP:<id>) supaya broadcast buka/tutup toko
+//   sampai juga ke grup, bukan cuma ke pengguna DM.
+// - Aktivitas grup dicatat (GRUP_AKTIF:<id>, throttle 5 menit)
+//   untuk roast sepi: 5 menit sesudah nudge autodark, sandekala
+//   ikut nimbrung "brisik banget sih lu!".
+// - Kata tertentu memicu balasan (cooldown 60 detik per grup+aksi).
+async function catatGrup(env, chatId) {
+  if (!chatId) return;
+  const kunci = "GRUP:" + chatId;
+  const ada = await env.ORDERS.get(kunci).catch(() => null);
+  if (ada) return;
+  await env.ORDERS.put(kunci, "1");
+}
+async function daftarSemuaGrup(env) {
+  const list = await env.ORDERS.list({ prefix: "GRUP:" });
+  const hasil = new Set();
+  for (const key of list.keys) {
+    const id = key.name.slice("GRUP:".length);
+    if (id) hasil.add(id);
+  }
+  return hasil;
+}
+async function catatAktivitasGrup(env, chatId) {
+  if (!chatId) return;
+  try {
+    const kunci = "GRUP_AKTIF:" + chatId;
+    const lama = Number(await env.ORDERS.get(kunci).catch(() => null)) || 0;
+    if (lama && Date.now() - lama < 5 * 60 * 1000) return;
+    await env.ORDERS.put(kunci, String(Date.now()));
+  } catch { /* abaikan */ }
+}
+// Roast sepi (sekali per masa sepi): grup sepi > 6 jam -> sandekala
+// nimbrung "brisik banget sih lu!" — nyautin nudge autodark yang
+// jalan tiap jam pas menit :00, sandekala dicek menit :05.
+async function cekGrupSepiReseller(env) {
+  if (!env.ORDERS || !env.BOT_TOKEN) return;
+  let daftar;
+  try { daftar = await env.ORDERS.list({ prefix: "GRUP_AKTIF:" }); } catch { return; }
+  const sekarang = Date.now();
+  for (const key of daftar.keys || []) {
+    const chatId = key.name.slice("GRUP_AKTIF:".length);
+    let terakhir = 0;
+    try { terakhir = Number(await env.ORDERS.get(key.name)) || 0; } catch { /* abaikan */ }
+    if (!terakhir || sekarang - terakhir < 6 * 3600 * 1000) continue;
+    let roastTerakhir = 0;
+    try { roastTerakhir = Number(await env.ORDERS.get("GRUP_ROAST:" + chatId)) || 0; } catch { /* abaikan */ }
+    if (roastTerakhir && roastTerakhir >= terakhir) continue;
+    await sendTelegram(env, Number(chatId), "brisik banget sih lu!");
+    try { await env.ORDERS.put("GRUP_ROAST:" + chatId, String(sekarang)); } catch { /* abaikan */ }
+  }
+}
+
+const PEMICU_RESELLER = [
+  { kata: ["minta"], aksi: "minta" },
+  { kata: ["beli"], aksi: "beli" },
+  { kata: ["harga"], aksi: "harga" },
+  { kata: ["terimaksih", "terima kasih", "trmksh", "makasih", "mksh"], aksi: "makasih" },
+  { kata: ["assalamualaikum"], aksi: "salam" },
+];
+const cooldownPemicuReseller = new Map();
+function cocokPemicuReseller(teks) {
+  const normal = String(teks || "").toLowerCase().replace(/\s+/g, " ").replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "").trim();
+  if (!normal) return null;
+  for (const p of PEMICU_RESELLER) {
+    for (const k of p.kata) {
+      if (normal === k || normal.startsWith(k + " ")) return p.aksi;
+    }
+  }
+  return null;
+}
+async function balasPemicuReseller(env, chatId, aksi) {
+  const kunci = chatId + ":" + aksi;
+  const sekarang = Date.now();
+  if (cooldownPemicuReseller.has(kunci) && sekarang - cooldownPemicuReseller.get(kunci) < 60000) return false;
+  cooldownPemicuReseller.set(kunci, sekarang);
+  const tombolBeli = [[{ text: "🛒 Beli di Chat Pribadi", url: "https://t.me/sandekalavpn_bot" }]];
+  if (aksi === "minta" || aksi === "beli") {
+    await sendTelegram(env, chatId, "plisss beli di gw bang:(", tombolBeli);
+    return true;
+  }
+  if (aksi === "harga") {
+    await sendTelegram(env, chatId, "standar bang, (Rp1.000/hr, Rp5.000/mg, Rp10.000/bln)", tombolBeli);
+    return true;
+  }
+  if (aksi === "makasih") {
+    await sendTelegram(env, chatId, "sama-sama bang!");
+    return true;
+  }
+  if (aksi === "salam") {
+    await sendTelegram(env, chatId, "waalikumsalam!");
+    return true;
+  }
+  return false;
+}
+
+// Broadcast buka/tutup toko ke SEMUA pengguna yang pernah membuka bot
+// + semua grup tempat bot berada (22 Nov 2026). Yang memblokir bot
+// otomatis gagal dikirimi — tidak dilaporkan, laporan cuma jumlah sukses.
 async function siarkanKeSemuaPengguna(env, teks) {
   const tujuan = await daftarSemuaPengguna(env);
-  if (!tujuan.size) { await sendTelegram(env, env.ADMIN_CHAT_ID, "Belum ada pengguna yang tercatat di bot."); return; }
-  let ok = 0, gagal = 0;
+  const grup = await daftarSemuaGrup(env);
+  if (!tujuan.size && !grup.size) { await sendTelegram(env, env.ADMIN_CHAT_ID, "Belum ada pengguna yang tercatat di bot."); return; }
+  let ok = 0, okGrup = 0;
   for (const id of tujuan) {
     const j = await telegramApi(env, "sendMessage", { chat_id: Number(id), text: teks.slice(0, 4000) });
-    if (j?.ok) ok++; else gagal++;
+    if (j?.ok) ok++;
   }
-  await sendTelegram(env, env.ADMIN_CHAT_ID, "📣 Info buka/tutup terkirim ke " + ok + " pengguna.");
+  for (const id of grup) {
+    const j = await telegramApi(env, "sendMessage", { chat_id: Number(id), text: teks.slice(0, 4000) });
+    if (j?.ok) okGrup++;
+  }
+  await sendTelegram(env, env.ADMIN_CHAT_ID, "📣 Info buka/tutup terkirim ke " + ok + " pengguna" + (okGrup ? " dan " + okGrup + " grup" : "") + ".");
 }
 
 async function handleTelegram(env, update) {
@@ -579,15 +684,24 @@ async function handleTelegram(env, update) {
   const chatId = msg.chat.id;
   const text = msg.text.trim();
 
-  // Mode grup: di grup bot hanya jadi etalase. Perintah yang dilayani:
-  // /start, /menu, /harga (boleh pakai @namabot di belakangnya).
-  // Sisanya diabaikan — jualan tetap di DM supaya config pembeli
-  // tidak bocor ke semua anggota grup.
+  // Mode grup: di grup bot jadi etalase + ikut ngobrol (22 Nov 2026).
+  // Perintah yang dilayani: /start, /menu, /harga (boleh pakai
+  // @namabot di belakangnya). Kata tertentu memicu balasan
+  // (minta/beli/harga/makasih/assalamualaikum). Sisanya diabaikan —
+  // jualan tetap di DM supaya config pembeli tidak bocor ke semua
+  // anggota grup.
   const diGrup = msg.chat.type === "group" || msg.chat.type === "supergroup";
   if (diGrup) {
+    // (22 Nov 2026) Catat grup + aktivitas, lalu layani perintah
+    // etalase (/start, /menu, /harga) atau pemicu kata biar rame.
+    await catatGrup(env, chatId);
+    await catatAktivitasGrup(env, chatId);
     const perintah = text.split(" ")[0].replace(/@.+$/, "");
     if (perintah === "/start" || perintah === "/menu" || perintah === "/harga") {
       await tampilkanPromoGrup(env, chatId);
+    } else if (!text.startsWith("/")) {
+      const aksi = cocokPemicuReseller(text);
+      if (aksi) await balasPemicuReseller(env, chatId, aksi);
     }
     return;
   }
