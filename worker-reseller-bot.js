@@ -296,7 +296,7 @@ const PESAN_TUTUP = "🔴 Toko lagi tutup. Lihat-lihat dulu aja, order dibuka la
 async function siarkanStatusToko(env, buka) {
   await siarkanKeSemuaPengguna(env, buka
     ? "🟢 SANDEKALA VPN sudah BUKA!\n\nSilakan order VPN lewat bot ini. Ketik /start untuk mulai.\n\nHarga: 1 hari Rp1.000 • 7 hari Rp5.000 • 30 hari Rp10.000"
-    : "🔴 SANDEKALA VPN lagi TUTUP dulu ya.\n\nOrder dibuka lagi nanti — pantau terus bot ini. Ketik /start untuk lihat menu.");
+    : "🔴 SANDEKALA VPN lagi TUTUP dulu ya.\n\nOrder dibuka lagi nanti — pantau terus bot ini. Ketik /start untuk lihat menu.", buka);
 }
 
 // ================= ALUR BELI =================
@@ -425,7 +425,7 @@ async function balasPemicuReseller(env, chatId, aksi) {
 // Broadcast buka/tutup toko ke SEMUA pengguna yang pernah membuka bot
 // + semua grup tempat bot berada (22 Nov 2026). Yang memblokir bot
 // otomatis gagal dikirimi — tidak dilaporkan, laporan cuma jumlah sukses.
-async function siarkanKeSemuaPengguna(env, teks) {
+async function siarkanKeSemuaPengguna(env, teks, buka) {
   const tujuan = await daftarSemuaPengguna(env);
   const grup = await daftarSemuaGrup(env);
   if (!tujuan.size && !grup.size) { await sendTelegram(env, env.ADMIN_CHAT_ID, "Belum ada pengguna yang tercatat di bot."); return; }
@@ -436,7 +436,18 @@ async function siarkanKeSemuaPengguna(env, teks) {
   }
   for (const id of grup) {
     const j = await telegramApi(env, "sendMessage", { chat_id: Number(id), text: teks.slice(0, 4000) });
-    if (j?.ok) okGrup++;
+    if (j?.ok) {
+      okGrup++;
+      // (22 Nov 2026) Tandai buat autodark: biar dia nyautin
+      // broadcast ini ("kemana aja lu?" / "bot kok tutup njng!").
+      // Ditulis ke KV DATA (milik autodark, di-bind ke worker ini
+      // lewat wrangler.toml); kalau belum di-bind, dilewati diam-diam.
+      try {
+        if (env.DATA && typeof buka === "boolean") {
+          await env.DATA.put((buka ? "ROAST_BUKA:" : "ROAST_TUTUP:") + id, String(Date.now()));
+        }
+      } catch { /* abaikan */ }
+    }
   }
   await sendTelegram(env, env.ADMIN_CHAT_ID, "📣 Info buka/tutup terkirim ke " + ok + " pengguna" + (okGrup ? " dan " + okGrup + " grup" : "") + ".");
 }
