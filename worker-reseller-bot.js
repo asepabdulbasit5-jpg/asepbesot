@@ -615,6 +615,12 @@ async function handleTelegram(env, update) {
       await kirimConfig(env, cb.from.id,
         "🎁 Ini config trial kamu (" + menitTrial + " menit, kuota 1 GB):", hasil.config,
         "Kalau cocok, lanjut beli paket lewat /beli." + (sisaTrial !== null ? "\nSisa jatah trial kamu: " + sisaTrial + "." : ""), null, midTrial);
+      // Trial berhasil: kabari admin (calon pembeli — bisa di-follow-up).
+      // Trial admin sendiri tidak dikabari (kabariAdmin skip).
+      await kabariAdmin(env, cb.from.id,
+        "🎁 Trial baru — " + (namaPembeli(cb.from) || ("ID " + cb.from.id)) + " (" + (server?.nama || serverKode) + " / " + proto.toUpperCase() + ", " + menitTrial + " menit)." +
+        (sisaTrial !== null ? "\nSisa jatah trial: " + sisaTrial + "." : ""),
+        tombolChatPembeli(cb.from.id));
       return;
     }
     // ---- Konfirmasi bayar (tombol admin, ganti ketik /konfirmasi) ----
@@ -1596,7 +1602,7 @@ function namaPembeli(from) {
 // Tombol "Chat Pembeli" di semua notif order ke admin — satu ketuk
 // langsung buka chat pembeli (pakai ID Telegram, jadi jalan walau
 // pembeli tidak punya @username). Dipakai di notif order baru,
-// gagal buat akun, terjual, dan perpanjang berhasil.
+// gagal buat akun, terjual, perpanjang berhasil, dan trial baru.
 function tombolChatPembeli(chatIdPembeli) {
   return [{ text: "💬 Chat Pembeli", url: "tg://user?id=" + chatIdPembeli }];
 }
