@@ -2127,26 +2127,6 @@ function formatPort(v) {
   return [...perNilai.values()].join("\n");
 }
 
-// Cari domain/host akun — bisa di root, di dalam `config`/`data`/
-// `account`, atau di dalam object `server` (respons details memakai
-// server: {server_id, name, domain}). Dipakai untuk template payload
-// WebSocket SSH.
-function cariDomain(d) {
-  if (!d || typeof d !== "object") return null;
-  const langsung = cariField(d, ["domain", "hostname", "host_domain", "host"]);
-  if (langsung) return langsung;
-  const srv = (d.server && typeof d.server === "object") ? d.server : ((d.host && typeof d.host === "object") ? d.host : null);
-  if (srv && (srv.domain || srv.host)) return srv.domain || srv.host;
-  for (const k of ["config", "data", "account"]) {
-    const v = cariDomain(d[k]);
-    if (v) return v;
-  }
-  return null;
-}
-
-// Port pertama untuk sebuah kunci port (mis. ws_http -> 80,
-// ws_tls -> 443). Dipakai untuk seksi "Format Account" (format
-// host:port@user:pass ala bot referensi).
 function portPertama(d, kunciList) {
   const raw = d?.port ?? d?.config?.port ?? d?.data?.port ?? d?.account?.port ?? null;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
@@ -2160,31 +2140,43 @@ function portPertama(d, kunciList) {
   return null;
 }
 
-// Satu seksi "Payload WebSocket" (template standar Nadia, host diisi
-// dari domain akun). Dipakai renderSSH dan sebagai fallback di
-// ambilConfigDariData.
-// Satu seksi "Payload WebSocket" — tiap baris GET dibungkus <code>
-// supaya pembeli bisa mengetuknya untuk langsung menyalin (Telegram
-// menyalin isi <code> saat diketuk).
-function bagianPayload(domain) {
-  const garis = "────────────────────";
-  const item = (judul, get) => judul + " :\n<code>" + escapeHtml(get) + "</code>";
-  return "◆ Payload WebSocket\n" + garis + "\n" +
-    item("TLS", "GET /worryfree/ssh HTTP/1.1[crlf]Host: " + domain + "[crlf]Upgrade: websocket[crlf][crlf]") + "\n\n" +
-    item("NON-TLS", "GET /worryfree/ssh HTTP/1.1[crlf]Host: " + domain + "[crlf]Upgrade: websocket[crlf][crlf]") + "\n\n" +
-    item("CDN", "GET / HTTP/1.1[crlf]Host: [host_port][crlf]User-Agent: [ua][crlf]Upgrade: websocket[crlf][crlf]") + "\n\n" +
-    item("WITH PATH", "GET /worryfree/ssh HTTP/1.1[crlf]Host: BUG[crlf]User-Agent: [ua][crlf]Upgrade: websocket[crlf][crlf]");
+// Ringkas grid Port ("WS TLS : 443, 8443\nWS NON-TLS : 80, 8080\n...")
+// jadi satu baris dengan urutan tetap: OPENSSH (port pertama saja)
+// + WS TLS + WS NON-TLS + SLOWDNS + UDP CUSTOM. Dipakai format
+// ringkas SANDEKALAVPN (22 Nov 2026).
+function portSingkat(grid) {
+  if (!grid) return null;
+  const URUT = ["OPENSSH", "WS TLS", "WS NON-TLS", "SLOWDNS", "UDP CUSTOM"];
+  const perLabel = new Map();
+  let cocok = false;
+  for (const barisPort of String(grid).split("\n")) {
+    const m = barisPort.match(/^(.+?)\s*:\s*(.*)$/);
+    if (!m) continue;
+    const label = m[1].trim().toUpperCase();
+    if (!URUT.includes(label)) continue;
+    cocok = true;
+    const vals = m[2].split(",").map((s) => s.trim()).filter(Boolean);
+    if (vals.length) perLabel.set(label, vals);
+  }
+  if (!cocok) return String(grid).trim() || null; // bukan grid — tampil apa adanya
+  const nilai = [];
+  for (const label of URUT) {
+    const vals = perLabel.get(label);
+    if (!vals) continue;
+    nilai.push(...(label === "OPENSSH" ? [vals[0]] : vals));
+  }
+  return nilai.length ? nilai.join(", ") : null;
 }
 
-// Render config SSH rapih per seksi ala bot referensi (Informasi Akun /
-// Domain & Koneksi / Format Account / Payload WebSocket / Masa Aktif),
-// dalam satu blok <pre> supaya rata. `entri` = [{label, nilai}] dari
-// susunBaris; `o` = object respons mentah (untuk port pertama).
+// Render config SSH FORMAT RINGKAS SANDEKALAVPN (22 Nov 2026, spek
+// Asep): header SANDEKALAVPN, Informasi Akun (Username/Password),
+// Domain & Koneksi (Domain/Server/Pubkey/DNS + satu baris Port),
+// Format Account (WS/TLS port pertama saja). Tanpa seksi Payload,
+// Squid/OpenVPN/SNI/Path, dan tanpa Masa Aktif (Berlaku sampai /
+// Sisa waktu ditempel sebagai baris biasa oleh ambilConfigDariData
+// atau handler trial). Berlaku untuk SEMUA config SSH: trial,
+// order, perpanjang, perbaiki, pindah server, ganti protokol.
 function renderSSH(entri, o) {
-  // Setiap NILAI dibungkus <code> — di Telegram, mengetuk <code>
-  // langsung menyalin isinya (username, password, domain, port,
-  // pubkey, format account, payload). Label & garis pemisah tetap
-  // teks biasa. Nilai di-escape dulu supaya aman di HTML.
   const peta = new Map(entri.map((e) => [e.label, e.nilai]));
   const garis = "────────────────────";
   const seksi = [];
@@ -2197,53 +2189,28 @@ function renderSSH(entri, o) {
   tambah("Informasi Akun", [
     peta.has("Username") ? baris("Username", peta.get("Username")) : null,
     peta.has("Password") ? baris("Password", peta.get("Password")) : null,
-    peta.has("UUID") ? baris("UUID", peta.get("UUID")) : null,
   ]);
   const serverVal = peta.get("Server") || null;
   const domain = peta.get("Host / Domain") || (serverVal && !/^\d+\.\d+\.\d+\.\d+$/.test(serverVal) ? serverVal : null);
   const koneksi = [];
   if (domain) koneksi.push(baris("Domain", domain));
   if (serverVal) koneksi.push(baris("Server", serverVal));
-  if (peta.has("Name Server")) koneksi.push(baris("Ns-Domain", peta.get("Name Server")));
   if (peta.has("Public Key")) koneksi.push(baris("Pubkey", peta.get("Public Key")));
   if (domain) koneksi.push(baris("DNS", domain));
-  if (peta.has("Squid Proxy")) koneksi.push(baris("Squid Proxy", peta.get("Squid Proxy")));
-  if (peta.has("HTTP Custom")) koneksi.push(baris("HTTP Custom", peta.get("HTTP Custom")));
-  if (peta.has("OpenVPN")) koneksi.push(baris("OpenVPN", peta.get("OpenVPN")));
-  if (peta.has("SNI")) koneksi.push(baris("SNI", peta.get("SNI")));
-  if (peta.has("Path")) koneksi.push(baris("Path", peta.get("Path")));
-  if (peta.has("Port")) {
-    const grid = peta.get("Port");
-    if (grid.includes("\n")) {
-      const gridKode = grid.split("\n").map((l) => {
-        const m = l.match(/^(.+?)\s*:\s*(.*)$/);
-        return m ? m[1].trim() + " : " + kode(m[2].trim()) : escapeHtml(l);
-      }).join("\n");
-      koneksi.push("Port :\n" + gridKode);
-    } else {
-      koneksi.push(baris("Port", grid));
-    }
-  }
+  const portLine = portSingkat(peta.get("Port"));
+  if (portLine) koneksi.push((koneksi.length ? "\n" : "") + baris("Port", portLine));
   tambah("Domain & Koneksi", koneksi);
   const user = peta.get("Username"), pass = peta.get("Password");
-  const wsPort = portPertama(o, ["ws_http", "none", "ws", "wsnontls"]);
-  const tlsPort = portPertama(o, ["ws_tls", "tls"]);
+  const portUtama = (v) => (v === null || v === undefined || v === "" ? null : String(v).split(",")[0].trim() || null);
+  const wsPort = portUtama(portPertama(o, ["ws_http", "none", "ws", "wsnontls"]));
+  const tlsPort = portUtama(portPertama(o, ["ws_tls", "tls"]));
   if (domain && user && pass && (wsPort || tlsPort)) {
     const fmt = [];
     if (wsPort) fmt.push("WS :\n" + kode(domain + ":" + wsPort + "@" + user + ":" + pass));
     if (tlsPort) fmt.push("TLS :\n" + kode(domain + ":" + tlsPort + "@" + user + ":" + pass));
     tambah("Format Account", fmt);
   }
-  if (domain) seksi.push(bagianPayload(domain));
-  const lim = peta.get("Limit Device");
-  tambah("Masa Aktif", [
-    peta.has("Berlaku sampai") ? baris("Expires", peta.get("Berlaku sampai")) : null,
-    peta.has("Sisa waktu") ? baris("Sisa waktu", peta.get("Sisa waktu")) : null,
-    lim ? baris("IP Limit", String(lim).replace(/ IP$/, "") + " Device") : null,
-    peta.has("Limit IP & Kuota") ? baris("IP Limit", peta.get("Limit IP & Kuota")) : null,
-    peta.has("Kuota") ? baris("Kuota", peta.get("Kuota")) : null,
-  ]);
-  return seksi.join("\n\n");
+  return "SANDEKALAVPN\n\n" + seksi.join("\n\n");
 }
 
 // Ubah nilai config apa pun (string / object) jadi teks yang bisa
@@ -2572,18 +2539,8 @@ function ambilConfigDariData(d) {
     teks = info ? info + "\n\n" + daftar : daftar;
   } else {
     teks = ubahConfigJadiTeks(d.config || d.link || d.vless || d.vmess || d.trojan || d.url || d);
-    // SSH: template payload WebSocket (HTTP Custom) ala web Nadia —
-    // host diisi dari domain akun ini; kalau domain tidak diketahui,
-    // payload tidak ditampilkan (jangan ditebak).
-    // Respons bisa bersarang (field-field akun di dalam `config`) —
-    // cari domain & password sampai ke dalam, supaya payload tidak
-    // hilang hanya karena field-nya tidak di root (kejadian 20 Nov
-    // 2026: config SSH hasil ganti protokol tidak menampilkan payload).
-    const domainPayload = cariDomain(d);
-    const adaPassword = !!cariField(d, ["password", "pass"]);
-    if (adaPassword && domainPayload && !teks.includes("Payload")) {
-      teks += "\n\n" + bagianPayload(domainPayload);
-    }
+    // Format ringkas SANDEKALAVPN (22 Nov 2026): seksi Payload
+    // WebSocket tidak lagi ditampilkan di config SSH.
   }
   const exp = cariExpired(d);
   if (exp && !teks.includes("Berlaku sampai") && !teks.includes("Expires :")) {
