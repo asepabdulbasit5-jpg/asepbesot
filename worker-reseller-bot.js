@@ -1834,6 +1834,24 @@ async function selesaikanOrder(env, orderId, order) {
     "Masa aktif mulai hari ini. Selamat memakai!" + infoTrialBaru, tombolKelola(orderId));
 }
 
+// (22 Nov 2026) Handoff ke @autosetdark_bot: simpan akun pembeli di KV
+// DATA (dipakai bersama autodark) supaya tombol "⚡ Buat Config" bisa
+// membuka autodark dengan akun yang sudah menunggu — pembeli tinggal
+// ketuk Start, file .dark langsung dibuat, tanpa salin-tempel. Berlaku
+// 24 jam, sekali pakai (autodark menghapus begitu dibaca). Tanpa DATA
+// (atau gagal simpan), tombol tetap tampil sebagai link biasa ke
+// autodark — pembeli tempel akunnya manual. Satu tombol Telegram cuma
+// bisa satu aksi (buka link ATAU salin teks), jadi salin otomatis +
+// buka sekaligus tidak bisa — handoff ini gantinya.
+async function simpanHandoffBuatConfig(env, chatId, teksConfig) {
+  if (!env.DATA || !teksConfig) return null;
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  try {
+    await env.DATA.put("HANDOFF:" + id, JSON.stringify({ chatId, config: teksConfig, ts: Date.now() }), { expirationTtl: 86400 });
+    return id;
+  } catch { return null; }
+}
+
 // Kirim config akun ke pembeli dalam blok <pre> supaya Telegram
 // menampilkan tombol SALIN KODE — pembeli tinggal tap untuk menyalin
 // link/config ke v2rayNG. Hanya dipakai untuk config akun, bukan
@@ -1843,6 +1861,11 @@ async function kirimConfig(env, chatId, pembuka, config, penutup, keyboard, mess
   // Pengaman terakhir: kalau config masih berupa object (parser luput),
   // ubah dulu jadi teks — jangan sampai "[object Object]" kekirim lagi.
   const teksConfig = typeof config === "string" ? config : ubahConfigJadiTeks(config);
+  // (22 Nov 2026) Tombol "Buat Config" di bawah config: buka
+  // @autosetdark_bot dengan akun yang sudah menunggu di KV (handoff).
+  const idHandoff = await simpanHandoffBuatConfig(env, chatId, teksConfig);
+  const urlBuat = idHandoff ? "https://t.me/autosetdark_bot?start=dark_" + idHandoff : "https://t.me/autosetdark_bot";
+  const keyboardAkhir = keyboard ? [...keyboard, [{ text: "⚡ Buat Config", url: urlBuat }]] : [[{ text: "⚡ Buat Config", url: urlBuat }]];
   let isi;
   if (teksConfig.includes("◆ ")) {
     // Config SSH berbentuk seksi — nilainya sudah dibungkus <code>
@@ -1866,8 +1889,8 @@ async function kirimConfig(env, chatId, pembuka, config, penutup, keyboard, mess
     isi = "<pre>" + escapeHtml(teksConfig || "") + "</pre>";
   }
   const html = escapeHtml(pembuka) + "\n\n" + isi + (penutup ? "\n\n" + escapeHtml(penutup) : "");
-  if (messageId) await editHtml(env, chatId, messageId, html, keyboard);
-  else await sendHtml(env, chatId, html, keyboard);
+  if (messageId) await editHtml(env, chatId, messageId, html, keyboardAkhir);
+  else await sendHtml(env, chatId, html, keyboardAkhir);
 }
 
 // Tombol kelola akun (pembeli & admin): Perpanjang, Pindah Server,
