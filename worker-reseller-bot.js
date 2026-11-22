@@ -2474,8 +2474,13 @@ function susunInfoAkun(d, links) {
   const portRawInfo = d.port ?? d.ports ?? d.config?.port ?? d.data?.port ?? d.account?.port ?? null;
   const portTeksInfo = formatPort(portRawInfo);
   if (portTeksInfo !== null) {
-    if (portTeksInfo.includes("\n")) baris.push("Port:\n" + portTeksInfo);
-    else baris.push("Port: " + portTeksInfo);
+    // Format ringkas SANDEKALAVPN (22 Nov 2026): semua port jadi satu
+    // baris, urutan ikut grid (WS TLS → WS NON-TLS → ANY → ...).
+    const portSatuBaris = portTeksInfo.split("\n").map((b) => {
+      const m = b.match(/^.+?:\s*(.*)$/);
+      return m ? m[1].trim() : b.trim();
+    }).filter(Boolean).join(", ");
+    if (portSatuBaris) baris.push("Port: " + portSatuBaris);
   }
   if (limitIp !== null && kuota !== null) {
     const k = /unlimit/i.test(String(kuota)) ? "Unli" : String(kuota);
@@ -2490,6 +2495,9 @@ function susunInfoAkun(d, links) {
     cetak("Berlaku sampai", formatExpired(exp));
     cetak("Sisa waktu", sisaWaktu(exp));
   }
+  // Format ringkas SANDEKALAVPN (22 Nov 2026): header di semua config
+  // Xray, sama seperti config SSH.
+  if (baris.length) baris.unshift("SANDEKALAVPN");
   return baris.join("\n");
 }
 
