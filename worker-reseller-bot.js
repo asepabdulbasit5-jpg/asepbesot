@@ -547,7 +547,7 @@ async function handleTelegram(env, update) {
         "Kamu pilih " + (SERVERS.find((x) => x.kode === serverKode)?.nama || serverKode) +
         " — " + (PROTOKOL.find((x) => x.kode === proto)?.nama || proto.toUpperCase()) +
         " — " + (PAKET.find((x) => x.kode === kodePaket)?.nama || kodePaket) + ".\n\n" +
-        "Ketik username yang kamu mau (huruf/angka saja, 3-15 karakter).\n" +
+        "Ketik username yang kamu mau (huruf/angka saja, 4-15 karakter).\n" +
         "Atau ketik - kalau mau username diacak otomatis.\n" +
         "Ketik /batal untuk membatalkan."), [[{ text: "🔙 Kembali", callback_data: "proto:" + serverKode + ":" + proto }]]);
       return;
@@ -744,8 +744,8 @@ async function handleTelegram(env, update) {
     let username = null;
     if (text !== "-") {
       const bersih = text.toLowerCase().replace(/[^a-z0-9]/g, "");
-      if (bersih.length < 3 || bersih.length > 15) {
-        await sendTelegram(env, chatId, "Username harus 3-15 karakter (huruf/angka saja). Ketik lagi, atau ketik - untuk acak.");
+      if (bersih.length < 4 || bersih.length > 15) {
+        await sendTelegram(env, chatId, "Username harus 4-15 karakter (huruf/angka saja). Ketik lagi, atau ketik - untuk acak.");
         return;
       }
       username = bersih;
