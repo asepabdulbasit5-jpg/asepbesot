@@ -350,6 +350,26 @@ function keyboardKategoriBug(opKey, kvKats) {
   return rows;
 }
 
+// (v2.9.17) Grup tanpa tombol: daftar operator/kategori sebagai teks
+// "ketik ..." — anggota grup mengetik perintahnya, bot kirim hasilnya.
+function teksDaftarOperatorBug() {
+  const baris = Object.entries(BUG_DB).map(([k, v]) => "• <code>bug " + k + "</code> — " + escapeHtml(v.label));
+  return "🐛 <b>Daftar Bug Host</b>\n\nKetik salah satu:\n" + baris.join("\n");
+}
+
+async function teksDaftarKategoriBug(env, opKey) {
+  const op = BUG_DB[opKey];
+  if (!op) return null;
+  const kv = await ambilBugsKv(env);
+  const katsBawaan = Object.keys(op.kategori);
+  const semua = [...new Set([...katsBawaan, ...Object.keys(kv[opKey] || {})])].sort((a, b) => {
+    const ia = URUTAN_KATEGORI.indexOf(a), ib = URUTAN_KATEGORI.indexOf(b);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+  });
+  const baris = semua.map((k) => "• <code>bug " + opKey + " " + k + "</code> — " + escapeHtml(labelKategori(opKey, k)));
+  return "🐛 <b>Bug " + escapeHtml(op.label) + "</b>\n\nKetik salah satu:\n" + baris.join("\n");
+}
+
 // Kelompokkan tombol jadi 2 per baris (biar daftar kategori tidak
 // memanjang ke bawah — 1 tombol per baris bikin daftar kepanjangan).
 function baris2(tombol) {
@@ -1580,7 +1600,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.16";
+const VERSI_BOT = "v2.9.17";
 
 const PESAN_START =
   "👋 <b>Selamat datang di Generator Config Dark Tunnel</b>\n\n" +
@@ -1621,7 +1641,11 @@ const DESKRIPSI_BOT =
 const PESAN_GRUP =
   "👋 <b>Generator Config Dark Tunnel</b>\n\n" +
   "Kirim akun SSH / VLESS / VMess / Trojan / Shadowsocks kamu, bot buatkan config Dark Tunnel-nya.\n\n" +
-  "⚠️ Jangan kirim akun di grup — akun kamu bisa dilihat semua anggota. kirim lewat chat pribadi bot ini ya.";
+  "⚠️ Jangan kirim akun di grup — akun kamu bisa dilihat semua anggota. kirim lewat chat pribadi bot ini ya.\n\n" +
+  "📝 <b>Di grup, ketik saja:</b>\n" +
+  "• <code>bug xl opok</code> — lihat daftar bug\n" +
+  "• <code>/cek domain.com</code> — cek domain\n" +
+  "• <code>/update</code> — update terbaru";
 
 const CARA_IMPOR =
   "📥 <b>Cara impor ke Dark Tunnel:</b>\n" +
@@ -2508,17 +2532,11 @@ export function formatHasilCek(r) {
 
 function keyboardStart(isAdmin, diGrup) {
   if (diGrup) {
-    // (v2.9.13) Menu grup: cuma yang perlu di grup. Buat Config /
-    // Buat Manual tetap ada tapi ketukannya dialihkan ke DM (akun
-    // rahasia); Template Config tidak ditampilkan di grup; Admin
-    // tidak pernah tampil di grup. (v2.9.14) Cek Domain balik ke
-    // grup atas permintaan Asep.
-    return [
-      [{ text: "⚡ Buat Config", callback_data: "buat:config" }, { text: "✏️ Buat Manual", callback_data: "buat:manual" }],
-      [{ text: "🔍 Cari Bug", callback_data: "bug:menu" }, { text: "🌐 Cek Domain", callback_data: "cek:mulai" }],
-      [{ text: "🆕 Update Terbaru", callback_data: "update:lihat" }, { text: "📥 dark tunnel", url: "https://sfile.co/H26JBeTBi1o" }],
-      [{ text: "🛒 Beli Akun VPN", url: "https://t.me/sandekalavpn_bot" }, { text: "👥 Gabung Grup", url: "https://t.me/sand3kala" }],
-    ];
+    // (v2.9.17) Menu grup tanpa tombol — kecuali Buat Config.
+    // Anggota grup mengetik perintahnya; bot kirim hasilnya sebagai
+    // pesan biasa. Buat Config tetap ada tapi ketukannya dialihkan ke
+    // DM (akun rahasia).
+    return [[{ text: "⚡ Buat Config", callback_data: "buat:config" }]];
   }
   const kb = [
     [{ text: "⚡ Buat Config", callback_data: "buat:config" }, { text: "✏️ Buat Manual", callback_data: "buat:manual" }],
@@ -2836,9 +2854,6 @@ async function balasPemicuGrup(env, chatId, aksi, teksAsli) {
   const sekarang = Date.now();
   if (cooldownPemicu.has(kunci) && sekarang - cooldownPemicu.get(kunci) < 60000) return false;
   cooldownPemicu.set(kunci, sekarang);
-  const tombolDm = env.BOT_USERNAME
-    ? [[{ text: "💬 Buka di Chat Pribadi", url: "https://t.me/" + env.BOT_USERNAME }]]
-    : undefined;
   if (aksi === "bug") {
     const marah = "bug apa kntl? tulis yg bener!";
     const arg = argumenBug(teksAsli);
@@ -2846,13 +2861,14 @@ async function balasPemicuGrup(env, chatId, aksi, teksAsli) {
     const kata = arg.split(" ").filter(Boolean);
     const op1 = normalisasiOperator(kata[0]);
     if (op1 && kata.length === 1) {
-      const kv = await ambilBugsKv(env);
-      await sendTelegram(env, chatId, "🐛 <b>Bug " + BUG_DB[op1].label + "</b>\n\nPilih kategori:", keyboardKategoriBug(op1, Object.keys(kv[op1] || {})));
+      // (v2.9.17) Grup tanpa tombol: kategori sebagai teks "ketik ...".
+      const teksKat = await teksDaftarKategoriBug(env, op1);
+      await sendTelegram(env, chatId, teksKat || "😕 Operator itu tidak ada.");
       return true;
     }
     if (op1 && kata.length >= 2) {
       const kat = normalisasiKategori(kata[1]);
-      if (kat && BUG_DB[op1].kategori[kat]) { await kirimDaftarBug(env, chatId, op1, kat); return true; }
+      if (kat && BUG_DB[op1].kategori[kat]) { await kirimDaftarBug(env, chatId, op1, kat, true); return true; }
       await sendTelegram(env, chatId, marah); return true;
     }
     const kat0 = normalisasiKategori(kata[0]);
@@ -2860,13 +2876,14 @@ async function balasPemicuGrup(env, chatId, aksi, teksAsli) {
       // (v2.9.16) Urutan terbalik juga diterima: "bug opok xl" = "bug xl opok".
       if (kata.length >= 2) {
         const op2 = normalisasiOperator(kata[1]);
-        if (op2 && BUG_DB[op2].kategori[kat0]) { await kirimDaftarBug(env, chatId, op2, kat0); return true; }
+        if (op2 && BUG_DB[op2].kategori[kat0]) { await kirimDaftarBug(env, chatId, op2, kat0, true); return true; }
       }
       const ops = Object.keys(BUG_DB).filter((o) => BUG_DB[o].kategori[kat0]);
-      if (ops.length === 1) { await kirimDaftarBug(env, chatId, ops[0], kat0); return true; }
+      if (ops.length === 1) { await kirimDaftarBug(env, chatId, ops[0], kat0, true); return true; }
       if (ops.length > 1) {
-        await sendTelegram(env, chatId, "🐛 Kategori <b>" + escapeHtml(labelKategori(ops[0], kat0)) + "</b> ada di beberapa operator, pilih dulu:",
-          baris2(ops.map((o) => ({ text: BUG_DB[o].label, callback_data: "bug:op:" + o }))));
+        // (v2.9.17) Grup tanpa tombol: operator sebagai teks "ketik ...".
+        const barisOp = ops.map((o) => "• <code>bug " + o + " " + kat0 + "</code> — " + escapeHtml(labelOperator(o)));
+        await sendTelegram(env, chatId, "🐛 Kategori <b>" + escapeHtml(labelKategori(ops[0], kat0)) + "</b> ada di beberapa operator, ketik salah satu:\n" + barisOp.join("\n"));
         return true;
       }
     }
@@ -2874,10 +2891,10 @@ async function balasPemicuGrup(env, chatId, aksi, teksAsli) {
     return true;
   }
   if (aksi === "harga") {
+    // (v2.9.17) Grup tanpa tombol — teks saja.
     await sendTelegram(env, chatId,
       "💰 <b>Bot ini GRATIS</b> — buat config Dark Tunnel nggak bayar. Kirim akunmu ke @autosetdark_bot di chat pribadi, langsung jadi file .dark.\n\n" +
-      "Kalau mau beli akun VPN-nya, di @sandekalavpn_bot: 1 hari Rp1.000, 7 hari Rp5.000, 30 hari Rp10.000.",
-      [[{ text: "🛒 Beli Akun VPN", url: "https://t.me/sandekalavpn_bot" }, { text: "💬 Buka Bot", url: "https://t.me/" + (env.BOT_USERNAME || "autosetdark_bot") }]]);
+      "Kalau mau beli akun VPN-nya, di @sandekalavpn_bot: 1 hari Rp1.000, 7 hari Rp5.000, 30 hari Rp10.000.");
     return true;
   }
   if (aksi === "cara") {
@@ -2886,18 +2903,16 @@ async function balasPemicuGrup(env, chatId, aksi, teksAsli) {
       "1️⃣ Buka @autosetdark_bot di chat pribadi\n" +
       "2️⃣ Kirim akunmu apa adanya (SSH / VLESS / VMess / Trojan)\n" +
       "3️⃣ Unduh file .dark-nya, impor ke Dark Tunnel, tekan Connect\n\n" +
-      "🔒 Akunmu tidak disimpan.",
-      tombolDm);
+      "🔒 Akunmu tidak disimpan.");
     return true;
   }
   if (aksi === "apk") {
-    await sendTelegram(env, chatId, "📥 <b>Download aplikasi Dark Tunnel:</b>", TOMBOL_APK);
+    await sendTelegram(env, chatId, "📥 <b>Download aplikasi Dark Tunnel:</b>\nhttps://sfile.co/H26JBeTBi1o");
     return true;
   }
   if (aksi === "beli") {
     await sendTelegram(env, chatId,
-      "🛒 Beli akun VPN / trial di @sandekalavpn_bot — 1 hari Rp1.000, 7 hari Rp5.000, 30 hari Rp10.000. Trial gratis tersedia buat pengguna baru.",
-      [[{ text: "🛒 Buka @sandekalavpn_bot", url: "https://t.me/sandekalavpn_bot" }]]);
+      "🛒 Beli akun VPN / trial di @sandekalavpn_bot — 1 hari Rp1.000, 7 hari Rp5.000, 30 hari Rp10.000. Trial gratis tersedia buat pengguna baru.");
     return true;
   }
   if (aksi === "belicanda") {
@@ -2922,8 +2937,7 @@ async function balasPemicuGrup(env, chatId, aksi, teksAsli) {
   }
   if (aksi === "config") {
     await sendTelegram(env, chatId,
-      "⚡ Buat config lewat chat pribadi ya — biar akun kamu nggak kelihatan orang lain.",
-      tombolDm);
+      "⚡ Buat config lewat chat pribadi ya — biar akun kamu nggak kelihatan orang lain.");
     return true;
   }
   return false;
@@ -2951,11 +2965,12 @@ const CATATAN_PEMICU =
 
 // Jalankan cek domain lalu kirim hasilnya (dipakai mulaiCekDomain
 // + alur pendingCek di grup).
-async function kirimHasilCek(env, chatId, domain) {
+async function kirimHasilCek(env, chatId, domain, diGrup) {
   let hasilCek;
   try { hasilCek = await cekDomain(domain); }
   catch { hasilCek = { domain, ok: false, status: 0, ms: 0, cdn: "", server: "", ips: [], hostname: "", subdomains: null }; }
-  await sendTelegram(env, chatId, formatHasilCek(hasilCek), [
+  // (v2.9.17) Di grup: hasil saja, tanpa tombol.
+  await sendTelegram(env, chatId, formatHasilCek(hasilCek), diGrup ? undefined : [
     [{ text: "🔄 Cek Lagi", callback_data: "cek:mulai" }],
     ...TOMBOL_KEMBALI,
   ]);
@@ -2964,19 +2979,22 @@ async function kirimHasilCek(env, chatId, domain) {
 // Mulai cek domain: kalau argumen berisi domain, langsung cek;
 // kalau tidak, minta domain (pendingCek). Dipakai /cek,
 // /cekdomain, /cekrespon — di grup maupun DM.
-async function mulaiCekDomain(env, chatId, argumen) {
+// (v2.9.17) diGrup = prompt tanpa tombol Kembali; userId = yang minta
+// cek, supaya obrolan anggota lain tidak membatalkan tunggunya.
+async function mulaiCekDomain(env, chatId, argumen, diGrup, userId) {
   const domain = bersihkanDomain(argumen);
-  if (domain) { await kirimHasilCek(env, chatId, domain); return; }
-  pendingCek.set(chatId, { ts: Date.now() });
-  await sendTelegram(env, chatId, "🌐 <b>Cek Domain</b>\n\nKirim domain yang mau dicek — mis. <code>edu.ruangguru.com</code>.", TOMBOL_KEMBALI);
+  if (domain) { await kirimHasilCek(env, chatId, domain, diGrup); return; }
+  pendingCek.set(chatId, { ts: Date.now(), userId: userId || chatId });
+  await sendTelegram(env, chatId, "🌐 <b>Cek Domain</b>\n\nKirim domain yang mau dicek — mis. <code>edu.ruangguru.com</code>.", diGrup ? undefined : TOMBOL_KEMBALI);
 }
 
 // Kirim daftar bug satu kategori sebagai pesan baru (jalur pemicu grup).
-async function kirimDaftarBug(env, chatId, opKey, katKey) {
+// (v2.9.17) diGrup = tanpa tombol Kembali — hasilnya saja.
+async function kirimDaftarBug(env, chatId, opKey, katKey, diGrup) {
   const daftar = await daftarBugPesanGabungan(env, opKey, katKey);
   if (!daftar) { await sendTelegram(env, chatId, "😕 Kategori itu tidak ada."); return; }
   for (let i = 0; i < daftar.length; i++) {
-    const kb = i === daftar.length - 1 ? keyboardKembaliBug(opKey, katKey, false) : undefined;
+    const kb = !diGrup && i === daftar.length - 1 ? keyboardKembaliBug(opKey, katKey, false) : undefined;
     await sendTelegram(env, chatId, daftar[i], kb);
   }
 }
@@ -4063,14 +4081,14 @@ async function handleStatus(env, chatId) {
 }
 
 // ---- /update: 5 update terbaru ----
-async function handleUpdate(env, chatId) {
+async function handleUpdate(env, chatId, diGrup) {
   const arr = await ambilUpdatesKv(env);
   if (!arr.length) {
-    await sendTelegram(env, chatId, "🆕 <b>Update Terbaru</b>\n\nBelum ada update.", TOMBOL_KEMBALI);
+    await sendTelegram(env, chatId, "🆕 <b>Update Terbaru</b>\n\nBelum ada update.", diGrup ? undefined : TOMBOL_KEMBALI);
     return;
   }
   const baris = arr.slice(0, 5).map((e) => "• " + escapeHtml(e.teks) + " — " + e.tanggal);
-  await sendTelegram(env, chatId, "🆕 <b>Update Terbaru</b>\n\n" + baris.join("\n"), TOMBOL_KEMBALI);
+  await sendTelegram(env, chatId, "🆕 <b>Update Terbaru</b>\n\n" + baris.join("\n"), diGrup ? undefined : TOMBOL_KEMBALI);
 }
 
 // ---- /config: daftar config contoh + template config per operator (v2.7) ----
@@ -4285,14 +4303,21 @@ async function handleTelegram(env, update) {
     // (v2.9.2: edit pesan menu jadi daftar operator.)
     if (data === "bug:menu") {
       await jawabCallback(env, cb.id);
-      await editAtauKirim(env, chatIdCb, cb.message.message_id, "🐛 <b>Daftar Bug Host</b>\n\nPilih operator dulu:", keyboardOperatorBug());
+      // (v2.9.17) Di grup: teks saja, tanpa tombol.
+      if (diGrupCb) {
+        await editAtauKirim(env, chatIdCb, cb.message.message_id, teksDaftarOperatorBug());
+      } else {
+        await editAtauKirim(env, chatIdCb, cb.message.message_id, "🐛 <b>Daftar Bug Host</b>\n\nPilih operator dulu:", keyboardOperatorBug());
+      }
       return;
     }
     // Tombol "🌐 Cek Domain" di /start — minta domain, lalu cek.
+    // (v2.9.17) Di grup: prompt tanpa tombol Kembali; tunggu milik
+    // yang mengetuk saja (cb.from.id).
     if (data === "cek:mulai") {
       await jawabCallback(env, cb.id);
-      pendingCek.set(chatIdCb, { ts: Date.now() });
-      await sendTelegram(env, chatIdCb, "🌐 <b>Cek Domain</b>\n\nKirim domain yang mau dicek — mis. <code>edu.ruangguru.com</code>.", TOMBOL_KEMBALI);
+      pendingCek.set(chatIdCb, { ts: Date.now(), userId: cb.from?.id || chatIdCb });
+      await sendTelegram(env, chatIdCb, "🌐 <b>Cek Domain</b>\n\nKirim domain yang mau dicek — mis. <code>edu.ruangguru.com</code>.", diGrupCb ? undefined : TOMBOL_KEMBALI);
       return;
     }
     // Pilih metode payload untuk akun SSH+bug yang sedang menunggu.
@@ -4318,7 +4343,7 @@ async function handleTelegram(env, update) {
     // Tombol "🆕 Update Terbaru" di /start.
     if (data === "update:lihat") {
       await jawabCallback(env, cb.id);
-      await handleUpdate(env, chatIdCb);
+      await handleUpdate(env, chatIdCb, diGrupCb);
       return;
     }
     // Panel admin (tombol "⚙️ Admin" di menu utama) — admin saja.
@@ -4831,9 +4856,15 @@ async function handleTelegram(env, update) {
       const op = BUG_DB[opKey];
       if (!op) { await jawabCallback(env, cb.id); return; }
       await jawabCallback(env, cb.id);
-      const kv = await ambilBugsKv(env);
-      await editAtauKirim(env, chatIdCb, cb.message.message_id,
-        "🐛 <b>Bug " + op.label + "</b>\n\nPilih kategori:", keyboardKategoriBug(opKey, Object.keys(kv[opKey] || {})));
+      // (v2.9.17) Di grup: teks saja, tanpa tombol.
+      if (diGrupCb) {
+        const teksKat = await teksDaftarKategoriBug(env, opKey);
+        await editAtauKirim(env, chatIdCb, cb.message.message_id, teksKat || "😕 Operator itu tidak ada.");
+      } else {
+        const kv = await ambilBugsKv(env);
+        await editAtauKirim(env, chatIdCb, cb.message.message_id,
+          "🐛 <b>Bug " + op.label + "</b>\n\nPilih kategori:", keyboardKategoriBug(opKey, Object.keys(kv[opKey] || {})));
+      }
       return;
     }
     if (data.startsWith("bug:kat:")) {
@@ -4845,7 +4876,8 @@ async function handleTelegram(env, update) {
         return;
       }
       for (let i = 0; i < daftar.length; i++) {
-        const kbDaftar = i === daftar.length - 1 ? keyboardKembaliBug(parts[0], parts[1], cekAdmin(env, chatIdCb) === "ya") : undefined;
+        // (v2.9.17) Di grup: tanpa tombol Kembali.
+        const kbDaftar = !diGrupCb && i === daftar.length - 1 ? keyboardKembaliBug(parts[0], parts[1], cekAdmin(env, chatIdCb) === "ya") : undefined;
         // (v2.9.2: potongan pertama mengedit pesan kategori; sisanya
         // kirim baru. v2.9.6: tiap potongan kini membawa judul + nomor
         // bagian, jadi tidak terlihat seperti daftar lepas.)
@@ -4948,30 +4980,41 @@ async function handleTelegram(env, update) {
     if (perintah === "/start" || perintah === "/menu") {
       await tampilkanMenuUtama(env, chatId, undefined, true);
     } else if (perintah === "/bug") {
-      await sendTelegram(env, chatId, "🐛 <b>Daftar Bug Host</b>\n\nPilih operator dulu:", keyboardOperatorBug());
+      // (v2.9.17) Grup tanpa tombol: operator sebagai teks "ketik ...".
+      await sendTelegram(env, chatId, teksDaftarOperatorBug());
     } else if (perintah === "/update") {
-      await handleUpdate(env, chatId);
+      await handleUpdate(env, chatId, true);
     } else if (perintah === "/cek" || perintah === "/cekdomain" || perintah === "/cekrespon") {
       // (v2.9.14) Cek Domain balik ke grup — domain bisa ditulis
       // langsung di perintah atau dikirim sesudahnya.
       const argumen = teks.split(/\s+/).slice(1).join(" ");
-      await mulaiCekDomain(env, chatId, argumen);
+      await mulaiCekDomain(env, chatId, argumen, true, msg.from?.id);
     } else if (perintah === "/catatan") {
-      await sendTelegram(env, chatId, CATATAN_PEMICU, TOMBOL_KEMBALI);
+      await sendTelegram(env, chatId, CATATAN_PEMICU);
     } else if (perintah === "/config") {
-      // Template Config tetap di DM.
-      const tombol = env.BOT_USERNAME
-        ? [[{ text: "💬 Buka di Chat Pribadi", url: "https://t.me/" + env.BOT_USERNAME }]]
-        : undefined;
-      await sendTelegram(env, chatId, "🧩 Template config cuma bisa di chat pribadi ya.", tombol);
+      // Template Config tetap di DM (tanpa tombol, v2.9.17).
+      await sendTelegram(env, chatId, "🧩 Template config cuma bisa di chat pribadi ya — buka @" + (env.BOT_USERNAME || "autosetdark_bot") + ".");
     } else if (!teks.startsWith("/")) {
       // Cek domain yang tertunda: domain dicek, bukan domain diabaikan
       // diam-diam (biar obrolan grup tidak memicu balasan "bukan domain").
-      if (pendingCek.has(chatId)) {
-        pendingCek.delete(chatId);
-        const domain = bersihkanDomain(teks);
-        if (domain) await kirimHasilCek(env, chatId, domain);
-      } else if (!teks.includes("://")) {
+      // (v2.9.17) Tunggu ini milik yang minta cek saja — obrolan anggota
+      // lain tidak membatalkannya dan tetap bisa memicu balasan;
+      // kedaluwarsa 10 menit.
+      const tunggu = pendingCek.get(chatId);
+      let dimakan = false;
+      if (tunggu) {
+        if (tunggu.userId && tunggu.userId !== msg.from?.id) {
+          // Bukan yang minta cek — biarkan tunggunya tetap jalan.
+        } else if (Date.now() - (tunggu.ts || 0) > 10 * 60 * 1000) {
+          pendingCek.delete(chatId);
+        } else {
+          dimakan = true;
+          pendingCek.delete(chatId);
+          const domain = bersihkanDomain(teks);
+          if (domain) await kirimHasilCek(env, chatId, domain, true);
+        }
+      }
+      if (!dimakan && !teks.includes("://")) {
         // Kata kunci pemicu; teks ber-link (akun) diabaikan.
         const aksi = cocokPemicu(teks);
         if (aksi) await balasPemicuGrup(env, chatId, aksi, teks);
