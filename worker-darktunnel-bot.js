@@ -1600,7 +1600,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.17";
+const VERSI_BOT = "v2.9.18";
 
 const PESAN_START =
   "👋 <b>Selamat datang di Generator Config Dark Tunnel</b>\n\n" +
@@ -4976,8 +4976,19 @@ async function handleTelegram(env, update) {
     // dialihkan ke DM (akun rahasia); kata kunci tertentu memicu
     // balasan bot. Akun pelanggan tidak pernah diproses di grup.
     await catatAktivitasGrup(env, chatId);
-    const perintah = teks.split(" ")[0].replace(/@.+$/, "");
+    const tokenPerintah = teks.split(" ")[0];
+    const mention = tokenPerintah.match(/^\/\S+@([A-Za-z0-9_]+)/);
+    const namaBotKu = (env.BOT_USERNAME || "autosetdark_bot").toLowerCase();
+    // (22 Nov 2026) Perintah yang ditujukan ke bot lain
+    // (mis. /start@sandekalavpn_bot) diabaikan — biar cuma satu bot
+    // yang jawab di grup.
+    if (mention && mention[1].toLowerCase() !== namaBotKu) return;
+    const perintah = tokenPerintah.replace(/@.+$/, "");
     if (perintah === "/start" || perintah === "/menu") {
+      // (22 Nov 2026) Menu autodark di grup cuma muncul kalau
+      // dipanggil langsung (@autosetdark_bot) — pas buat config aja.
+      // /start polos jadi jatah bot toko.
+      if (!mention) return;
       await tampilkanMenuUtama(env, chatId, undefined, true);
     } else if (perintah === "/bug") {
       // (v2.9.17) Grup tanpa tombol: operator sebagai teks "ketik ...".
