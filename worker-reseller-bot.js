@@ -293,6 +293,10 @@ async function setToko(env, buka) {
 }
 function adalahAdmin(env, chatId) { return String(chatId) === String(env.ADMIN_CHAT_ID); }
 const PESAN_TUTUP = "🔴 Toko lagi tutup. Lihat-lihat dulu aja, order dibuka lagi nanti ya.";
+// Deskripsi bot (tampil di profil: "Apa yang dapat bot ini lakukan?").
+// Dipasang lewat /setdeskripsi (admin) — Bot API setMyDescription.
+// (22 Nov 2026) Harga disingkat jadi Rp10.000 / bulan.
+const DESKRIPSI_BOT = "SANDEKALA VPN — Beli akun VPN VLESS, VMess, Trojan & SSH. Harga: Rp10.000 / bulan. Trial gratis 30 menit. Bayar via QRIS DANA.";
 // Siarkan status buka/tutup ke semua pengguna bot + semua grup
 // tempat bot berada (22 Nov 2026). Dipanggil setiap admin buka/tutup
 // toko — lewat tombol menu maupun perintah /buka dan /tutup.
@@ -902,6 +906,17 @@ async function handleTelegram(env, update) {
       ? "🟢 Toko DIBUKA. Pembeli sudah bisa order, trial, dan perpanjang lagi."
       : "🔴 Toko DITUTUP. Pembeli hanya bisa lihat-lihat (menu, daftar server, status, akun).");
     await siarkanStatusToko(env, text === "/buka");
+    return;
+  }
+
+  // Perintah admin: /setdeskripsi — pasang deskripsi bot (tampil di
+  // profil: "Apa yang dapat bot ini lakukan?") lewat setMyDescription.
+  // Dipakai sekali setelah deploy; kalau teks deskripsi diubah di kode,
+  // kirim lagi.
+  if (text === "/setdeskripsi") {
+    if (!adalahAdmin(env, chatId)) return;
+    const r = await telegramApi(env, "setMyDescription", { description: DESKRIPSI_BOT });
+    await sendTelegram(env, chatId, r && r.ok ? "✅ Deskripsi bot sudah dipasang — cek di profil @sandekalavpn_bot." : "😕 Gagal memasang deskripsi, coba lagi nanti ya.");
     return;
   }
 
