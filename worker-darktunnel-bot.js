@@ -1544,7 +1544,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.14";
+const VERSI_BOT = "v2.9.15";
 
 const PESAN_START =
   "👋 <b>Selamat datang di Generator Config Dark Tunnel</b>\n\n" +
@@ -2950,6 +2950,31 @@ async function catatAktivitasGrup(env, chatId) {
     if (lama && Date.now() - lama < 5 * 60 * 1000) return;
     await env.DATA.put(kunci, String(Date.now()));
   } catch { /* abaikan */ }
+}
+
+// ---- Roast broadcast sandekala (v2.9.15) ----
+// Bot reseller menulis flag ke KV DATA tiap kali broadcast buka/tutup
+// sampai ke grup (ROAST_BUKA:<idGrup> / ROAST_TUTUP:<idGrup> = waktu).
+// Cron (tiap 10 menit) memanggil ini: flag segar (< 30 menit) dibalas
+// candaan, flag basi dibuang diam-diam. Bot tidak bisa melihat pesan
+// bot lain di Telegram, jadi flag KV ini jembatannya — candaan muncul
+// paling lambat 10 menit sesudah broadcast, bukan balasan ber-thread.
+export async function cekRoastSandekala(env) {
+  if (!env.DATA || !env.BOT_TOKEN) return;
+  const sekarang = Date.now();
+  for (const prefix of ["ROAST_BUKA:", "ROAST_TUTUP:"]) {
+    let daftar;
+    try { daftar = await env.DATA.list({ prefix }); } catch { continue; }
+    for (const key of daftar.keys || []) {
+      const chatId = key.name.slice(prefix.length);
+      let ts = 0;
+      try { ts = Number(await env.DATA.get(key.name)) || 0; } catch { /* abaikan */ }
+      try { await env.DATA.delete(key.name); } catch { /* abaikan */ }
+      if (!ts || sekarang - ts > 30 * 60 * 1000) continue; // basi, buang diam-diam
+      const teks = prefix === "ROAST_BUKA:" ? "kemana aja lu? niat jualan gak sih?" : "wkwkwk bot kok tutup njng!";
+      await sendTelegram(env, Number(chatId), teks);
+    }
+  }
 }
 
 export async function cekGrupSepi(env) {
@@ -5118,9 +5143,13 @@ export default {
     }
     return new Response("Bot generator config Dark Tunnel aktif");
   },
-  // Cron per jam (v2.9.14): nudge grup yang sepi > 6 jam.
+  // Cron tiap 10 menit (v2.9.14, v2.9.15): nudge grup yang sepi
+  // > 6 jam + nyautin broadcast buka/tutup sandekala.
   // Jadwal dipasang di workflow deploy (wrangler.toml [triggers]).
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(cekGrupSepi(env));
+    ctx.waitUntil((async () => {
+      await cekGrupSepi(env);
+      await cekRoastSandekala(env);
+    })());
   },
 };
