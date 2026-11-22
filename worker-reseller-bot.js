@@ -550,8 +550,9 @@ async function handleTelegram(env, update) {
         "Kamu pilih " + (SERVERS.find((x) => x.kode === serverKode)?.nama || serverKode) +
         " — " + (PROTOKOL.find((x) => x.kode === proto)?.nama || proto.toUpperCase()) +
         " — " + (PAKET.find((x) => x.kode === kodePaket)?.nama || kodePaket) + ".\n\n" +
-        "Ketik username yang kamu mau (huruf/angka saja, 4-15 karakter).\n" +
+        "Ketik username yang kamu mau (huruf/angka saja, maksimal 15 karakter).\n" +
         "Atau ketik - kalau mau username diacak otomatis.\n" +
+        "Kalau kurang dari 4 huruf atau sudah dipakai, bot tambahkan karakter acak.\n" +
         (proto === "ssh" ? "Setelah itu, ketik password SSH yang kamu mau.\n" : "") +
         "Ketik /batal untuk membatalkan."), [[{ text: "🔙 Kembali", callback_data: "proto:" + serverKode + ":" + proto }]]);
       return;
@@ -744,30 +745,48 @@ async function handleTelegram(env, update) {
   }
 
   // Langkah 4b (SSH saja): pembeli mengetik password SSH sendiri
-  // (22 Nov 2026) — password apa adanya, minimal 4 karakter.
+  // (22 Nov 2026) — password apa adanya. Kalau kurang dari 4 karakter,
+  // bot tambahkan karakter acak supaya order tetap jalan (biar cepat),
+  // dan pembeli dikabari password akhirnya.
   const pendingPass = await env.ORDERS.get("pendingPass:" + chatId, "json").catch(() => null);
   if (pendingPass && !text.startsWith("/")) {
-    if (text.length < 4) { await sendTelegram(env, chatId, "Password SSH minimal 4 karakter. Ketik lagi."); return; }
+    let pass = text;
+    if (pass.length < 4) {
+      pass = pass + acakHuruf(4 - pass.length);
+      await sendTelegram(env, chatId, "Password yang kamu ketik kurang dari 4 karakter, jadi bot menambahkan karakter acak. Password SSH kamu: " + pass);
+    }
     await env.ORDERS.delete("pendingPass:" + chatId);
     if (!(await tokoBuka(env)) && !adalahAdmin(env, chatId)) {
       await sendTelegram(env, chatId, PESAN_TUTUP);
       return;
     }
-    await buatOrder(env, chatId, pendingPass.paket, pendingPass.protocol, pendingPass.username, pendingPass.server, msg.from, text);
+    await buatOrder(env, chatId, pendingPass.paket, pendingPass.protocol, pendingPass.username, pendingPass.server, msg.from, pass);
     return;
   }
 
   // Langkah 4: pembeli mengetik username (atau "-") setelah pilih paket.
+  // Username kurang dari 4 huruf atau bentrok: bot tambahkan karakter
+  // acak (22 Nov 2026) supaya order tetap jalan — pembeli dikabari
+  // nama akhirnya. Yang ditolak cuma username lebih dari 15 karakter.
   const pending = await env.ORDERS.get("pending:" + chatId, "json").catch(() => null);
   if (pending && !text.startsWith("/")) {
     let username = null;
+    let catatanUsername = "";
     if (text !== "-") {
       const bersih = text.toLowerCase().replace(/[^a-z0-9]/g, "");
-      if (bersih.length < 4 || bersih.length > 15) {
-        await sendTelegram(env, chatId, "Username harus 4-15 karakter (huruf/angka saja). Ketik lagi, atau ketik - untuk acak.");
+      if (bersih.length > 15) {
+        await sendTelegram(env, chatId, "Username maksimal 15 karakter (huruf/angka saja). Ketik lagi, atau ketik - untuk acak.");
         return;
       }
       username = bersih;
+      if (username.length < 4) {
+        username = username + acakHuruf(4 - username.length);
+        catatanUsername = "kurang";
+      }
+      if (await usernameDipakai(env, username)) {
+        username = tambahAcak(username);
+        catatanUsername = "dipakai";
+      }
     }
     await env.ORDERS.delete("pending:" + chatId);
     if (!(await tokoBuka(env)) && !adalahAdmin(env, chatId)) {
@@ -778,8 +797,18 @@ async function handleTelegram(env, update) {
     // dibuat setelah password masuk.
     if ((pending.protocol || "").toLowerCase() === "ssh") {
       await env.ORDERS.put("pendingPass:" + chatId, JSON.stringify({ server: pending.server, protocol: pending.protocol, paket: pending.paket, username }));
-      await sendTelegram(env, chatId, "Username: " + (username || "acak otomatis") + "\n\nKetik password SSH yang kamu mau (minimal 4 karakter).\nKetik /batal untuk membatalkan.");
+      const infoUsername = catatanUsername === "kurang"
+        ? " (yang kamu ketik kurang dari 4 huruf, ditambah karakter acak)"
+        : catatanUsername === "dipakai"
+          ? " (nama itu sudah dipakai, ditambah karakter acak)"
+          : "";
+      await sendTelegram(env, chatId, "Username: " + (username || "acak otomatis") + infoUsername + "\n\nKetik password SSH yang kamu mau. Kalau kurang dari 4 karakter, bot tambahkan karakter acak.\nKetik /batal untuk membatalkan.");
       return;
+    }
+    if (catatanUsername) {
+      await sendTelegram(env, chatId, catatanUsername === "kurang"
+        ? "Username yang kamu ketik kurang dari 4 huruf, jadi bot menambahkan karakter acak. Username kamu: " + username
+        : "Username yang kamu ketik sudah dipakai, jadi bot menambahkan karakter acak. Username kamu: " + username);
     }
     await buatOrder(env, chatId, pending.paket, pending.protocol, username, pending.server, msg.from);
     return;
@@ -1621,6 +1650,7 @@ async function buatOrder(env, chatId, kodePaket, protocol, customUsername, serve
     "Server: " + server.nama + "\n" +
     "Protokol: " + proto.toUpperCase() + "\n" +
     "Username: " + username + "\n" +
+    (proto === "ssh" && sshPassword ? "Password SSH: " + sshPassword + "\n" : "") +
     "TOLONG BAYAR SESUAI NOMINAL HARGA YANG TERTERA: " +
     "Rp" + nominalUnik.toLocaleString("id-ID") + "\n\n" +
     "Scan QRIS DANA Bisnis SANDEKALA dengan nominal di atas. " +
@@ -1841,6 +1871,36 @@ async function daftarAkunUser(env, chatId) {
 // secara fleksibel: cari config/link di beberapa tempat umum
 // (data.config, data.link, data.vless, dll). Kalau tidak ada,
 // kirim isi data apa adanya supaya pembeli/admin tetap bisa pakai.
+// Karakter acak (huruf/angka kecil) sebanyak n — untuk menambal
+// username/password yang kurang panjang atau bentrok.
+function acakHuruf(n) {
+  return (Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)).slice(0, n);
+}
+
+// Username + 3 karakter acak (tetap maks. 15 karakter) — dipakai
+// kalau username bentrok dengan yang sudah ada di Nadia.
+function tambahAcak(nama) {
+  const dasar = String(nama || "user");
+  const acak = acakHuruf(3);
+  return (dasar + acak).length > 15 ? dasar.slice(0, 12) + acak : dasar + acak;
+}
+
+// Cek apakah username sudah dipakai di akun Nadia (GET /vpn/accounts
+// — daftar akun milik reseller ini). Kalau API gagal, jangan blokir:
+// kembalikan false supaya order tetap jalan dan Nadia yang menilai.
+// Catatan: daftar ini cuma akun reseller sendiri — username yang
+// dipakai reseller lain di server yang sama tidak ketahuan di sini;
+// bentrok seperti itu ditangkap retry di createResellerAccount.
+async function usernameDipakai(env, username) {
+  const cari = String(username || "").toLowerCase();
+  if (!cari) return false;
+  const r = await nadiaGet(env, "/vpn/accounts");
+  if (!r.ok) return false;
+  const daftar = Array.isArray(r.data) ? r.data : (r.data?.accounts || r.data?.data || r.data?.list || []);
+  if (!Array.isArray(daftar)) return false;
+  return daftar.some((a) => a && String(a.username || a.user || "").toLowerCase() === cari);
+}
+
 async function createResellerAccount(env, order) {
   const base = (env.RESELLER_API_URL || "https://www.nadiavpn.web.id/api/v1").replace(/\/$/, "");
   if (!env.RESELLER_API_KEY) {
@@ -1854,7 +1914,7 @@ async function createResellerAccount(env, order) {
   }
   const paket = PAKET.find((p) => p.kode === order.paket) || PAKET[0];
   const protocol = (order.protocol || env.NADIA_PROTOCOL || "vless").toLowerCase();
-  const username = order.username ||
+  let username = order.username ||
     ("sdk" + order.id.replace(/[^A-Za-z0-9]/g, "").toLowerCase() + Math.floor(Math.random() * 90 + 10)).slice(0, 20);
   // SSH: Nadia WAJIB minta `password` di /vpn/order (22 Nov 2026:
   // order SSH gagal "The password field is required" karena bot
@@ -1868,32 +1928,39 @@ async function createResellerAccount(env, order) {
   const sshPassword = protocol === "ssh"
     ? (order.password || (Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)).slice(0, 10))
     : null;
+  let d = null;
   try {
-    const r = await fetch(base + "/vpn/order", {
-      method: "POST",
-      headers: {
-        "Authorization": "Bearer " + env.RESELLER_API_KEY,
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        server_id: serverId,
-        protocol,
-        type: paket.nadiaType,
-        duration: paket.nadiaDuration,
-        username,
-        ...(sshPassword ? { password: sshPassword } : {}),
-      }),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) {
-      const msg = j.message || j.error || ("HTTP " + r.status);
-      return { ok: false, error: "Penyedia: " + msg + " (saldo / server / token — cek dashboard penyedia)" };
+    for (let percobaan = 0; percobaan < 2; percobaan++) {
+      const r = await fetch(base + "/vpn/order", {
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer " + env.RESELLER_API_KEY,
+          "Accept": "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          server_id: serverId,
+          protocol,
+          type: paket.nadiaType,
+          duration: paket.nadiaDuration,
+          username,
+          ...(sshPassword ? { password: sshPassword } : {}),
+        }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok && j.success !== false) { d = j.data || j; break; }
+      const msg = j.message || j.error || (r.ok ? "order ditolak" : ("HTTP " + r.status));
+      // Username bentrok yang tidak ketahuan di cek awal (mis. dipakai
+      // reseller lain di server yang sama): tambah karakter acak dan
+      // coba sekali lagi — order tetap jalan tanpa campur tangan admin.
+      if (percobaan === 0 && /username/i.test(msg) && /(taken|already|duplikat|sudah dipakai|already exists)/i.test(msg)) {
+        username = tambahAcak(username);
+        order.username = username;
+        continue;
+      }
+      return { ok: false, error: "Penyedia: " + msg + (!r.ok ? " (saldo / server / token — cek dashboard penyedia)" : "") };
     }
-    if (j.success === false) {
-      return { ok: false, error: "Penyedia: " + (j.message || j.error || "order ditolak") };
-    }
-    const d = j.data || j;
+    if (!d) return { ok: false, error: "Penyedia: order ditolak" };
     // account_id Nadia (UUID akun) — simpan untuk renew/migrate/
     // change-protocol/details. Letaknya bisa beda-beda, cari di
     // beberapa tempat umum (termasuk di dalam `account` / `data`).
