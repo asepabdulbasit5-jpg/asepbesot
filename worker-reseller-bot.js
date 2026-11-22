@@ -614,7 +614,7 @@ async function handleTelegram(env, update) {
       }
       await kirimConfig(env, cb.from.id,
         "🎁 Ini config trial kamu (" + menitTrial + " menit, kuota 1 GB):", hasil.config,
-        "Kalau cocok, lanjut beli paket lewat /beli." + (sisaTrial !== null ? "\nSisa jatah trial kamu: " + sisaTrial + "." : ""), null, midTrial);
+        "Kalau cocok, lanjut beli paket lewat /beli." + (sisaTrial !== null ? "\nSisa jatah trial kamu: " + sisaTrial + "." : ""), [[{ text: "🛒 Beli VPN", callback_data: "menu:beli" }]], midTrial);
       // Trial berhasil: kabari admin (calon pembeli — bisa di-follow-up).
       // Trial admin sendiri tidak dikabari (kabariAdmin skip).
       await kabariAdmin(env, cb.from.id,
