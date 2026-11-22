@@ -298,7 +298,7 @@ const PESAN_TUTUP = "🔴 Toko lagi tutup. Lihat-lihat dulu aja, order dibuka la
 // toko — lewat tombol menu maupun perintah /buka dan /tutup.
 async function siarkanStatusToko(env, buka) {
   await siarkanKeSemuaPengguna(env, buka
-    ? "🟢 SANDEKALA VPN sudah BUKA!\n\nSilakan order VPN lewat bot ini. Ketik /start untuk mulai.\n\nHarga: 1 hari Rp1.000 • 7 hari Rp5.000 • 30 hari Rp10.000"
+    ? "🟢 SANDEKALA VPN sudah BUKA!\n\nSilakan order VPN lewat bot ini. Ketik /start untuk mulai.\n\nHarga: Rp10.000 / bulan"
     : "🔴 SANDEKALA VPN lagi TUTUP dulu ya.\n\nOrder dibuka lagi nanti — pantau terus bot ini. Ketik /start untuk lihat menu.", buka);
 }
 
