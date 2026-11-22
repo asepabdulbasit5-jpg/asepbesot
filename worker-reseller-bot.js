@@ -708,7 +708,8 @@ async function handleTelegram(env, update) {
 
   // Mode grup: di grup bot jadi etalase + ikut ngobrol (22 Nov 2026).
   // Perintah yang dilayani: /start, /menu, /harga (boleh pakai
-  // @namabot di belakangnya). Kata tertentu memicu balasan
+  // @sandekalavpn_bot di belakangnya; @bot lain diabaikan, 22 Nov
+  // 2026). Kata tertentu memicu balasan (minta/beli/harga/makasih/
   // (minta/beli/harga/makasih/assalamualaikum). Sisanya diabaikan —
   // jualan tetap di DM supaya config pembeli tidak bocor ke semua
   // anggota grup.
@@ -718,7 +719,14 @@ async function handleTelegram(env, update) {
     // etalase (/start, /menu, /harga) atau pemicu kata biar rame.
     await catatGrup(env, chatId);
     await catatAktivitasGrup(env, chatId);
-    const perintah = text.split(" ")[0].replace(/@.+$/, "");
+    const tokenPerintah = text.split(" ")[0];
+    const mention = tokenPerintah.match(/^\/\S+@([A-Za-z0-9_]+)/);
+    // (22 Nov 2026) Perintah yang ditujukan ke bot lain
+    // (mis. /start@autosetdark_bot) diabaikan — biar cuma satu bot
+    // yang jawab di grup. Tanpa @mention atau @sandekalavpn_bot
+    // tetap dilayani.
+    if (mention && mention[1].toLowerCase() !== "sandekalavpn_bot") return;
+    const perintah = tokenPerintah.replace(/@.+$/, "");
     if (perintah === "/start" || perintah === "/menu" || perintah === "/harga") {
       await tampilkanPromoGrup(env, chatId);
     } else if (!text.startsWith("/")) {
