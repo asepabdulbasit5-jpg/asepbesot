@@ -1283,18 +1283,31 @@ async function eksekusiGantiProtokol(env, chatId, target, proto, sshPassword) {
   target.protocol = proto;
   const idBaru = cariAccountIdKetat(r.data);
   if (idBaru && String(idBaru) !== String(target.accountId)) target.accountId = idBaru;
+  // Config baru cuma dipakai kalau Nadia benar-benar mengembalikannya.
+  // Kalau change-protocol tidak mengembalikan config, ambil lewat
+  // details (jalur yang sama dipakai Perbaiki Akun) — pembeli harus
+  // dapat akun SSH-nya, bukan config lama. Kalau details juga tidak
+  // memberi config, kirim pesan sukses + password baru (SSH) saja,
+  // JANGAN config lama (22 Nov 2026).
+  let configBaru = null;
   if (r.data?.config) {
-    target.config = ambilConfigDariData(r.data);
+    configBaru = ambilConfigDariData(r.data);
+  } else {
+    const det = await nadiaPost(env, "/vpn/account/details", { account_id: target.accountId });
+    if (det.ok && det.data?.config) configBaru = ambilConfigDariData(det.data);
+  }
+  if (configBaru) {
     // SSH: pastikan password yang dikirim ke Nadia ikut tampil di
     // config — kalau respons Nadia tidak menyebutkannya, pembeli tidak
     // akan tahu password barunya (apalagi kalau ditambal acak).
-    if (proto === "ssh" && sshPassword && !target.config.includes("Password")) {
-      target.config += "\nPassword: " + sshPassword;
+    if (proto === "ssh" && sshPassword && !configBaru.includes("Password")) {
+      configBaru += "\nPassword: " + sshPassword;
     }
+    target.config = configBaru;
   }
   await env.ORDERS.put(target.id, JSON.stringify(target));
-  if (target.config) await kirimConfig(env, chatId, "✅ Protokol akun " + (target.username || "") + " sekarang " + proto.toUpperCase() + ". Masa aktif tetap.\n\nConfig terbaru:", target.config);
-  else await sendTelegram(env, chatId, "✅ Protokol akun " + (target.username || "") + " sekarang " + proto.toUpperCase() + ". Masa aktif tetap.");
+  if (configBaru) await kirimConfig(env, chatId, "✅ Protokol akun " + (target.username || "") + " sekarang " + proto.toUpperCase() + ". Masa aktif tetap.\n\nConfig terbaru:", configBaru);
+  else await sendTelegram(env, chatId, "✅ Protokol akun " + (target.username || "") + " sekarang " + proto.toUpperCase() + ". Masa aktif tetap." + (proto === "ssh" && sshPassword ? "\nPassword SSH baru kamu: " + sshPassword : ""));
 }
 
 async function tampilkanTrialServer(env, chatId, halaman, messageId) {
