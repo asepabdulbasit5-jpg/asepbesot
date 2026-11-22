@@ -10,6 +10,8 @@
 //     POST /api/v1/vpn/order
 //          body: {server_id, protocol, type, duration, username}
 //          protocol: vmess | vless | trojan | ssh | zivpn
+//          SSH wajib kirim `password` (Nadia: "The password field
+//          is required", 22 Nov 2026) — bot membuatnya acak 10 huruf.
 //          type: day | week | month
 //   Auth: Authorization: Bearer <token sk_live_...>
 //   Token dibuat di dashboard Nadia: API Reseller > Label
@@ -165,9 +167,10 @@ const SERVERS = [
 ];
 // Alur beli sekarang: /beli (atau tombol 🛒 Beli VPN) -> pilih
 // SERVER -> pilih protokol -> pilih durasi -> ketik username sendiri
-// (atau "-" untuk acak) -> order dibuat. Username & password akun
-// dibuatkan Nadia; pembeli tidak perlu isi password — password
-// (khusus SSH) ikut terkirim bersama config dari Nadia.
+// (atau "-" untuk acak) -> order dibuat. Username dibuatkan Nadia
+// kalau acak; password akun (khusus SSH) dibuat acak oleh bot dan
+// dikirim ke Nadia di `password`, lalu ditampilkan ke pembeli di
+// config — Nadia WAJIB minta password untuk order SSH.
 const PROTOKOL = [
   { kode: "vless",  nama: "VLESS" },
   { kode: "vmess",  nama: "VMess" },
@@ -1814,6 +1817,15 @@ async function createResellerAccount(env, order) {
   const protocol = (order.protocol || env.NADIA_PROTOCOL || "vless").toLowerCase();
   const username = order.username ||
     ("sdk" + order.id.replace(/[^A-Za-z0-9]/g, "").toLowerCase() + Math.floor(Math.random() * 90 + 10)).slice(0, 20);
+  // SSH: Nadia WAJIB minta `password` di /vpn/order (22 Nov 2026:
+  // order SSH gagal "The password field is required" karena bot
+  // tidak pernah mengirimnya). Protokol lain dibuatkan otomatis
+  // oleh Nadia. Buat password acak 10 karakter — ditampilkan ke
+  // pembeli lewat config (ditambahkan kalau respons Nadia tidak
+  // menyebutkannya), supaya akun SSH bisa langsung dipakai.
+  const sshPassword = protocol === "ssh"
+    ? (Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)).slice(0, 10)
+    : null;
   try {
     const r = await fetch(base + "/vpn/order", {
       method: "POST",
@@ -1828,6 +1840,7 @@ async function createResellerAccount(env, order) {
         type: paket.nadiaType,
         duration: paket.nadiaDuration,
         username,
+        ...(sshPassword ? { password: sshPassword } : {}),
       }),
     });
     const j = await r.json().catch(() => ({}));
@@ -1846,7 +1859,11 @@ async function createResellerAccount(env, order) {
     const hasil = ambilConfigDariData(d);
     // Tambah baris Username kalau hasil parse belum menyebutnya
     // (mis. kalau config berupa link vless:// saja).
-    const config = hasil.includes("Username:") ? hasil : "Username: " + username + "\n" + hasil;
+    let config = hasil.includes("Username:") ? hasil : "Username: " + username + "\n" + hasil;
+    // SSH: pastikan password yang dikirim ke Nadia ikut tampil di
+    // config — kalau respons Nadia tidak menyebutkannya, pembeli
+    // tidak akan tahu password akunnya.
+    if (sshPassword && !config.includes("Password")) config += "\nPassword: " + sshPassword;
     return { ok: true, config, accountId };
   } catch (e) {
     return { ok: false, error: "Tidak bisa hubungi API penyedia." };
