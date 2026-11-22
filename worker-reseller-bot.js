@@ -1831,7 +1831,7 @@ async function selesaikanOrder(env, orderId, order) {
     [tombolChatPembeli(order.chatId)]);
   await kirimConfig(env, order.chatId,
     "✅ Pembayaran diterima! Ini config " + order.namaPaket + " kamu:", hasil.config,
-    "Masa aktif mulai hari ini. Selamat memakai!" + infoTrialBaru, tombolKelola(orderId));
+    "Masa aktif mulai hari ini. Selamat memakai!" + infoTrialBaru);
 }
 
 // (22 Nov 2026) Handoff ke @autosetdark_bot: simpan akun pembeli di KV
