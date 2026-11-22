@@ -417,8 +417,44 @@ const OPERATOR_ADMIN = { xl: "XL", axis: "Axis", telkomsel: "Telkomsel", indosat
 const URUTAN_KATEGORI = ["edu", "ilped", "opok", "wa", "game", "sosmed", "musik", "nonton", "conference", "appfun"];
 
 export function normalisasiOperator(op) {
-  const k = String(op || "").toLowerCase();
-  return OPERATOR_ADMIN[k] ? k : null;
+  const k = String(op || "").toLowerCase().trim();
+  if (OPERATOR_ADMIN[k]) return k;
+  if (ALIAS_OPERATOR[k]) return ALIAS_OPERATOR[k];
+  // Toleransi typo 1 huruf (min. 5 huruf, biar "xl"/"tri" tidak salah kena),
+  // mis. "telokmsel" -> "telkomsel" (22 Nov 2026).
+  if (k.length >= 5) {
+    for (const kunci of [...Object.keys(OPERATOR_ADMIN), ...Object.keys(ALIAS_OPERATOR)]) {
+      if (jarakEdit(k, kunci) <= 1) return ALIAS_OPERATOR[kunci] || kunci;
+    }
+  }
+  return null;
+}
+
+// Alias nama operator yang umum dipakai di grup (22 Nov 2026).
+const ALIAS_OPERATOR = {
+  tsel: "telkomsel", telkom: "telkomsel",
+  isat: "indosat", im3: "indosat",
+  smart: "smartfren", sf: "smartfren",
+  "3": "tri", three: "tri",
+  "by.u": "byu",
+};
+
+// Jarak edit Damerau-Levenshtein (tukar 2 huruf berurutan dihitung 1).
+export function jarakEdit(a, b) {
+  const s = String(a || ""), t = String(b || "");
+  const m = s.length, n = t.length;
+  if (!m) return n;
+  if (!n) return m;
+  const d = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
+  for (let j = 0; j <= n; j++) d[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const ganti = s[i - 1] === t[j - 1] ? 0 : 1;
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + ganti);
+      if (i > 1 && j > 1 && s[i - 1] === t[j - 2] && s[i - 2] === t[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
+  }
+  return d[m][n];
 }
 
 export function normalisasiKategori(kat) {
@@ -1544,7 +1580,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.15";
+const VERSI_BOT = "v2.9.16";
 
 const PESAN_START =
   "👋 <b>Selamat datang di Generator Config Dark Tunnel</b>\n\n" +
@@ -2793,7 +2829,10 @@ export function argumenBug(teks) {
 // Balasan tiap pemicu grup. Return true bila dibalas.
 // (v2.9.14) "bug" ber-argumen + candaan "beli" + "minta"/"gak bisa"/"males".
 async function balasPemicuGrup(env, chatId, aksi, teksAsli) {
-  const kunci = chatId + ":" + aksi;
+  // (v2.9.16) Jeda dihitung per (grup, aksi, teks) — bukan per aksi saja.
+  // Sebelumnya "bug telkomsel" lalu "bug opok xl" dalam 60 detik ikut
+  // ditelan diam-diam, padahal itu pertanyaan yang berbeda.
+  const kunci = chatId + ":" + aksi + ":" + normalisasiPemicu(teksAsli);
   const sekarang = Date.now();
   if (cooldownPemicu.has(kunci) && sekarang - cooldownPemicu.get(kunci) < 60000) return false;
   cooldownPemicu.set(kunci, sekarang);
@@ -2818,6 +2857,11 @@ async function balasPemicuGrup(env, chatId, aksi, teksAsli) {
     }
     const kat0 = normalisasiKategori(kata[0]);
     if (kat0) {
+      // (v2.9.16) Urutan terbalik juga diterima: "bug opok xl" = "bug xl opok".
+      if (kata.length >= 2) {
+        const op2 = normalisasiOperator(kata[1]);
+        if (op2 && BUG_DB[op2].kategori[kat0]) { await kirimDaftarBug(env, chatId, op2, kat0); return true; }
+      }
       const ops = Object.keys(BUG_DB).filter((o) => BUG_DB[o].kategori[kat0]);
       if (ops.length === 1) { await kirimDaftarBug(env, chatId, ops[0], kat0); return true; }
       if (ops.length > 1) {
