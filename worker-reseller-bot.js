@@ -552,6 +552,7 @@ async function handleTelegram(env, update) {
         " — " + (PAKET.find((x) => x.kode === kodePaket)?.nama || kodePaket) + ".\n\n" +
         "Ketik username yang kamu mau (huruf/angka saja, 4-15 karakter).\n" +
         "Atau ketik - kalau mau username diacak otomatis.\n" +
+        (proto === "ssh" ? "Setelah itu, ketik password SSH yang kamu mau.\n" : "") +
         "Ketik /batal untuk membatalkan."), [[{ text: "🔙 Kembali", callback_data: "proto:" + serverKode + ":" + proto }]]);
       return;
     }
@@ -726,6 +727,7 @@ async function handleTelegram(env, update) {
   if (text === "📋 Semua Akun") { await tampilkanSemuaAkun(env, chatId); return; }
   if (text === "/batal") {
     await env.ORDERS.delete("pending:" + chatId);
+    await env.ORDERS.delete("pendingPass:" + chatId);
     await sendTelegram(env, chatId, "Order dibatalkan. Ketik /beli kalau mau pesan lagi.");
     return;
   }
@@ -738,6 +740,20 @@ async function handleTelegram(env, update) {
     const target = await env.ORDERS.get(sshpass.orderId, "json").catch(() => null);
     if (!target) { await sendTelegram(env, chatId, "Akun tidak ditemukan."); return; }
     await eksekusiGantiProtokol(env, chatId, target, "ssh", text);
+    return;
+  }
+
+  // Langkah 4b (SSH saja): pembeli mengetik password SSH sendiri
+  // (22 Nov 2026) — password apa adanya, minimal 4 karakter.
+  const pendingPass = await env.ORDERS.get("pendingPass:" + chatId, "json").catch(() => null);
+  if (pendingPass && !text.startsWith("/")) {
+    if (text.length < 4) { await sendTelegram(env, chatId, "Password SSH minimal 4 karakter. Ketik lagi."); return; }
+    await env.ORDERS.delete("pendingPass:" + chatId);
+    if (!(await tokoBuka(env)) && !adalahAdmin(env, chatId)) {
+      await sendTelegram(env, chatId, PESAN_TUTUP);
+      return;
+    }
+    await buatOrder(env, chatId, pendingPass.paket, pendingPass.protocol, pendingPass.username, pendingPass.server, msg.from, text);
     return;
   }
 
@@ -756,6 +772,13 @@ async function handleTelegram(env, update) {
     await env.ORDERS.delete("pending:" + chatId);
     if (!(await tokoBuka(env)) && !adalahAdmin(env, chatId)) {
       await sendTelegram(env, chatId, PESAN_TUTUP);
+      return;
+    }
+    // SSH: password diketik pembeli sendiri — minta dulu, order baru
+    // dibuat setelah password masuk.
+    if ((pending.protocol || "").toLowerCase() === "ssh") {
+      await env.ORDERS.put("pendingPass:" + chatId, JSON.stringify({ server: pending.server, protocol: pending.protocol, paket: pending.paket, username }));
+      await sendTelegram(env, chatId, "Username: " + (username || "acak otomatis") + "\n\nKetik password SSH yang kamu mau (minimal 4 karakter).\nKetik /batal untuk membatalkan.");
       return;
     }
     await buatOrder(env, chatId, pending.paket, pending.protocol, username, pending.server, msg.from);
@@ -1565,7 +1588,7 @@ async function kabariGagal(env, chatId, judul, error) {
   }
 }
 
-async function buatOrder(env, chatId, kodePaket, protocol, customUsername, serverKode, from) {
+async function buatOrder(env, chatId, kodePaket, protocol, customUsername, serverKode, from, sshPassword) {
   const paket = PAKET.find((p) => p.kode === kodePaket);
   if (!paket) return;
   const proto = (protocol || env.NADIA_PROTOCOL || "vless").toLowerCase();
@@ -1584,6 +1607,9 @@ async function buatOrder(env, chatId, kodePaket, protocol, customUsername, serve
     paket: paket.kode, namaPaket: paket.nama,
     protocol: proto, username, server: server.kode, serverNama: server.nama,
     serverId: server.serverId,
+    // Password SSH ketikan pembeli (SSH saja; protokol lain null).
+    // Dipakai createResellerAccount + Konfirmasi Ulang.
+    password: sshPassword || null,
     harga: paket.harga, nominalUnik, status: "menunggu bayar",
     createdAt: Date.now(),
   };
@@ -1832,12 +1858,15 @@ async function createResellerAccount(env, order) {
     ("sdk" + order.id.replace(/[^A-Za-z0-9]/g, "").toLowerCase() + Math.floor(Math.random() * 90 + 10)).slice(0, 20);
   // SSH: Nadia WAJIB minta `password` di /vpn/order (22 Nov 2026:
   // order SSH gagal "The password field is required" karena bot
-  // tidak pernah mengirimnya). Protokol lain dibuatkan otomatis
-  // oleh Nadia. Buat password acak 10 karakter — ditampilkan ke
-  // pembeli lewat config (ditambahkan kalau respons Nadia tidak
-  // menyebutkannya), supaya akun SSH bisa langsung dipakai.
+  // tidak pernah mengirimnya). Pakai password ketikan pembeli
+  // (order baru); order lama sebelum fitur ini tidak punya password
+  // tersimpan — buatkan acak 10 karakter supaya Konfirmasi Ulang
+  // tetap bisa jalan. Protokol lain dibuatkan otomatis oleh Nadia.
+  // Password yang dipakai ditampilkan ke pembeli lewat config
+  // (ditambahkan kalau respons Nadia tidak menyebutkannya), supaya
+  // akun SSH bisa langsung dipakai.
   const sshPassword = protocol === "ssh"
-    ? (Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)).slice(0, 10)
+    ? (order.password || (Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)).slice(0, 10))
     : null;
   try {
     const r = await fetch(base + "/vpn/order", {
