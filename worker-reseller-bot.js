@@ -1202,7 +1202,8 @@ async function buatRenewOrder(env, chatId, target, kodePaket) {
     "Pembeli: " + (target.pembeli || ("ID " + chatId)) + " — akun " + (target.username || "") +
     " — tambah " + paket.nama + " — bayar Rp" + nominalUnik.toLocaleString("id-ID") + "\n" +
     "Berlaku 30 menit. Kalau uang sudah masuk Dana, ketuk tombol Konfirmasi di bawah.",
-    [[{ text: "✅ Konfirmasi Pembayaran", callback_data: "konfirmasi:" + orderId }]]);
+    [[{ text: "✅ Konfirmasi Pembayaran", callback_data: "konfirmasi:" + orderId }],
+     tombolChatPembeli(chatId)]);
   await sendTelegram(env, chatId,
     "Order perpanjang " + orderId + " dibuat.\n\n" +
     "Akun: " + (target.username || "") + " — tambah " + paket.nama + " — Rp" + paket.harga.toLocaleString("id-ID") + "\n" +
@@ -1513,6 +1514,14 @@ function namaPembeli(from) {
 }
 
 
+// Tombol "Chat Pembeli" di semua notif order ke admin — satu ketuk
+// langsung buka chat pembeli (pakai ID Telegram, jadi jalan walau
+// pembeli tidak punya @username). Dipakai di notif order baru,
+// gagal buat akun, terjual, dan perpanjang berhasil.
+function tombolChatPembeli(chatIdPembeli) {
+  return [{ text: "💬 Chat Pembeli", url: "tg://user?id=" + chatIdPembeli }];
+}
+
 // Kabari admin kalau ada order baru / penjualan berhasil.
 // Dipakai supaya admin tetap tahu walau MacroDroid gagal baca notif
 // Dana — admin bisa cek Dana lalu /konfirmasi manual.
@@ -1597,7 +1606,8 @@ async function buatOrder(env, chatId, kodePaket, protocol, customUsername, serve
     "Paket: " + paket.nama + " — " + proto.toUpperCase() + " — " + server.nama + "\n" +
     "Username: " + username + " — bayar Rp" + nominalUnik.toLocaleString("id-ID") + "\n" +
     "Berlaku 30 menit. Kalau uang sudah masuk Dana, ketuk tombol Konfirmasi di bawah.",
-    [[{ text: "✅ Konfirmasi Pembayaran", callback_data: "konfirmasi:" + orderId }]]);
+    [[{ text: "✅ Konfirmasi Pembayaran", callback_data: "konfirmasi:" + orderId }],
+     tombolChatPembeli(chatId)]);
   // Gambar QRIS: kirim fotonya kalau QRIS_IMAGE_URL sudah diisi di
   // Secrets Worker. Kalau belum diisi, jujur ke pembeli supaya dia
   // tidak menunggu gambar yang tidak akan datang.
@@ -1653,7 +1663,8 @@ async function selesaikanOrder(env, orderId, order) {
       order.nominalUnik.toLocaleString("id-ID") +
       " tapi gagal buat akun reseller: " + hasil.error +
       "\nCek saldo/API reseller, lalu ketuk tombol Konfirmasi Ulang di bawah setelah diperbaiki — atau refund manual ke pembeli.",
-      [[{ text: "🔄 Konfirmasi Ulang", callback_data: "konfirmasi:" + orderId }]]);
+      [[{ text: "🔄 Konfirmasi Ulang", callback_data: "konfirmasi:" + orderId }],
+       tombolChatPembeli(order.chatId)]);
     await sendTelegram(env, order.chatId,
       "Pembayaranmu sudah masuk, tapi pembuatan akun lagi gangguan. " +
       "Admin sudah dikabari, config akan dikirim secepatnya. " +
@@ -1700,7 +1711,8 @@ async function selesaikanOrder(env, orderId, order) {
     await kabariAdmin(env, order.chatId,
       "✅ Perpanjang berhasil: " + orderId + "\n" +
       "Pembeli: " + (order.pembeli || ("ID " + order.chatId)) + " — akun " + (order.username || "") +
-      " — " + order.namaPaket + " — Rp" + order.nominalUnik.toLocaleString("id-ID") + " sudah masuk.");
+      " — " + order.namaPaket + " — Rp" + order.nominalUnik.toLocaleString("id-ID") + " sudah masuk.",
+      [tombolChatPembeli(order.chatId)]);
     if (configKirim) await kirimConfig(env, order.chatId,
       "✅ Akun " + (order.username || "") + " berhasil diperpanjang (" + order.namaPaket + ")." + infoTrialBaru + "\n\nConfig terbaru:", configKirim);
     else await sendTelegram(env, order.chatId,
@@ -1718,7 +1730,8 @@ async function selesaikanOrder(env, orderId, order) {
     "Pembeli: " + (order.pembeli || ("ID " + order.chatId)) + "\n" +
     "Akun: " + (order.username || "") + " — " + order.namaPaket + " — " + (order.protocol || "?").toUpperCase() +
     " — " + (order.serverNama || order.server || "?") + "\n" +
-    "Rp" + order.nominalUnik.toLocaleString("id-ID") + " sudah masuk, config sudah dikirim ke pembeli.");
+    "Rp" + order.nominalUnik.toLocaleString("id-ID") + " sudah masuk, config sudah dikirim ke pembeli.",
+    [tombolChatPembeli(order.chatId)]);
   await kirimConfig(env, order.chatId,
     "✅ Pembayaran diterima! Ini config " + order.namaPaket + " kamu:", hasil.config,
     "Masa aktif mulai hari ini. Selamat memakai!" + infoTrialBaru, tombolKelola(orderId));
