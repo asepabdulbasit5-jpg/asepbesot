@@ -673,7 +673,7 @@ async function handleTelegram(env, update) {
       if (!target?.accountId) { await sendTelegram(env, cb.from.id, "Akun ini tidak punya ID akun tersimpan — ganti manual, hubungi admin."); return; }
       if (proto === "ssh") {
         await env.ORDERS.put("sshpass:" + cb.from.id, JSON.stringify({ orderId }));
-        await sendTelegram(env, cb.from.id, "Ganti ke SSH butuh password SSH baru. Ketik password SSH yang kamu mau (minimal 4 karakter).");
+        await sendTelegram(env, cb.from.id, "Ganti ke SSH butuh password SSH baru. Ketik password SSH yang kamu mau. Kalau kurang dari 4 karakter, bot tambahkan karakter acak.");
         return;
       }
       await eksekusiGantiProtokol(env, cb.from.id, target, proto, null);
@@ -733,14 +733,20 @@ async function handleTelegram(env, update) {
     return;
   }
 
-  // Password SSH baru saat ganti protokol ke SSH.
+  // Password SSH baru saat ganti protokol ke SSH — kalau kurang dari
+  // 4 karakter, bot tambahkan karakter acak (disamakan dengan alur
+  // order, 22 Nov 2026) dan pembeli dikabari password akhirnya.
   const sshpass = await env.ORDERS.get("sshpass:" + chatId, "json").catch(() => null);
   if (sshpass && !text.startsWith("/")) {
-    if (text.length < 4) { await sendTelegram(env, chatId, "Password SSH minimal 4 karakter. Ketik lagi."); return; }
+    let pass = text;
+    if (pass.length < 4) {
+      pass = pass + acakHuruf(4 - pass.length);
+      await sendTelegram(env, chatId, "Password yang kamu ketik kurang dari 4 karakter, jadi bot menambahkan karakter acak. Password SSH kamu: " + pass);
+    }
     await env.ORDERS.delete("sshpass:" + chatId);
     const target = await env.ORDERS.get(sshpass.orderId, "json").catch(() => null);
     if (!target) { await sendTelegram(env, chatId, "Akun tidak ditemukan."); return; }
-    await eksekusiGantiProtokol(env, chatId, target, "ssh", text);
+    await eksekusiGantiProtokol(env, chatId, target, "ssh", pass);
     return;
   }
 
@@ -1277,7 +1283,15 @@ async function eksekusiGantiProtokol(env, chatId, target, proto, sshPassword) {
   target.protocol = proto;
   const idBaru = cariAccountIdKetat(r.data);
   if (idBaru && String(idBaru) !== String(target.accountId)) target.accountId = idBaru;
-  if (r.data?.config) target.config = ambilConfigDariData(r.data);
+  if (r.data?.config) {
+    target.config = ambilConfigDariData(r.data);
+    // SSH: pastikan password yang dikirim ke Nadia ikut tampil di
+    // config — kalau respons Nadia tidak menyebutkannya, pembeli tidak
+    // akan tahu password barunya (apalagi kalau ditambal acak).
+    if (proto === "ssh" && sshPassword && !target.config.includes("Password")) {
+      target.config += "\nPassword: " + sshPassword;
+    }
+  }
   await env.ORDERS.put(target.id, JSON.stringify(target));
   if (target.config) await kirimConfig(env, chatId, "✅ Protokol akun " + (target.username || "") + " sekarang " + proto.toUpperCase() + ". Masa aktif tetap.\n\nConfig terbaru:", target.config);
   else await sendTelegram(env, chatId, "✅ Protokol akun " + (target.username || "") + " sekarang " + proto.toUpperCase() + ". Masa aktif tetap.");
