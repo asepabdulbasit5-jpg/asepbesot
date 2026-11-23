@@ -1062,7 +1062,7 @@ async function tampilkanPromoGrup(env, chatId) {
   const buka = await tokoBuka(env);
   const teks =
     "🛡️ SANDEKALA VPN\n\n" +
-    "Harga: 1 hari Rp1.000 • 7 hari Rp5.000 • 30 hari Rp10.000\n" +
+    "Harga: Rp10.000 / bulan\n" +
     "🎁 Trial gratis 30 menit (kuota 1 GB).\n" +
     "TOKO: " + (buka ? "🟢 BUKA" : "🔴 TUTUP") + "\n\n" +
     "Order lewat chat pribadi ya — klik tombol di bawah.";
