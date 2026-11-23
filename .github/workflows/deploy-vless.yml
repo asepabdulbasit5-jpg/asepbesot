@@ -1,0 +1,45 @@
+# Deploy VLESS pribadi ke Cloudflare — OTOMATIS tiap worker-vless.js di-push
+# ke main, plus manual dari tab Actions. Worker name sandekala-vless.
+# UUID dibaca dari GitHub Secret VLESS_UUID (bukan dari file ini).
+# Secrets yang dibutuhkan: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, VLESS_UUID.
+name: Deploy VLESS Pribadi
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - worker-vless.js
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Cek sintaks worker
+        run: node --check worker-vless.js
+
+      - name: Deploy ke Cloudflare Workers
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          VLESS_UUID: ${{ secrets.VLESS_UUID }}
+        run: |
+          cat > wrangler.toml <<EOF
+          name = "sandekala-vless"
+          main = "worker-vless.js"
+          compatibility_date = "2026-11-20"
+          [vars]
+          UUID = "$VLESS_UUID"
+          EOF
+          npx -y wrangler@latest deploy
