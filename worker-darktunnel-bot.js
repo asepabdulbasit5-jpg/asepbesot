@@ -827,7 +827,9 @@ async function siarkanUpdate(env, teks) {
 // Catatan bug untuk caption file hasil generate (dipakai generate utama
 // dan konfirmasi /tambahconfig). Return "" bila bug tidak dikenal.
 async function catatanBugUntuk(env, hasil) {
-  if (hasil.adaInject && hasil.bug) {
+  // (v2.9.21) Catatan bug tampil bila bug terdeteksi — tidak lagi
+  // digantung ke adaInject, karena config Xray kini tanpa inject.
+  if (hasil.bug) {
     const info = await cariBugGabungan(env, hasil.bug);
     if (info) {
       return "\n\n🐛 Bug terdeteksi: <code>" + escapeHtml(hasil.bug) + "</code> (" + info.operatorLabel + " — " + info.kategoriLabel + ")";
@@ -1329,10 +1331,10 @@ async function terapkanTemplateXrayMetode(env, cfg, template, bugAkun) {
     if (t.targetPort) v2.port = t.targetPort;
     v2.wsHeaderHost = wc;
     v2.serverNameIndication = wc;
-    const inj = pastikanInject(sub, wc, cfg.type);
-    inj.serverNameIndication = wc;
-    inj.mode = "DIRECT_SNI";
-    isiPayloadTemplate(inj, t.payload, v2.host, wc);
+    // (v2.9.21) Xray tanpa inject (terbukti: config manual WC tanpa
+    // inject konek, config bot ber-inject gagal). Hapus inject lama
+    // bila ada (mis. akun dari link darktunnel ber-inject).
+    delete sub.injectConfig;
     return cfg;
   }
 
@@ -1344,12 +1346,8 @@ async function terapkanTemplateXrayMetode(env, cfg, template, bugAkun) {
     if (t.targetPort) v2.port = t.targetPort;
     if (t.headerHost) v2.wsHeaderHost = t.headerHost;
     if (bug) v2.serverNameIndication = bug;
-    const butuh = !!(bug || t.payload || sub.injectConfig);
-    if (!butuh) return cfg;
-    const inj = pastikanInject(sub, bug, cfg.type);
-    inj.serverNameIndication = bug;
-    inj.mode = "DIRECT_SNI";
-    isiPayloadTemplate(inj, t.payload, v2.host, bug);
+    // (v2.9.21) Xray tanpa inject.
+    delete sub.injectConfig;
     return cfg;
   }
 
@@ -1365,12 +1363,8 @@ async function terapkanTemplateXrayMetode(env, cfg, template, bugAkun) {
       v2.wsHeaderHost = wc;
       v2.serverNameIndication = wc;
     }
-    const butuh = !!(wc || t.payload || sub.injectConfig);
-    if (!butuh) return cfg;
-    const inj = pastikanInject(sub, wc, cfg.type);
-    if (wc) inj.serverNameIndication = wc;
-    inj.mode = "DIRECT_SNI";
-    isiPayloadTemplate(inj, t.payload, v2.host, wc);
+    // (v2.9.21) Xray tanpa inject.
+    delete sub.injectConfig;
     return cfg;
   }
 
@@ -1386,10 +1380,8 @@ async function terapkanTemplateXrayMetode(env, cfg, template, bugAkun) {
     v2.wsHeaderHost = host;
     v2.serverNameIndication = sni;
     v2.transportNetwork = "Websocket";
-    const inj = pastikanInject(sub, sni, cfg.type);
-    inj.serverNameIndication = sni;
-    inj.mode = "DIRECT_SNI";
-    isiPayloadTemplate(inj, t.payload, v2.host, sni);
+    // (v2.9.21) Xray tanpa inject.
+    delete sub.injectConfig;
     return cfg;
   }
 
@@ -1397,16 +1389,8 @@ async function terapkanTemplateXrayMetode(env, cfg, template, bugAkun) {
   // PROXY_SNI bila SNI template terisi, else PROXY (tanpa SNI).
   if (m === "XRAY_PAYLOAD_PROXY" || m === "XRAY_PROXY") {
     const out = await terapkanTemplateXrayGenerik(env, cfg, template, bugAkun);
-    if (t.proxyHost) {
-      const adaInj = !!sub.injectConfig;
-      const inj = pastikanInject(sub, t.sni || "", cfg.type);
-      if (!adaInj) inj.payload = ""; // payload kosong (v2.9.7) — bukan default SSH aplikasi
-      inj.proxyHost = t.proxyHost;
-      if (t.proxyPort) inj.proxyPort = t.proxyPort;
-      if (t.sni) inj.mode = "PROXY_SNI";
-      else { inj.mode = "PROXY"; inj.serverNameIndication = ""; }
-      if (m === "XRAY_PROXY") inj.payload = ""; // metode ini tanpa payload (v2.9.7) — kosong, bukan default SSH
-    }
+    // (v2.9.21) Xray tanpa inject (generik sudah menghapusnya).
+    delete out[subKey].injectConfig;
     return out;
   }
 
@@ -1417,16 +1401,8 @@ async function terapkanTemplateXrayMetode(env, cfg, template, bugAkun) {
     if (t.targetHost) v2.host = t.targetHost;
     if (t.targetPort) v2.port = t.targetPort;
     if (t.sni) v2.serverNameIndication = t.sni;
-    const butuh = !!(t.proxyHost || t.sni || t.payload || sub.injectConfig);
-    if (!butuh) return cfg;
-    const inj = pastikanInject(sub, t.sni || "", cfg.type);
-    if (t.proxyHost) {
-      inj.proxyHost = t.proxyHost;
-      if (t.proxyPort) inj.proxyPort = t.proxyPort;
-    }
-    if (t.sni) { inj.mode = "PROXY_SNI"; inj.serverNameIndication = t.sni; }
-    else { inj.mode = "PROXY"; inj.serverNameIndication = ""; }
-    isiPayloadTemplate(inj, t.payload, v2.host, t.sni || "");
+    // (v2.9.21) Xray tanpa inject.
+    delete sub.injectConfig;
     return cfg;
   }
 
@@ -1462,32 +1438,13 @@ async function terapkanTemplateXrayGenerik(env, cfg, template, bugAkun) {
   // (v2.serverNameIndication) = server; inject SNI = bug — target
   // template (front/bug) > bug akun. Bila tidak ada bug sama sekali,
   // inject SNI jatuh ke SNI template supaya inject tidak kehilangan SNI.
-  const bugAsli = t.targetHost || bugAkun || v2.serverNameIndication || null;
-  const sniEfektif = await sniEfektifTemplate(env, bugAsli, t.sni || v2.serverNameIndication || hostAkun);
-  const slowdns = xraySlowdnsAktif(template);
-  const butuhInject = !!(sniEfektif || t.payload || slowdns);
-  let inj = cfg[subKey].injectConfig;
-  if (butuhInject && !inj) {
-    inj = injectConfigAktif(sniEfektif || "", cfg.type, {
-      dnstt: slowdns ? { udpDnsHost: t.udpDnsHost, udpDnsPort: t.udpDnsPort, serverName: t.nameServer, publicKey: t.publicKey } : undefined,
-    });
-    cfg[subKey].injectConfig = inj;
-  }
-  if (inj) {
-    if (sniEfektif) inj.serverNameIndication = sniEfektif;
-    // Template dipakai: payload kosong = `""` (v2.9.7, aturan v2.8.2
-    // dikembalikan: omit di v2.9.5 membuat aplikasi isi ulang payload
-    // default SSH-nya sendiri).
-    if (t.payload) inj.payload = isiPlaceholderPayload(t.payload, v2.host, sniEfektif);
-    else inj.payload = "";
-    if (slowdns) {
-      inj.mode = "DNSTT";
-      inj.dnsttUdpDnsHost = t.udpDnsHost || "1.1.1.1";
-      inj.dnsttUdpDnsPort = t.udpDnsPort || 53;
-      inj.dnsttServerName = t.nameServer;
-      inj.dnsttPublicKey = t.publicKey;
-    }
-  }
+  // (v2.9.21) Xray TANPA inject: SNI/bug sudah dibawa field V2Ray
+  // (serverNameIndication / wsHeaderHost); inject yang dipasang bot
+  // bikin config Xray gagal konek (terbukti di template WC vs config
+  // manual). Hapus inject lama bila ada (mis. akun dari link
+  // darktunnel ber-inject). Xray over SlowDNS (DNSTT) ikut nonaktif
+  // sementara — butuh uji konek terpisah bila mau dihidupkan lagi.
+  delete cfg[subKey].injectConfig;
   return cfg;
 }
 
@@ -1600,7 +1557,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.20";
+const VERSI_BOT = "v2.9.21";
 
 const PESAN_START =
   "👋 <b>Selamat datang di Generator Config Dark Tunnel</b>\n\n" +
@@ -1762,7 +1719,9 @@ function bangunV2ray(type, name, v2, bug) {
   if (v2.wsHeaderHost) cfg.wsHeaderHost = v2.wsHeaderHost;
   if (v2.grpcServiceName) cfg.grpcServiceName = v2.grpcServiceName;
   const sub = { v2rayConfig: cfg };
-  if (bug) sub.injectConfig = injectConfigAktif(bug, type);
+  // (v2.9.21) Xray TIDAK pakai inject: config manual yang konek di
+  // aplikasi tidak punya injectConfig; inject yang dipasang bot bikin
+  // config Xray gagal konek. Bug tetap dibawa field V2Ray (SNI/header).
   return { type, name, [key]: sub };
 }
 
@@ -2166,16 +2125,23 @@ export async function parsePesan(teks, opts = {}) {
   }
   const pakaiWc = !!(infoBug && dukungWildcard(infoBug.note));
 
-  // 4) Terapkan inject ke config Xray bila ada bug (SNI link tetap
-  //    jadi TLS SNI-nya; inject terpisah di injectConfig).
-  //    Mode WC: SNI inject = bug + "." + host server config itu.
-  if (bug) {
-    for (const c of configs) {
-      const subKey = ["vmessTunnelConfig", "vlessTunnelConfig", "trojanTunnelConfig", "shadowsocksTunnelConfig"].find((k) => c[k]);
-      if (subKey && !c[subKey].injectConfig) {
-        const hostServer = c[subKey].v2rayConfig?.host || "";
-        const bugEfektif = pakaiWc ? hostWildcard(bug, hostServer) : bug;
-        c[subKey].injectConfig = injectConfigAktif(bugEfektif, c.type);
+  // 4) (v2.9.21) Xray TANPA inject: inject yang dipasang bot bikin
+  //    config Xray gagal konek (terbukti di template WC vs config
+  //    manual). Hapus inject lama bila ada (mis. akun dari link
+  //    darktunnel ber-inject). Mode WC: SNI/header V2Ray = bug + "."
+  //    + host server (persis config manual yang konek); selain WC,
+  //    SNI V2Ray dibiarkan (link aslinya) supaya config tetap konek
+  //    langsung.
+  for (const c of configs) {
+    const subKey = ["vmessTunnelConfig", "vlessTunnelConfig", "trojanTunnelConfig", "shadowsocksTunnelConfig"].find((k) => c[k]);
+    if (!subKey) continue;
+    delete c[subKey].injectConfig;
+    if (bug && pakaiWc) {
+      const hostServer = c[subKey].v2rayConfig?.host || "";
+      const wc = hostWildcard(bug, hostServer);
+      if (wc) {
+        c[subKey].v2rayConfig.serverNameIndication = wc;
+        c[subKey].v2rayConfig.wsHeaderHost = wc;
       }
     }
   }
