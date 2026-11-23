@@ -1,7 +1,8 @@
 // SANDEKALA VLESS — Cloudflare Worker proxy VLESS-over-WebSocket pribadi.
 // Versi baru yang disederhanakan dari proyek lama besot.eu.cc (bukan restore).
 // HANYA proxy VLESS + status teks. Tanpa signup, panel admin, KV, rate limit,
-// sponsor gate, atau halaman HTML. UUID diambil dari env var `UUID`.
+// sponsor gate, atau halaman HTML. UUID diambil dari env var `UUID` (Asep)
+// dan `UUID2` (istri) — keduanya diterima, jadi masing-masing punya UUID sendiri.
 // Deploy: wrangler / GitHub Actions, worker name `sandekala-vless`.
 //
 // TIDAK ADA self-fetch (`return fetch(req)`) di file ini — pola itu yang
@@ -21,6 +22,13 @@ function formatIpv6(b) {
   const parts = [];
   for (let i = 0; i < 16; i += 2) parts.push(((b[i] << 8) | b[i + 1]).toString(16));
   return parts.join(':');
+}
+
+// UUID dikenali bila sama dengan UUID (Asep) atau UUID2 (istri).
+function uuidDikenali(env, uuidReq) {
+  const u = String(uuidReq || '').toLowerCase();
+  return (env.UUID && u === String(env.UUID).toLowerCase())
+    || (env.UUID2 && u === String(env.UUID2).toLowerCase());
 }
 
 export default {
@@ -43,7 +51,7 @@ export default {
     if (url.pathname !== '/') return new Response('Not found', { status: 404 });
 
     // Tanpa UUID di env, semua koneksi ditolak.
-    if (!env.UUID) return new Response('UUID tidak dikonfigurasi', { status: 500 });
+    if (!env.UUID && !env.UUID2) return new Response('UUID tidak dikonfigurasi', { status: 500 });
 
     const [client, server] = new WebSocketPair();
     server.accept();
@@ -97,7 +105,7 @@ async function tanganiVless(ws, env) {
         // [version:1][uuid:16][addonLen:1][addon][command:1][port:2][atyp:1][address]
         if (data.length < 19) throw new Error('header VLESS terlalu pendek');
         const uuidReq = uuidBytesKeString(data.slice(1, 17));
-        if (uuidReq.toLowerCase() !== String(env.UUID).toLowerCase()) {
+        if (!uuidDikenali(env, uuidReq)) {
           throw new Error('UUID tidak cocok');
         }
         const addonLen = data[17];
