@@ -2267,7 +2267,7 @@ function portSingkat(grid) {
 
 // Render config SSH FORMAT RINGKAS SANDEKALAVPN (22 Nov 2026, spek
 // Asep): header SANDEKALAVPN, Informasi Akun (Username/Password),
-// Domain & Koneksi (Domain/Server/Pubkey/DNS + satu baris Port),
+// Domain & Koneksi (Domain/Server/Pubkey/Name Server/DNS + satu baris Port),
 // Format Account (WS/TLS port pertama saja). Tanpa seksi Payload,
 // Squid/OpenVPN/SNI/Path, dan tanpa Masa Aktif (Berlaku sampai /
 // Sisa waktu ditempel sebagai baris biasa oleh ambilConfigDariData
@@ -2293,6 +2293,7 @@ function renderSSH(entri, o) {
   if (domain) koneksi.push(baris("Domain", domain));
   if (serverVal) koneksi.push(baris("Server", serverVal));
   if (peta.has("Public Key")) koneksi.push(baris("Pubkey", peta.get("Public Key")));
+  if (peta.has("Name Server")) koneksi.push(baris("Name Server", peta.get("Name Server")));
   if (domain) koneksi.push(baris("DNS", domain));
   const portLine = portSingkat(peta.get("Port"));
   if (portLine) koneksi.push((koneksi.length ? "\n" : "") + baris("Port", portLine));
