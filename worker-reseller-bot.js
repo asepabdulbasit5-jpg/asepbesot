@@ -167,6 +167,17 @@ const SERVERS = [
   { kode: "binet",     nama: "CLOUDFRONT BINET NEO",          serverId: "01a11353-0afc-7193-8c02-08d3de1a50b8", protocols: ["ssh", "vmess", "vless", "trojan"], used: 85, limit: 200 },
   { kode: "ati",       nama: "CLOUDFRONT (ATI)",              serverId: "01a133f2-e422-73e9-bc1d-3d3621d704c6", protocols: ["ssh", "vmess", "vless", "trojan"], used: 52, limit: 250 },
 ];
+// Name Server SlowDNS per domain server (25 Nov 2026).
+// API Nadia TIDAK mengirim nameserver di respons order — nilainya
+// dari website Nadia (detail akun), beda tiap server. renderSSH
+// memakai tabel ini sebagai fallback kalau respons API tidak membawa
+// Name Server. Tambah entri baru ke sini kalau ada NS server lain.
+// CATATAN: nsbiz.vpnstore28.my.id dicek DNS 25 Nov 2026 (Cloudflare +
+// Google DoH) = NXDOMAIN, tidak resolve publik — nilai resmi Nadia,
+// tapi SlowDNS server ini baru jalan kalau Nadia memperbaiki DNS-nya.
+const NS_PER_DOMAIN = {
+  "vip.sshvpn.web.id": "nsbiz.vpnstore28.my.id", // SSH SELOW DNS & UDP MINI (ISP Biznet Gio, Bogor)
+};
 // Alur beli sekarang: /beli (atau tombol 🛒 Beli VPN) -> pilih
 // SERVER -> pilih protokol -> pilih durasi -> ketik username sendiri
 // (atau "-" untuk acak) -> order dibuat. Username dibuatkan Nadia
@@ -2268,6 +2279,7 @@ function portSingkat(grid) {
 // Render config SSH FORMAT RINGKAS SANDEKALAVPN (22 Nov 2026, spek
 // Asep): header SANDEKALAVPN, Informasi Akun (Username/Password),
 // Domain & Koneksi (Domain/Server/Pubkey/Name Server/DNS + satu baris Port),
+// Name Server dari API kalau ada, kalau tidak dari tabel NS_PER_DOMAIN,
 // Format Account (WS/TLS port pertama saja). Tanpa seksi Payload,
 // Squid/OpenVPN/SNI/Path, dan tanpa Masa Aktif (Berlaku sampai /
 // Sisa waktu ditempel sebagai baris biasa oleh ambilConfigDariData
@@ -2293,7 +2305,10 @@ function renderSSH(entri, o) {
   if (domain) koneksi.push(baris("Domain", domain));
   if (serverVal) koneksi.push(baris("Server", serverVal));
   if (peta.has("Public Key")) koneksi.push(baris("Pubkey", peta.get("Public Key")));
+  // Name Server: dari respons API kalau ada; kalau tidak, fallback ke
+  // tabel NS_PER_DOMAIN (API Nadia tidak mengirim NS).
   if (peta.has("Name Server")) koneksi.push(baris("Name Server", peta.get("Name Server")));
+  else if (domain && NS_PER_DOMAIN[domain]) koneksi.push(baris("Name Server", NS_PER_DOMAIN[domain]));
   if (domain) koneksi.push(baris("DNS", domain));
   const portLine = portSingkat(peta.get("Port"));
   if (portLine) koneksi.push((koneksi.length ? "\n" : "") + baris("Port", portLine));
