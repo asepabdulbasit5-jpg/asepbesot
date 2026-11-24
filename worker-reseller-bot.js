@@ -127,7 +127,9 @@ const PAKET = [
   { kode: "30hari", nama: "VPN 30 hari", harga: 10000, durasiHari: 30, nadiaType: "month", nadiaDuration: 1 },
 ];
 
-// Server yang bisa dipilih pembeli — SEMUA 21 server Nadia
+// Server yang bisa dipilih pembeli — SEMUA 22 server Nadia
+// 24 Nov 2026 sore (/ceknadia): SSH SELOW DNS & UDP MINI KEMBALI
+// di Nadia (ID sama) — dimasukkan lagi ke bot.
 // 24 Nov 2026 (/ceknadia): SSH SELOW DNS & UDP MINI dihapus
 // (hilang dari Nadia).
 // 20 Nov 2026 (/ceknadia): LITE & LITE PRO dihapus (hilang dari
@@ -142,6 +144,7 @@ const PAKET = [
 // Alur beli: /beli -> pilih SERVER -> pilih protokol ->
 // pilih durasi -> ketik username (atau "-") -> order dibuat.
 const SERVERS = [
+  { kode: "slowmini",  nama: "SSH SELOW DNS & UDP MINI",      serverId: "01a1a126-b5c7-710c-953a-68e8d0ea6e98", protocols: ["ssh"], used: 162, limit: 250 },
   { kode: "cloudmat",  nama: "CLOUDMATIKA",                   serverId: "019ecafe-9826-7339-8939-8c6c03daaac5", protocols: ["ssh", "vmess", "vless", "trojan"], used: 149, limit: 155 },
   { kode: "sgcloud",   nama: "SGCLOUDHOST",              serverId: "019d416c-91ab-70cf-ae93-98251456366e", protocols: ["ssh", "vmess", "vless", "trojan"], used: 124, limit: 127 },
   { kode: "rajasa",    nama: "PT.RAJASA — PENUH",             serverId: "01a03c0a-b07a-736c-a192-a3be583503ae", protocols: ["ssh", "vmess", "vless", "trojan"], penuh: true, used: 100, limit: 100 },
@@ -1052,7 +1055,7 @@ function labelServer(s, live) {
   return nama;
 }
 
-// Langkah 1 beli: pilih server dulu (semua 21 server Nadia).
+// Langkah 1 beli: pilih server dulu (semua 22 server Nadia).
 // Server penuh tampil tapi TIDAK bisa diklik untuk lanjut —
 // tombolnya pakai callback "penuh:" yang cuma menampilkan
 // peringatan pop-up "server penuh, pilih server lain".
