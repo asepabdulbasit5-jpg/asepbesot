@@ -261,10 +261,11 @@ export default {
   },
 
   // ---- Cron Trigger (v2.9.14 reseller) ----
-  // Jadwal di wrangler.toml: ["5 * * * *", "0 0 * * *"].
-  // - Tiap jam lewat 5 menit: cek grup sepi -> roast autodark
-  //   ("brisik banget sih lu!") 5 menit sesudah nudge autodark.
-  // - 07:00 WIB (00:00 UTC, menit 0): auto-cek Nadia seperti biasa.
+  // Jadwal di wrangler.toml (live, deploy-worker.yml): ["0 0 * * *"] saja.
+  // - 07:00 WIB (00:00 UTC): auto-cek Nadia + cek grup sepi -> roast
+  //   autodark ("brisik banget sih lu!") sesudah nudge autodark.
+  //   (Koreksi 24 Nov 2026: cron tiap jam "5 * * * *" di komentar lama
+  //   TIDAK PERNAH live — jadi cron bukan biang boros KV.)
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
       const d = new Date(event.scheduledTime || Date.now());
@@ -275,6 +276,26 @@ export default {
   },
 };
 
+// ---- Hemat KV (live sejak 24 Nov 2026) ----
+// Workers memakai ulang isolate yang sama untuk banyak request, jadi
+// cache memori ini memangkas baca KV yang berulang tanpa ubah perilaku:
+// - TOKO_BUKA: dibaca ulang tiap langkah order (sampai ~10x per order).
+//   Cache 60 detik; setToko() langsung mengosongkan cache di isolate ini.
+//   Isolate lain bisa telat maks. 60 detik melihat buka/tutup.
+// - Pengguna/grup yang sudah dikenal: tadinya GET KV di SETIAP pesan.
+//   Setelah sekali dikenal, isolate ini tidak GET lagi (Set dibatasi
+//   5000 entri, lalu dikosongkan & dipelajari ulang).
+// - Aktivitas grup: tadinya GET tiap pesan + PUT tiap 5 menit. Sekarang
+//   throttle dicek di memori dulu; KV cuma disentuh kalau sudah >5 menit
+//   sejak PUT terakhir di isolate ini.
+// - Bersihkan order kedaluarsa: tadinya LIST + GET semua order tiap kali
+//   pembeli cek status. Sekarang maks. 1x per jam per isolate.
+const cacheToko = { nilai: null, ts: 0 };
+const penggunaDikenal = new Set();
+const grupDikenal = new Set();
+const aktivitasGrupTerakhir = new Map();
+let bersihOrderTerakhir = 0;
+
 // ---- Toko buka/tutup ala warung (19 Nov 2026) ----
 // Status disimpan di KV ORDERS kunci "TOKO_BUKA": "buka" / "tutup".
 // Default: buka (kalau kunci belum ada). Saat TUTUP, pembeli hanya
@@ -284,10 +305,14 @@ export default {
 // /buka dan /tutup. Pembayaran kini MANUAL: admin cek Dana lalu
 // /konfirmasi ORDER_ID (MacroDroid sudah tidak dipakai).
 async function tokoBuka(env) {
+  if (cacheToko.nilai !== null && Date.now() - cacheToko.ts < 60000) return cacheToko.nilai;
   const v = await env.ORDERS.get("TOKO_BUKA").catch(() => null);
-  return v !== "tutup";
+  const buka = v !== "tutup";
+  cacheToko.nilai = buka; cacheToko.ts = Date.now();
+  return buka;
 }
 async function setToko(env, buka) {
+  cacheToko.nilai = buka; cacheToko.ts = Date.now();
   await env.ORDERS.put("TOKO_BUKA", buka ? "buka" : "tutup");
 }
 function adalahAdmin(env, chatId) { return String(chatId) === String(env.ADMIN_CHAT_ID); }
@@ -315,10 +340,13 @@ async function siarkanStatusToko(env, buka) {
 // pembeli saja. Disimpan di KV ORDERS kunci "USER:<chatId>".
 async function catatPengguna(env, chatId, nama) {
   if (!chatId) return;
+  if (penggunaDikenal.has(String(chatId))) return;
   const kunci = "USER:" + chatId;
   const ada = await env.ORDERS.get(kunci).catch(() => null);
-  if (ada) return;
+  if (ada) { if (penggunaDikenal.size > 5000) penggunaDikenal.clear(); penggunaDikenal.add(String(chatId)); return; }
   await env.ORDERS.put(kunci, JSON.stringify({ nama: nama || null, pertama: Date.now() }));
+  if (penggunaDikenal.size > 5000) penggunaDikenal.clear();
+  penggunaDikenal.add(String(chatId));
 }
 
 async function daftarSemuaPengguna(env) {
@@ -341,10 +369,13 @@ async function daftarSemuaPengguna(env) {
 // - Kata tertentu memicu balasan (cooldown 60 detik per grup+aksi).
 async function catatGrup(env, chatId) {
   if (!chatId) return;
+  if (grupDikenal.has(String(chatId))) return;
   const kunci = "GRUP:" + chatId;
   const ada = await env.ORDERS.get(kunci).catch(() => null);
-  if (ada) return;
+  if (ada) { if (grupDikenal.size > 5000) grupDikenal.clear(); grupDikenal.add(String(chatId)); return; }
   await env.ORDERS.put(kunci, "1");
+  if (grupDikenal.size > 5000) grupDikenal.clear();
+  grupDikenal.add(String(chatId));
 }
 async function daftarSemuaGrup(env) {
   const list = await env.ORDERS.list({ prefix: "GRUP:" });
@@ -358,10 +389,13 @@ async function daftarSemuaGrup(env) {
 async function catatAktivitasGrup(env, chatId) {
   if (!chatId) return;
   try {
+    const terakhirMemori = aktivitasGrupTerakhir.get(String(chatId)) || 0;
+    if (terakhirMemori && Date.now() - terakhirMemori < 5 * 60 * 1000) return;
     const kunci = "GRUP_AKTIF:" + chatId;
     const lama = Number(await env.ORDERS.get(kunci).catch(() => null)) || 0;
-    if (lama && Date.now() - lama < 5 * 60 * 1000) return;
+    if (lama && Date.now() - lama < 5 * 60 * 1000) { aktivitasGrupTerakhir.set(String(chatId), lama); return; }
     await env.ORDERS.put(kunci, String(Date.now()));
+    aktivitasGrupTerakhir.set(String(chatId), Date.now());
   } catch { /* abaikan */ }
 }
 // Roast sepi (sekali per masa sepi): grup sepi > 6 jam -> sandekala
@@ -1352,6 +1386,11 @@ async function tampilkanTrialServer(env, chatId, halaman, messageId) {
 // punya jadwal sendiri, jadi pembersihan jalan saat ada yang melihat
 // daftar. Mengembalikan jumlah yang dihapus.
 async function bersihkanOrderKedaluarsa(env) {
+  // Hemat KV: LIST + GET semua order tadinya jalan tiap kali pembeli cek
+  // status. Order kedaluarsa baru dihapus setelah 24 jam, jadi bersih-bersih
+  // 1x per jam per isolate sudah cukup.
+  if (Date.now() - bersihOrderTerakhir < 3600 * 1000) return 0;
+  bersihOrderTerakhir = Date.now();
   const list = await env.ORDERS.list({ prefix: "ORD-" });
   let dihapus = 0;
   const batas = Date.now() - ORDER_HAPUS_MS;
