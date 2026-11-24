@@ -127,7 +127,9 @@ const PAKET = [
   { kode: "30hari", nama: "VPN 30 hari", harga: 10000, durasiHari: 30, nadiaType: "month", nadiaDuration: 1 },
 ];
 
-// Server yang bisa dipilih pembeli — SEMUA 22 server Nadia
+// Server yang bisa dipilih pembeli — SEMUA 21 server Nadia
+// 24 Nov 2026 (/ceknadia): SSH SELOW DNS & UDP MINI dihapus
+// (hilang dari Nadia).
 // 20 Nov 2026 (/ceknadia): LITE & LITE PRO dihapus (hilang dari
 // Nadia); SGCLOUDHOST & CLOUDFRONT NUSA diganti nama mengikuti Nadia.
 // (19 Nov 2026, atas permintaan Asep). Data dari katalog
@@ -136,13 +138,10 @@ const PAKET = [
 // Catatan: 4 server ditandai PENUH (kapasitas 100/100) — tetap
 // ditampilkan sesuai permintaan, tapi order di sana kemungkinan
 // ditolak Nadia; pembeli disarankan pilih yang lain.
-// 1 server SSH SELOW hanya dukung protokol SSH — tombol protokol
-// otomatis disaring per server, jadi pembeli tidak bisa salah pilih.
 // Server CLOUDFRONT NUSA tidak dukung VLESS.
 // Alur beli: /beli -> pilih SERVER -> pilih protokol ->
 // pilih durasi -> ketik username (atau "-") -> order dibuat.
 const SERVERS = [
-  { kode: "slowmini",  nama: "SSH SELOW DNS & UDP MINI",      serverId: "01a1a126-b5c7-710c-953a-68e8d0ea6e98", protocols: ["ssh"], used: 162, limit: 250 },
   { kode: "cloudmat",  nama: "CLOUDMATIKA",                   serverId: "019ecafe-9826-7339-8939-8c6c03daaac5", protocols: ["ssh", "vmess", "vless", "trojan"], used: 149, limit: 155 },
   { kode: "sgcloud",   nama: "SGCLOUDHOST",              serverId: "019d416c-91ab-70cf-ae93-98251456366e", protocols: ["ssh", "vmess", "vless", "trojan"], used: 124, limit: 127 },
   { kode: "rajasa",    nama: "PT.RAJASA — PENUH",             serverId: "01a03c0a-b07a-736c-a192-a3be583503ae", protocols: ["ssh", "vmess", "vless", "trojan"], penuh: true, used: 100, limit: 100 },
@@ -521,8 +520,8 @@ async function handleTelegram(env, update) {
     if (data.startsWith("trypage:")) { await tampilkanDaftarServer(env, cb.from.id, "trial", parseInt(data.slice(8), 10) || 0, cb.message?.message_id); return; }
     if (data.startsWith("server:")) {
       // Langkah 2: pilih protokol untuk server yang dipilih.
-      // Protokol disaring per server: server SSH SELOW cuma tampil
-      // SSH, CLOUDFRONT NUSA tidak tampil VLESS, sisanya semua.
+      // Protokol disaring per server: CLOUDFRONT NUSA tidak tampil
+      // VLESS, sisanya semua.
       const serverKode = data.slice(7);
       const server = SERVERS.find((x) => x.kode === serverKode);
       if (!(await tokoBuka(env)) && !adalahAdmin(env, cb.from.id)) { await jawabAlert(env, cb.id, PESAN_TUTUP); return; }
@@ -1019,7 +1018,7 @@ function labelServer(s, live) {
   return nama;
 }
 
-// Langkah 1 beli: pilih server dulu (semua 22 server Nadia).
+// Langkah 1 beli: pilih server dulu (semua 21 server Nadia).
 // Server penuh tampil tapi TIDAK bisa diklik untuk lanjut —
 // tombolnya pakai callback "penuh:" yang cuma menampilkan
 // peringatan pop-up "server penuh, pilih server lain".
