@@ -32,8 +32,8 @@
 //  Fitur tambahan:
 //   - /bug: daftar bug host per operator/kategori (database dari grup
 //     SANDEKALA, lihat BUG_DB) — pilih lewat tombol inline.
-//   - Akun SSH+bug: bot tanya dulu metode payload (WS standar /
-//     SSH+payload / Enhanced / Direct) sebelum generate.
+//   - Akun SSH+bug: langsung generate, TANPA pilihan metode payload
+//     (v2.9.28 — SSH+SNI harus tanpa payload biar konek).
 //   - Kalau akun tanpa bug/SNI, hasil generate menyarankan /bug;
 //     kalau bug-nya dikenal di database, operator + kategorinya disebut.
 //   - Parser SSH kenal format `Ssh: host:port@user:pass`, label
@@ -1596,7 +1596,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.27";
+const VERSI_BOT = "v2.9.28";
 
 const PESAN_START =
   "👋 <b>Selamat datang di Generator Config Dark Tunnel</b>\n\n" +
@@ -1734,6 +1734,12 @@ function injectConfigAktif(bug, service, opts = {}) {
       .replaceAll("[ua]", UA_STANDAR)
       .replaceAll("[bug]", bug);
   }
+  // (v2.9.28) DIRECT_SNI tanpa payload — aturan Asep 26 Nov 2026:
+  // SETIAP SSH+SNI harus tanpa payload biar konek (payload HTTP ke
+  // server SSH bikin handshake gagal; terbukti 2 akun konek setelah
+  // payload dikosongkan di template). DNSTT tetap pakai payload;
+  // jalur template menimpa payload ini lagi via isiPayloadSshTemplate.
+  if (!opts.dnstt) payload = "";
   const inj = {
     enabled: true,
     // SlowDNS/DNSTT (v2.7): bila opts.dnstt terisi (name server +
@@ -3200,18 +3206,13 @@ async function handlePesanAkun(env, chatId, teks, opts = {}) {
     return;
   }
 
-  // Akun SSH + bug: tanya dulu metode payload-nya (kecuali metode
-  // sudah dipilih lewat tombol). Akun Xray langsung generate.
-  if (!opts.metodePayload) {
-    const adaSshBug = hasil.configs.some((c) => c.type === "SSH" && c.sshTunnelConfig?.injectConfig);
-    if (adaSshBug) {
-      pendingMetode.set(chatId, { teks, ts: Date.now() });
-      await sendTelegram(env, chatId,
-        "🔧 Akun SSH + bug terdeteksi. Pilih metode payload:",
-        keyboardMetodePayload());
-      return;
-    }
-  }
+  // (v2.9.28) Akun SSH + bug LANGSUNG generate — TIDAK ada lagi
+  // pilihan metode payload (aturan Asep 26 Nov 2026: SSH+SNI harus
+  // tanpa payload biar konek; prompt metode dihapus, payload DIRECT_SNI
+  // selalu ""). Akun Xray juga langsung generate seperti sebelumnya.
+  // (Sistem metode — pendingMetode, keyboardMetodePayload, handler
+  // callback "metode:" — dibiarkan: tombol lama di riwayat chat yang
+  // diketuk dijawab "kedaluwarsa" oleh handler, tanpa crash.)
 
   // Sukses: 1 config = 1 file .dark (tanpa link teks di chat).
   // Caption tiap file: nama config + rincian + cara impor + catatan bug.
