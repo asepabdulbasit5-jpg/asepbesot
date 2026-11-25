@@ -422,13 +422,44 @@ async function kvList(env, prefix) {
   } catch { return []; }
 }
 
+// ---- Hemat KV (v2.9.22, 25 Nov 2026) ----
+// Cloudflare kirim peringatan 50% jatah KV harian 2 hari berturut-turut
+// (24 & 25 Nov 2026); patch hemat di bot reseller (24 Nov) tidak cukup,
+// jadi pola yang sama dipasang di sini. Cache memori per-isolate (Workers
+// memakai ulang isolate yang sama untuk banyak request), tanpa ubah
+// perilaku yang terlihat pengguna:
+//   - USER: / KBRM: yang sudah dikenal diingat di Set (batas 5000 entri)
+//     — tidak GET lagi di isolate itu. Kedua kunci ini tulis-sekali
+//     (tidak pernah diubah), jadi Set tidak bisa basi.
+//   - Aktivitas grup: throttle 5 menit dicek di memori dulu.
+//   - Roast: 1 LIST prefix "ROAST_" (dulu 2 LIST: BUKA + TUTUP).
+//   - Nudge sepi: maks. 1x/jam per akun (dulu tiap cron 10 menit),
+//     dijaga kunci KV CRON_SEPI_TS (GET murah + PUT hanya saat jalan).
+//   - SENGAJA TIDAK di-cache: daftar template & BUGS (ditulis langsung
+//     ke KV di beberapa jalur; cache memori bisa basi & bikin tes rapuh).
+const penggunaDikenal = new Set();
+const kbrmDikenal = new Set();
+const aktivitasGrupTerakhir = new Map();
+const BATAS_SET_DIKEANAL = 5000;
+
+// Reset cache hemat KV (dipakai tes: tiap env tes = KV baru, jadi cache
+// per-isolate harus dingin lagi; di produksi tidak pernah dipanggil).
+export function resetCacheHematKv() {
+  penggunaDikenal.clear();
+  kbrmDikenal.clear();
+  aktivitasGrupTerakhir.clear();
+}
+
 // Catat pengirim DM sekali saja (USER:<chatId> = {nama, pertama}).
 async function catatPengguna(env, chatId, nama) {
   if (!env.DATA) return;
   try {
     const key = "USER:" + chatId;
-    if (await env.DATA.get(key)) return;
+    if (penggunaDikenal.has(String(chatId))) return;
+    if (await env.DATA.get(key)) { penggunaDikenal.add(String(chatId)); if (penggunaDikenal.size > BATAS_SET_DIKEANAL) penggunaDikenal.clear(); return; }
     await env.DATA.put(key, JSON.stringify({ nama: nama || "", pertama: tanggalWib() }));
+    penggunaDikenal.add(String(chatId));
+    if (penggunaDikenal.size > BATAS_SET_DIKEANAL) penggunaDikenal.clear();
   } catch { /* abaikan */ }
 }
 
@@ -1557,7 +1588,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.21";
+const VERSI_BOT = "v2.9.22";
 
 const PESAN_START =
   "👋 <b>Selamat datang di Generator Config Dark Tunnel</b>\n\n" +
@@ -2977,9 +3008,14 @@ async function catatAktivitasGrup(env, chatId) {
   if (!env.DATA) return;
   try {
     const kunci = "GRUP_AKTIF:" + chatId;
+    // (v2.9.22) throttle dicek di memori dulu — pesan grup yang ramai
+    // tidak lagi GET KV tiap pesan.
+    const terakhirMemori = aktivitasGrupTerakhir.get(String(chatId));
+    if (terakhirMemori && Date.now() - terakhirMemori < 5 * 60 * 1000) return;
     const lama = Number(await env.DATA.get(kunci).catch(() => null)) || 0;
-    if (lama && Date.now() - lama < 5 * 60 * 1000) return;
+    if (lama && Date.now() - lama < 5 * 60 * 1000) { aktivitasGrupTerakhir.set(String(chatId), lama); return; }
     await env.DATA.put(kunci, String(Date.now()));
+    aktivitasGrupTerakhir.set(String(chatId), Date.now());
   } catch { /* abaikan */ }
 }
 
@@ -2993,23 +3029,34 @@ async function catatAktivitasGrup(env, chatId) {
 export async function cekRoastSandekala(env) {
   if (!env.DATA || !env.BOT_TOKEN) return;
   const sekarang = Date.now();
-  for (const prefix of ["ROAST_BUKA:", "ROAST_TUTUP:"]) {
-    let daftar;
-    try { daftar = await env.DATA.list({ prefix }); } catch { continue; }
-    for (const key of daftar.keys || []) {
-      const chatId = key.name.slice(prefix.length);
-      let ts = 0;
-      try { ts = Number(await env.DATA.get(key.name)) || 0; } catch { /* abaikan */ }
-      try { await env.DATA.delete(key.name); } catch { /* abaikan */ }
-      if (!ts || sekarang - ts > 30 * 60 * 1000) continue; // basi, buang diam-diam
-      const teks = prefix === "ROAST_BUKA:" ? "kemana aja lu? niat jualan gak sih?" : "wkwkwk bot kok tutup njng!";
-      await sendTelegram(env, Number(chatId), teks);
-    }
+  // (v2.9.22) 1 LIST prefix "ROAST_" untuk BUKA + TUTUP sekaligus
+  // (dulu 2 LIST) — hemat jatah LIST KV harian (cuma 1000/hari).
+  let daftar;
+  try { daftar = await env.DATA.list({ prefix: "ROAST_" }); } catch { return; }
+  for (const key of daftar.keys || []) {
+    const prefix = key.name.startsWith("ROAST_BUKA:") ? "ROAST_BUKA:" : (key.name.startsWith("ROAST_TUTUP:") ? "ROAST_TUTUP:" : null);
+    if (!prefix) continue;
+    const chatId = key.name.slice(prefix.length);
+    let ts = 0;
+    try { ts = Number(await env.DATA.get(key.name)) || 0; } catch { /* abaikan */ }
+    try { await env.DATA.delete(key.name); } catch { /* abaikan */ }
+    if (!ts || sekarang - ts > 30 * 60 * 1000) continue; // basi, buang diam-diam
+    const teks = prefix === "ROAST_BUKA:" ? "kemana aja lu? niat jualan gak sih?" : "wkwkwk bot kok tutup njng!";
+    await sendTelegram(env, Number(chatId), teks);
   }
 }
 
 export async function cekGrupSepi(env) {
   if (!env.DATA || !env.BOT_TOKEN) return;
+  // (v2.9.22) Nudge sepi cukup 1x/jam — grup sepi > 6 jam tidak butuh
+  // dicek tiap cron 10 menit. Dijaga kunci KV CRON_SEPI_TS (GET murah;
+  // PUT hanya saat jalan) supaya tetap 1x/jam walau banyak isolate.
+  // Hemat: LIST GRUP_AKTIF: dari 144x/hari jadi 24x/hari.
+  try {
+    const jalanTerakhir = Number(await env.DATA.get("CRON_SEPI_TS").catch(() => null)) || 0;
+    if (jalanTerakhir && Date.now() - jalanTerakhir < 3600 * 1000) return;
+    await env.DATA.put("CRON_SEPI_TS", String(Date.now()));
+  } catch { /* abaikan, lanjut cek seperti biasa */ }
   let daftar;
   try { daftar = await env.DATA.list({ prefix: "GRUP_AKTIF:" }); } catch { return; }
   const sekarang = Date.now();
@@ -3032,13 +3079,17 @@ export async function cekGrupSepi(env) {
 async function hapusKeyboardBawahSekali(env, chatId) {
   if (!env.DATA) return;
   try {
-    if (await env.DATA.get("KBRM:" + chatId)) return;
+    // (v2.9.22) KBRM tulis-sekali: yang sudah dikenal tidak di-GET lagi.
+    if (kbrmDikenal.has(String(chatId))) return;
+    if (await env.DATA.get("KBRM:" + chatId)) { kbrmDikenal.add(String(chatId)); if (kbrmDikenal.size > BATAS_SET_DIKEANAL) kbrmDikenal.clear(); return; }
     await telegramApi(env, "sendMessage", {
       chat_id: chatId,
       text: "Tombol ▶️ Start di bawah sudah dihapus.",
       reply_markup: { remove_keyboard: true },
     });
     await env.DATA.put("KBRM:" + chatId, "1");
+    kbrmDikenal.add(String(chatId));
+    if (kbrmDikenal.size > BATAS_SET_DIKEANAL) kbrmDikenal.clear();
   } catch { /* abaikan */ }
 }
 
@@ -5242,6 +5293,7 @@ export default {
   },
   // Cron tiap 10 menit (v2.9.14, v2.9.15): nudge grup yang sepi
   // > 6 jam + nyautin broadcast buka/tutup sandekala.
+  // (v2.9.22 hemat KV: nudge maks. 1x/jam via CRON_SEPI_TS, roast 1 LIST.)
   // Jadwal dipasang di workflow deploy (wrangler.toml [triggers]).
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
