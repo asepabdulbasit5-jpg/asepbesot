@@ -1399,14 +1399,16 @@ async function terapkanTemplateXrayMetode(env, cfg, template, bugAkun) {
     return cfg;
   }
 
-  // WC ONERING: SNI = "onering:" + host + ":" + bug; port default 443
-  // bila target tanpa port; transport websocket.
+  // WC ONERING (koreksi Asep 25 Nov 2026 — sebelumnya server & urutan
+  // SNI kebalik): server = domain (headerHost), SNI =
+  // "onering:" + bug + ":" + domain; port default 443 bila target
+  // tanpa port; transport websocket.
   if (m === "WC_ONERING") {
     const bug = t.targetHost || "";
     const host = t.headerHost || "";
-    const sni = bug && host ? "onering:" + host + ":" + bug : "";
+    const sni = bug && host ? "onering:" + bug + ":" + host : "";
     if (!sni) return cfg;
-    v2.host = bug;
+    v2.host = host;
     v2.port = t.targetPort || 443;
     v2.wsHeaderHost = host;
     v2.serverNameIndication = sni;
@@ -1588,7 +1590,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.22";
+const VERSI_BOT = "v2.9.23";
 
 const PESAN_START =
   "👋 <b>Selamat datang di Generator Config Dark Tunnel</b>\n\n" +
@@ -3633,9 +3635,9 @@ async function kirimLangkahTemplate(env, chatId, st) {
   } else if (t === "xray_bug") {
     await tampil("🐛 <b>Bug</b>\n\nKetik bug (host, contoh: <code>api.quipper.com</code>) — atau ketuk 📋 Pilih dari Daftar Bug.\n\nKosong = dari akun pengguna. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_bugserver") {
-    await tampil("🐛 <b>Bug / Server</b>\n\nKirim bug — host saja (mis. <code>bug.contoh.com</code>, port default 443) atau format <code>host:port</code> — atau ketuk 📋 Pilih dari Daftar Bug.", batal);
+    await tampil("🐛 <b>Bug</b>\n\nKirim bug — host saja (mis. <code>bug.contoh.com</code>) atau format <code>host:port</code> (portnya jadi port koneksi, default 443) — atau ketuk 📋 Pilih dari Daftar Bug.", batal);
   } else if (t === "xray_host") {
-    await tampil("🌐 <b>Host</b>\n\nKirim host (mis. <code>www.yourdomain.com</code>).\n\nWajib diisi — dipakai di SNI (onering) dan Header Host.", batal);
+    await tampil("🌐 <b>Host</b>\n\nKirim host (mis. <code>www.yourdomain.com</code>).\n\nWajib diisi — dipakai sebagai server, di SNI (onering), dan Header Host.", batal);
   } else if (t === "xray_proxy") {
     await tampil("🔀 <b>Proxy</b>\n\nKirim proxy — host saja (mis. <code>proxy.contoh.com</code>, port ditanya setelahnya) atau langsung format <code>host:port</code> (boleh dari daftar bug — atau ketuk 📋 Pilih dari Daftar Bug).\n\nKosong = tanpa proxy. Ketuk ⏭️ Lewati untuk kosong.", batal);
   } else if (t === "xray_proxyport") {
@@ -3847,7 +3849,7 @@ async function handleTemplateTeks(env, chatId, st, teks) {
   }
   if (t === "xray_bugserver") {
     const v = kosongkan(teks);
-    if (v === null) return salah("😕 Bug/Server wajib diisi untuk WC ONERING. Kirim host atau <code>host:port</code> — atau ketuk 📋 Pilih dari Daftar Bug.");
+    if (v === null) return salah("😕 Bug wajib diisi untuk WC ONERING. Kirim host atau <code>host:port</code> — atau ketuk 📋 Pilih dari Daftar Bug.");
     const hp = parseHostPort(v);
     if (hp) { st.xray.targetHost = hp.host; st.xray.targetPort = hp.port; }
     else if (validHost(v.toLowerCase())) { st.xray.targetHost = v.toLowerCase(); st.xray.targetPort = null; }
