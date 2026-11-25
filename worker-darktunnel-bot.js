@@ -1590,7 +1590,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.23";
+const VERSI_BOT = "v2.9.24";
 
 const PESAN_START =
   "👋 <b>Selamat datang di Generator Config Dark Tunnel</b>\n\n" +
@@ -2025,8 +2025,11 @@ export function parseSshTeks(teks) {
 
   // 2) Format label (Host: ... Port: ... Username: ... Password: ...).
   //    Baris yang isinya label bug/SNI dilewati — "Domain CloudFront"
-  //    atau "Host SNI" bukan host akun.
-  const RE_BARIS_BUG = /^\s*(?:sni|bug|host\s*sni|bug\s*host|domain\s*cloudfront|cloudfront(?:\s*domain)?)(?:nya)?\s*[:=]/i;
+  //    atau "Host SNI" bukan host akun. (v2.9.24) Baris "Name Server" /
+  //    "Nameserver" / "DNS Server" juga dilewati: itu NS SlowDNS, bukan
+  //    host akun — baris NS di akhir detail akun sempat menimpa host
+  //    (config pakai NS, tidak konek; kasus Asep 25 Nov 2026).
+  const RE_BARIS_BUG = /^\s*(?:sni|bug|host\s*sni|bug\s*host|domain\s*cloudfront|cloudfront(?:\s*domain)?|name\s*server|dns\s*server)(?:nya)?\s*[:=]/i;
   const barisBersih = sisa.split(/\n/).filter((b) => !RE_BARIS_BUG.test(b));
   const teksBersih = barisBersih.join("\n");
   //    Ambil per baris agar nilai tidak "menelan" label berikutnya.
