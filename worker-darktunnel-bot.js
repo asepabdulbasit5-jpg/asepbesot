@@ -1285,7 +1285,13 @@ async function terapkanTemplateSshGenerik(env, cfg, template, bugAkun) {
     if (sniEfektif) inj.serverNameIndication = sniEfektif;
     // Payload template > enhanced > default Asep (v2.9.8 — "" v2.9.7
     // hanya tinggal untuk Xray).
-    isiPayloadSshTemplate(inj, t, ssh.host, sniEfektif);
+    // (v2.9.27) KECUALI DIRECT_SNI tanpa payload template: SSH+SNI
+    // harus tanpa payload (perintah Asep 25 Nov 2026 — config XL
+    // Iflix Barat ber-payload default gagal konek di 2 akun; tanpa
+    // payload, TLS ke server langsung jalanin SSH). "" = baris
+    // kosong; omit malah bikin aplikasi isi ulang default-nya.
+    if (sniEfektif && !t.proxyHost && !t.slowdns && !t.payload && !t.enhanced) inj.payload = "";
+    else isiPayloadSshTemplate(inj, t, ssh.host, sniEfektif);
     if (t.proxyHost) {
       inj.proxyHost = t.proxyHost;
       if (t.proxyPort) inj.proxyPort = t.proxyPort;
@@ -1590,7 +1596,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.26";
+const VERSI_BOT = "v2.9.27";
 
 const PESAN_START =
   "👋 <b>Selamat datang di Generator Config Dark Tunnel</b>\n\n" +
