@@ -1590,7 +1590,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.24";
+const VERSI_BOT = "v2.9.25";
 
 const PESAN_START =
   "👋 <b>Selamat datang di Generator Config Dark Tunnel</b>\n\n" +
@@ -1687,9 +1687,19 @@ function escapeHtml(s) {
 // dirapikan; kosong setelah sanitasi -> fallback format lama.
 const BRANDING_FILE_DARK = " by @autosetdark_bot.dark";
 const JENIS_CONFIG_FILE = ["SSH", "VMESS", "VLESS", "TROJAN", "SHADOWSOCKS", "SSH_DNSTT", "OPENVPN"];
-export function namaFileDark(namaConfig, type, namaTemplate) {
+export function namaFileDark(namaConfig, type, namaTemplate, bedakanAkun) {
   const tpl = String(namaTemplate || "").replace(/[/\\:*?"<>|\x00-\x1f\x7f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 60);
-  if (tpl) return tpl + BRANDING_FILE_DARK;
+  // (v2.9.25) Bila pakai template (bedakanAkun), bedakan file per akun
+  // dari nama config (SSH: username; Xray: nama dari link) — sebelumnya
+  // semua file dari satu template bernama SAMA PERSIS sehingga ketukar
+  // di Telegram (kasus Asep 25 Nov 2026: caption Bumi Ayu, file yang
+  // keimpor ternyata Nadia). Nama manual (Buat Manual) tidak dibedakan:
+  // itu nama pilihan pengguna sendiri.
+  if (tpl) {
+    if (!bedakanAkun) return tpl + BRANDING_FILE_DARK;
+    const akun = String(namaConfig || "").toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 30);
+    return akun ? tpl + " - " + akun + BRANDING_FILE_DARK : tpl + BRANDING_FILE_DARK;
+  }
   let s = String(namaConfig || "").toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
   if (!s) s = "config";
   let prefix = "";
@@ -2036,30 +2046,54 @@ export function parseSshTeks(teks) {
   const baris = barisBersih;
   let host = "", port = 0, username = "", password = "";
   let ketemuLabel = false;
+  let blokBaris = [];
+  let sisaBlok = null;
+  const dorongBlok = () => {
+    // Label bisa juga sebaris ("Username: x Password: y") — coba
+    // global, tapi HANYA dalam blok ini supaya tidak mengambil nilai
+    // dari blok akun lain.
+    if ((!username || !password || !host) && blokBaris.length) {
+      const tBlok = blokBaris.join("\n");
+      const gu = tBlok.match(LABEL_USER); if (gu && !username) { username = bersihNilai(gu[1]); ketemuLabel = true; }
+      const gw = tBlok.match(LABEL_PASS); if (gw && !password) { password = bersihNilai(gw[1]); ketemuLabel = true; }
+      const gh = tBlok.match(LABEL_HOST); if (gh && !host && validHost(bersihNilai(gh[1]))) { host = bersihNilai(gh[1]); ketemuLabel = true; }
+      const gp = tBlok.match(LABEL_PORT); if (gp && !port) { port = Number(gp[1]); ketemuLabel = true; }
+    }
+    if (host && username && password) {
+      akunList.push({ host, port: port || 22, username, password });
+      sisaBlok = null;
+    } else {
+      sisaBlok = { host, port, username, password };
+    }
+    host = ""; port = 0; username = ""; password = "";
+    blokBaris = [];
+  };
+  // Tiap blok label (Host..Password) jadi 1 akun: bila baris Host
+  // muncul lagi padahal akun sebelumnya sudah lengkap, simpan dulu
+  // akun itu (v2.9.25 — 2 blok label dalam 1 pesan sebelumnya
+  // digabung last-wins, akun pertama hilang diam-diam; kasus Asep
+  // 25 Nov 2026: 2 Nadia + 1 Bumi Ayu, 2 blok SSH-nya menyatu).
   for (const b of baris) {
     const mh = b.match(LABEL_HOST);
-    if (mh && validHost(bersihNilai(mh[1]))) { host = bersihNilai(mh[1]); ketemuLabel = true; }
+    if (mh && validHost(bersihNilai(mh[1]))) {
+      if (host && username && password) dorongBlok();
+      host = bersihNilai(mh[1]); ketemuLabel = true;
+    }
     const mp = b.match(LABEL_PORT);
     if (mp) { port = Number(mp[1]); ketemuLabel = true; }
     const mu = b.match(LABEL_USER);
     if (mu) { username = bersihNilai(mu[1]); ketemuLabel = true; }
     const mw = b.match(LABEL_PASS);
     if (mw) { password = bersihNilai(mw[1]); ketemuLabel = true; }
+    blokBaris.push(b);
   }
-  // Label bisa juga sebaris ("Username: x Password: y") — coba global.
-  if (!username || !password || !host) {
-    const gu = teksBersih.match(LABEL_USER); if (gu && !username) { username = bersihNilai(gu[1]); ketemuLabel = true; }
-    const gw = teksBersih.match(LABEL_PASS); if (gw && !password) { password = bersihNilai(gw[1]); ketemuLabel = true; }
-    const gh = teksBersih.match(LABEL_HOST); if (gh && !host && validHost(bersihNilai(gh[1]))) { host = bersihNilai(gh[1]); ketemuLabel = true; }
-    const gp = teksBersih.match(LABEL_PORT); if (gp && !port) { port = Number(gp[1]); ketemuLabel = true; }
-  }
-  if (host && username && password) {
-    akunList.push({ host, port: port || 22, username, password });
-  } else if (ketemuLabel || /ssh/i.test(teks)) {
+  dorongBlok();
+  if (akunList.length) return { akunList, kurang: [], adaSsh: true };
+  if (ketemuLabel || /ssh/i.test(teks)) {
     const kurang = [];
-    if (!host) kurang.push("Host/Server");
-    if (!username) kurang.push("Username");
-    if (!password) kurang.push("Password");
+    if (!sisaBlok?.host) kurang.push("Host/Server");
+    if (!sisaBlok?.username) kurang.push("Username");
+    if (!sisaBlok?.password) kurang.push("Password");
     return { akunList, kurang, adaSsh: true };
   }
   return { akunList, kurang: [], adaSsh: akunList.length > 0 };
@@ -4227,7 +4261,7 @@ async function handlePakaiTemplate(env, chatId, teks) {
     const rincian = ringkasanConfig(c);
     const caption = "✅ <b>Config Dark Tunnel jadi (template: " + escapeHtml(template.nama) + "):</b> " + escapeHtml(c.type + " — " + c.name) +
       (rincian ? "\n\n" + rincian : "") + "\n\n" + CARA_IMPOR + catatanBug;
-    await sendDocument(env, chatId, namaFileDark(c.name, c.type, template.nama), toDarktunnelLink(c) + "\n", caption, TOMBOL_APK);
+    await sendDocument(env, chatId, namaFileDark(c.name, c.type, template.nama, true), toDarktunnelLink(c) + "\n", caption, TOMBOL_APK);
   }
   return true;
 }
