@@ -1590,7 +1590,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.25";
+const VERSI_BOT = "v2.9.26";
 
 const PESAN_START =
   "👋 <b>Selamat datang di Generator Config Dark Tunnel</b>\n\n" +
@@ -2011,7 +2011,7 @@ function validSniTemplate(v) {
 // pernah ditebak — kalau tidak ketemu, akun = null dan `kurang` berisi
 // field yang hilang.
 export function parseSshTeks(teks) {
-  const akunList = [];
+  let akunList = [];
   let sisa = String(teks || "");
 
   // 1) Format kompak — boleh banyak dalam satu pesan.
@@ -2088,6 +2088,20 @@ export function parseSshTeks(teks) {
     blokBaris.push(b);
   }
   dorongBlok();
+  // (v2.9.26) Satu akun yang tertulis berulang dalam format berbeda
+  // (blok label + "Format Account WS" + "Format Account TLS") jadi
+  // 1 config saja — buang duplikat host+user+pass yang sama (kasus
+  // Asep 25 Nov 2026: akun Bumi Ayu jadi 3 file identik). Akun yang
+  // beda user/pass tetap dihitung terpisah.
+  {
+    const lihat = new Set();
+    akunList = akunList.filter((a) => {
+      const k = a.host.toLowerCase() + "\n" + a.username + "\n" + a.password;
+      if (lihat.has(k)) return false;
+      lihat.add(k);
+      return true;
+    });
+  }
   if (akunList.length) return { akunList, kurang: [], adaSsh: true };
   if (ketemuLabel || /ssh/i.test(teks)) {
     const kurang = [];
