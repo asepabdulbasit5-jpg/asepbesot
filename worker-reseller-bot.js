@@ -1862,7 +1862,13 @@ async function buatInvoiceDuitku(env, order) {
         productDetails: "SANDEKALA " + (order.namaPaket || "VPN"),
         additionalParam: "",
         merchantUserInfo: String(order.chatId || ""),
-        paymentMethod: "",
+        // QRIS SAJA (keputusan Asep 26 Nov 2026): "SP" = kanal QRIS
+        // ShopeePay. QR-nya QRIS biasa, jadi bisa dibayar pakai
+        // DANA/GoPay/OVO/e-wallet apa pun; fee 0,7%. Mengunci ke
+        // satu kanal supaya pembeli tidak bisa memilih VA (fee flat
+        // Rp3.000–5.000 bisa bikin paket 30 hari rugi) atau kartu
+        // kredit/e-wallet lain. "" = pembeli bebas pilih (dulu).
+        paymentMethod: "SP",
         customerVaName: order.pembeli || "Pembeli SANDEKALA",
         // Bot Telegram tidak mengumpulkan email pembeli; Duitku
         // mewajibkan kolom email, jadi kirim alamat sintetis per
