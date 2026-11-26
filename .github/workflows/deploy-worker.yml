@@ -4,8 +4,16 @@
 # cek Nadia, tidak ubah file. Cron Trigger auto-cek Nadia ikut
 # terpasang lewat wrangler.toml di bawah.
 # Secrets yang dibutuhkan: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID,
-# ADMIN_CHAT_ID, TELEGRAM_BOT_TOKEN
+# ADMIN_CHAT_ID, TELEGRAM_BOT_TOKEN,
+# DUITKU_MERCHANT_CODE, DUITKU_API_KEY_SANDBOX
 # (repo > Settings > Secrets and variables > Actions).
+# PERUBAHAN vs versi lama (26 Nov 2026, integrasi Duitku sandbox):
+#  - env deploy: + DUITKU_MERCHANT_CODE, + DUITKU_API_KEY
+#    (nilainya diambil dari GitHub Secret DUITKU_API_KEY_SANDBOX).
+#  - [vars] wrangler.toml: + DUITKU_MERCHANT_CODE, + DUITKU_SANDBOX="1".
+#  - Sebelum deploy: DUITKU_API_KEY di-set sebagai Secret Worker
+#    (bukan [vars]) lewat `wrangler secret put` — dijaga
+#    `if [ -n ... ]` supaya deploy tetap jalan kalau secret belum ada.
 name: Deploy Worker
 
 on:
@@ -38,6 +46,8 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
+          DUITKU_MERCHANT_CODE: ${{ secrets.DUITKU_MERCHANT_CODE }}
+          DUITKU_API_KEY: ${{ secrets.DUITKU_API_KEY_SANDBOX }}
         run: |
           cat > wrangler.toml <<EOF
           name = "sandekala"
@@ -57,7 +67,16 @@ jobs:
           NADIA_SERVER_ID = "01a1ca6a-b60e-73b9-a2fa-8684c0b25d62"
           NADIA_PROTOCOL = "vless"
           QRIS_IMAGE_URL = "https://raw.githubusercontent.com/asepabdulbasit5-jpg/asepbesot/main/dana.jpg"
+          DUITKU_MERCHANT_CODE = "$DUITKU_MERCHANT_CODE"
+          DUITKU_SANDBOX = "1"
           EOF
+          # API key Duitku WAJIB Secret Worker (bukan [vars]) — jangan
+          # tulis nilainya di file ini. Di-set ulang tiap deploy dari
+          # GitHub Secret; kalau secret kosong, lewati (fitur Duitku
+          # nonaktif, bayar manual tetap jalan).
+          if [ -n "$DUITKU_API_KEY" ]; then
+            printf '%s' "$DUITKU_API_KEY" | npx -y wrangler@latest secret put DUITKU_API_KEY
+          fi
           npx -y wrangler@latest deploy
 
       - name: Kabari deploy berhasil
