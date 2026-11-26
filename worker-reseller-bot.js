@@ -109,21 +109,21 @@
 // Taruh di Variables/Secrets dashboard seperti langkah 3.
 // ============================================================
 
-// ---- HARGA JUAL (harga final Asep, 19 Nov 2026) ----
-// Harian sempat dihapus 19 Nov 2026, diaktifkan lagi malam harinya
-// (untung bersih Rp533/akun setelah fee). Bulanan dijual Rp10.000:
-//   1 hari:  modal Rp267   -> jual Rp1.000  (untung Rp733, bersih Rp533)
-//   7 hari:  modal Rp1.869 -> jual Rp5.000  (untung Rp3.131)
-//   30 hari: modal Rp6.000 -> jual Rp10.000 (untung Rp4.000)
-// (Belum dikurangi fee order Nadia Rp200/order, kecuali harian di atas.)
+// ---- HARGA JUAL (harga final Asep, 19 Nov 2026; diubah 26 Nov 2026) ----
+// Harian sempat dihapus 19 Nov 2026, diaktifkan lagi malam harinya.
+// Bulanan tetap Rp10.000 (tidak berubah 26 Nov 2026):
+//   1 hari:  modal Rp267   -> jual Rp800    (untung Rp533, bersih Rp333 setelah fee Rp200)
+//   7 hari:  modal Rp1.869 -> jual Rp3.300  (untung Rp1.431, bersih Rp1.231 setelah fee Rp200)
+//   30 hari: modal Rp6.000 -> jual Rp10.000 (untung Rp4.000, bersih Rp3.800 setelah fee Rp200)
+// Fee order Nadia Rp200/order sudah dihitung di "bersih" di atas.
 // Nominal unik 10-99 ditambahkan otomatis supaya nominal tiap
 // order beda (mis. 10.000 jadi 10.042).
 // Pemetaan ke Nadia: 1 hari = type "day", duration 1.
 //                    7 hari = type "week", duration 1.
 //                    30 hari = type "month", duration 1.
 const PAKET = [
-  { kode: "1hari",  nama: "VPN 1 hari",  harga: 1000,  durasiHari: 1,  nadiaType: "day",   nadiaDuration: 1 },
-  { kode: "7hari",  nama: "VPN 7 hari",  harga: 5000,  durasiHari: 7,  nadiaType: "week",  nadiaDuration: 1 },
+  { kode: "1hari",  nama: "VPN 1 hari",  harga: 800,   durasiHari: 1,  nadiaType: "day",   nadiaDuration: 1 },
+  { kode: "7hari",  nama: "VPN 7 hari",  harga: 3300,  durasiHari: 7,  nadiaType: "week",  nadiaDuration: 1 },
   { kode: "30hari", nama: "VPN 30 hari", harga: 10000, durasiHari: 30, nadiaType: "month", nadiaDuration: 1 },
 ];
 
@@ -462,7 +462,7 @@ async function balasPemicuReseller(env, chatId, aksi) {
     return true;
   }
   if (aksi === "harga") {
-    await sendTelegram(env, chatId, "standar bang, (Rp1.000/hr, Rp5.000/mg, Rp10.000/bln)", tombolBeli);
+    await sendTelegram(env, chatId, "standar bang, (Rp800/hr, Rp3.300/mg, Rp10.000/bln)", tombolBeli);
     return true;
   }
   if (aksi === "makasih") {
@@ -940,7 +940,7 @@ async function handleTelegram(env, update) {
   if (text === "/harga") {
     const buka = await tokoBuka(env);
     await sendTelegram(env, chatId,
-      "💰 Harga SANDEKALA VPN\n\n1 hari — Rp1.000\n7 hari — Rp5.000\n30 hari — Rp10.000\n\n🎁 Trial gratis 30 menit (kuota 1 GB).\nTOKO: " + (buka ? "🟢 BUKA" : "🔴 TUTUP"),
+      "💰 Harga SANDEKALA VPN\n\n1 hari — Rp800\n7 hari — Rp3.300\n30 hari — Rp10.000\n\n🎁 Trial gratis 30 menit (kuota 1 GB).\nTOKO: " + (buka ? "🟢 BUKA" : "🔴 TUTUP"),
       [[{ text: "🛒 Beli VPN", callback_data: "menu:beli" }]]);
     return;
   }
@@ -1172,7 +1172,7 @@ function teksDaftarServer(daftar, live, judul, halaman, totalHalaman) {
     const nama = s.nama.replace(" — PENUH", "");
     const pakai = (st.used !== null && st.limit !== null) ? st.used + "/" + st.limit : "?";
     return "🔰 Nama Server: " + nama +
-      "\n💵 Harga: 1 hari Rp1.000 • 7 hari Rp5.000 • 30 hari Rp10.000" +
+      "\n💵 Harga: 1 hari Rp800 • 7 hari Rp3.300 • 30 hari Rp10.000" +
       "\n🧮 Total Akun Dibuat: " + pakai + (st.sisa !== null ? " (sisa " + st.sisa + ")" : "") +
       (st.penuh ? "\n❌ PENUH" : "") +
       "\n" + GARIS_PANEL;
@@ -2916,7 +2916,7 @@ function durasiTrialMenit(serverKode) {
 }
 
 function pesanJatahTrialHabis() {
-  return "🎁 Jatah trial kamu sudah habis.\n\nCara dapat jatah trial lagi: beli paket mingguan (Rp5.000) atau bulanan (Rp10.000) — setiap pembelian itu dapat +1 jatah trial. Jatah trial tidak kedaluwarsa, jadi bisa dipakai kapan saja.\n\nBeli harian (Rp1.000) tidak dapat jatah trial.";
+  return "🎁 Jatah trial kamu sudah habis.\n\nCara dapat jatah trial lagi: beli paket mingguan (Rp3.300) atau bulanan (Rp10.000) — setiap pembelian itu dapat +1 jatah trial. Jatah trial tidak kedaluwarsa, jadi bisa dipakai kapan saja.\n\nBeli harian (Rp800) tidak dapat jatah trial.";
 }
 
 // Trial gratis: POST /vpn/trial {server_id, protocol} — 30 menit,
