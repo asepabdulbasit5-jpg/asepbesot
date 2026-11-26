@@ -20,14 +20,12 @@
 //   ENDPOINT LAIN (dari screenshot Asep, 19 Nov 2026, 16:07-16:09):
 //     POST /api/v1/vpn/trial           {server_id, protocol}
 //          Trial gratis 30 menit (NUSA ID & CLOUDFRONT MEDIA 60 menit),
-//          kuota 1 GB, limit 1 IP, zivpn tidak didukung, saldo
-//          minimal Rp15.000. Jatah trial: pengguna baru dapat 1;
-//          beli/perpanjang mingguan/bulanan = +1 jatah; harian
-//          tidak dapat; jatah tidak kedaluwarsa.
-//          tidak didukung, username/password auto. Syarat: saldo
-//          minimal Rp15.000 (tidak dipotong). Saldo Asep saat itu
-//          Rp14.691 — di bawah syarat, trial bisa gagal sampai
-//          topup dulu.
+//          kuota 1 GB, limit 1 IP, zivpn tidak didukung, username/
+//          password auto. KHUSUS ADMIN sejak 26 Nov 2026 — pembeli
+//          tidak bisa trial lagi; sistem jatah trial (TRIAL: di KV)
+//          sudah dihapus. Syarat: saldo minimal Rp15.000 (tidak
+//          dipotong). Saldo Asep saat itu Rp14.691 — di bawah syarat,
+//          trial bisa gagal sampai topup dulu.
 //     POST /api/v1/vpn/renew           {account_id, type, duration}
 //          Perpanjang, memotong saldo.
 //     POST /api/v1/vpn/migrate         {account_id, new_server_id}
@@ -322,8 +320,8 @@ let bersihOrderTerakhir = 0;
 // ---- Toko buka/tutup ala warung (19 Nov 2026) ----
 // Status disimpan di KV ORDERS kunci "TOKO_BUKA": "buka" / "tutup".
 // Default: buka (kalau kunci belum ada). Saat TUTUP, pembeli hanya
-// bisa LIHAT (menu, daftar server, status order, akun saya) — beli,
-// trial, dan perpanjang diblokir dengan pesan tutup. Admin tidak
+// bisa LIHAT (menu, daftar server, status order, akun saya) — beli
+// dan perpanjang diblokir dengan pesan tutup. Admin tidak
 // diblokir dan bisa buka/tutup lewat tombol di menu atau perintah
 // /buka dan /tutup. Pembayaran kini MANUAL: admin cek Dana lalu
 // /konfirmasi ORDER_ID (MacroDroid sudah tidak dipakai).
@@ -343,7 +341,7 @@ const PESAN_TUTUP = "🔴 Toko lagi tutup. Lihat-lihat dulu aja, order dibuka la
 // Deskripsi bot (tampil di profil: "Apa yang dapat bot ini lakukan?").
 // Dipasang lewat /setdeskripsi (admin) — Bot API setMyDescription.
 // (22 Nov 2026) Harga disingkat jadi Rp10.000 / bulan.
-const DESKRIPSI_BOT = "SANDEKALA VPN — Beli akun VPN VLESS, VMess, Trojan & SSH. Harga: Rp10.000 / bulan. Trial gratis 30 menit. Bayar via QRIS DANA.";
+const DESKRIPSI_BOT = "SANDEKALA VPN — Beli akun VPN VLESS, VMess, Trojan & SSH. Harga: Rp10.000 / bulan. Bayar via QRIS DANA.";
 // Siarkan status buka/tutup ke semua pengguna bot + semua grup
 // tempat bot berada (22 Nov 2026). Dipanggil setiap admin buka/tutup
 // toko — lewat tombol menu maupun perintah /buka dan /tutup.
@@ -551,12 +549,12 @@ async function handleTelegram(env, update) {
     if (data === "menu:utama") { await tampilkanMenuUtama(env, cb.from.id, cb.from, cb.message?.message_id); return; }
     if (data === "menu:beli") { await tampilkanDaftarServer(env, cb.from.id, "beli", 0, cb.message?.message_id); return; }
     if (data === "menu:trial") {
+      // Trial KHUSUS ADMIN (26 Nov 2026): pembeli tidak bisa trial
+      // lagi — tombolnya juga disembunyikan di menu non-admin.
+      // Tombol trial lama di riwayat chat tetap dijawab di sini.
       if (!adalahAdmin(env, cb.from.id)) {
-        const j = await ambilJatahTrial(env, cb.from.id);
-        if (j.sisa <= 0) {
-          await editHtml(env, cb.from.id, cb.message?.message_id, escapeHtml(pesanJatahTrialHabis()), [[{ text: "🔙 Kembali ke Menu", callback_data: "menu:utama" }]]);
-          return;
-        }
+        await editHtml(env, cb.from.id, cb.message?.message_id, escapeHtml("Maaf, trial sudah tidak tersedia."), [[{ text: "🔙 Kembali ke Menu", callback_data: "menu:utama" }]]);
+        return;
       }
       await tampilkanDaftarServer(env, cb.from.id, "trial", 0, cb.message?.message_id);
       return;
@@ -574,7 +572,13 @@ async function handleTelegram(env, update) {
       return;
     }
     if (data.startsWith("srvpage:")) { await tampilkanDaftarServer(env, cb.from.id, "beli", parseInt(data.slice(8), 10) || 0, cb.message?.message_id); return; }
-    if (data.startsWith("trypage:")) { await tampilkanDaftarServer(env, cb.from.id, "trial", parseInt(data.slice(8), 10) || 0, cb.message?.message_id); return; }
+    if (data.startsWith("trypage:")) {
+      if (!adalahAdmin(env, cb.from.id)) {
+        await editHtml(env, cb.from.id, cb.message?.message_id, escapeHtml("Maaf, trial sudah tidak tersedia."), [[{ text: "🔙 Kembali ke Menu", callback_data: "menu:utama" }]]);
+        return;
+      }
+      await tampilkanDaftarServer(env, cb.from.id, "trial", parseInt(data.slice(8), 10) || 0, cb.message?.message_id); return;
+    }
     if (data.startsWith("server:")) {
       // Langkah 2: pilih protokol untuk server yang dipilih.
       // Protokol disaring per server: CLOUDFRONT NUSA tidak tampil
@@ -617,10 +621,14 @@ async function handleTelegram(env, update) {
         "Ketik /batal untuk membatalkan."), [[{ text: "🔙 Kembali", callback_data: "proto:" + serverKode + ":" + proto }]]);
       return;
     }
-    // ---- Trial gratis: pilih server -> protokol -> langsung dibuat ----
+    // ---- Trial gratis (KHUSUS ADMIN, 26 Nov 2026): pilih server -> protokol -> langsung dibuat ----
     if (data.startsWith("tserver:")) {
       const serverKode = data.slice(8);
       const server = SERVERS.find((x) => x.kode === serverKode);
+      if (!adalahAdmin(env, cb.from.id)) {
+        await editHtml(env, cb.from.id, cb.message?.message_id, escapeHtml("Maaf, trial sudah tidak tersedia."), [[{ text: "🔙 Kembali ke Menu", callback_data: "menu:utama" }]]);
+        return;
+      }
       if (!(await tokoBuka(env)) && !adalahAdmin(env, cb.from.id)) { await jawabAlert(env, cb.id, PESAN_TUTUP); return; }
       if (server?.penuh) { await jawabAlert(env, cb.id, "Server ini penuh, pilih server lain ya."); return; }
       const daftar = PROTOKOL.filter((p) => p.kode !== "zivpn" && (server?.protocols || []).includes(p.kode));
@@ -628,45 +636,24 @@ async function handleTelegram(env, update) {
         { text: p.nama, callback_data: "tproto:" + serverKode + ":" + p.kode },
       ]);
       tombol.push([{ text: "🔙 Kembali ke Server", callback_data: "menu:trial" }]);
-      const jatahTrialSrv = adalahAdmin(env, cb.from.id) ? null : await ambilJatahTrial(env, cb.from.id);
-      const infoJatahSrv = jatahTrialSrv ? "\nSisa jatah trial kamu: " + jatahTrialSrv.sisa + "." : "";
-      await editHtml(env, cb.from.id, cb.message?.message_id, escapeHtml("Trial gratis " + durasiTrialMenit(serverKode) + " menit (kuota 1 GB, 1 IP)." + infoJatahSrv + "\nServer: " + (server?.nama || serverKode) + "\nPilih protokolnya:"), tombol);
+      await editHtml(env, cb.from.id, cb.message?.message_id, escapeHtml("Trial gratis " + durasiTrialMenit(serverKode) + " menit (kuota 1 GB, 1 IP)." + "\nServer: " + (server?.nama || serverKode) + "\nPilih protokolnya:"), tombol);
       return;
     }
     if (data.startsWith("tproto:")) {
       const [, serverKode, proto] = data.split(":");
       const server = SERVERS.find((x) => x.kode === serverKode);
-      if (!(await tokoBuka(env)) && !adalahAdmin(env, cb.from.id)) { await jawabAlert(env, cb.id, PESAN_TUTUP); return; }
-      // Jatah trial: cek dulu sebelum dibuat (admin bebas).
-      let jatahTrial = null;
       if (!adalahAdmin(env, cb.from.id)) {
-        jatahTrial = await ambilJatahTrial(env, cb.from.id);
-        if (jatahTrial.sisa <= 0) {
-          await editHtml(env, cb.from.id, cb.message?.message_id, escapeHtml(pesanJatahTrialHabis()), [[{ text: "🔙 Kembali ke Menu", callback_data: "menu:utama" }]]);
-          return;
-        }
+        await editHtml(env, cb.from.id, cb.message?.message_id, escapeHtml("Maaf, trial sudah tidak tersedia."), [[{ text: "🔙 Kembali ke Menu", callback_data: "menu:utama" }]]);
+        return;
       }
+      if (!(await tokoBuka(env)) && !adalahAdmin(env, cb.from.id)) { await jawabAlert(env, cb.id, PESAN_TUTUP); return; }
       const midTrial = cb.message?.message_id;
       await editHtml(env, cb.from.id, midTrial, escapeHtml("Membuat akun trial " + proto.toUpperCase() + " di " + (server?.nama || serverKode) + "..."), []);
       const hasil = await trialNadiaAccount(env, server?.serverId, proto);
       if (!hasil.ok) {
-        // Pembeli cuma dikasih tahu trial gagal (tanpa alasan internal,
-        // mis. saldo reseller) — admin dikabari error mentahnya di bawah.
-        const teksTrial = String(cb.from.id) === String(env.ADMIN_CHAT_ID)
-          ? "Trial gagal: " + hasil.error
-          : "Trial gagal, coba lagi nanti ya.";
-        await editHtml(env, cb.from.id, midTrial, escapeHtml(teksTrial), []);
-        if (String(cb.from.id) !== String(env.ADMIN_CHAT_ID)) {
-          await kabariAdmin(env, cb.from.id, "⚠️ Trial gagal (" + (server?.nama || serverKode) + " / " + proto.toUpperCase() + "): " + hasil.error);
-        }
+        // Hanya admin yang sampai sini — dia lihat error mentahnya.
+        await editHtml(env, cb.from.id, midTrial, escapeHtml("Trial gagal: " + hasil.error), []);
         return;
-      }
-      // Trial berhasil: pakai 1 jatah (admin tidak dihitung).
-      let sisaTrial = null;
-      if (jatahTrial) {
-        jatahTrial.sisa -= 1;
-        await simpanJatahTrial(env, cb.from.id, jatahTrial);
-        sisaTrial = jatahTrial.sisa;
       }
       const menitTrial = durasiTrialMenit(serverKode);
       if (hasil.config && !hasil.config.includes("Berlaku sampai")) {
@@ -674,12 +661,11 @@ async function handleTelegram(env, update) {
       }
       await kirimConfig(env, cb.from.id,
         "🎁 Ini config trial kamu (" + menitTrial + " menit, kuota 1 GB):", hasil.config,
-        "Kalau cocok, lanjut beli paket lewat /beli." + (sisaTrial !== null ? "\nSisa jatah trial kamu: " + sisaTrial + "." : ""), [[{ text: "🛒 Beli VPN", callback_data: "menu:beli" }]], midTrial);
+        "Kalau cocok, lanjut beli paket lewat /beli.", [[{ text: "🛒 Beli VPN", callback_data: "menu:beli" }]], midTrial);
       // Trial berhasil: kabari admin (calon pembeli — bisa di-follow-up).
       // Trial admin sendiri tidak dikabari (kabariAdmin skip).
       await kabariAdmin(env, cb.from.id,
-        "🎁 Trial baru — " + (namaPembeli(cb.from) || ("ID " + cb.from.id)) + " (" + (server?.nama || serverKode) + " / " + proto.toUpperCase() + ", " + menitTrial + " menit)." +
-        (sisaTrial !== null ? "\nSisa jatah trial: " + sisaTrial + "." : ""),
+        "🎁 Trial baru — " + (namaPembeli(cb.from) || ("ID " + cb.from.id)) + " (" + (server?.nama || serverKode) + " / " + proto.toUpperCase() + ", " + menitTrial + " menit).",
         tombolChatPembeli(cb.from.id));
       return;
     }
@@ -789,6 +775,15 @@ async function handleTelegram(env, update) {
     const perintah = tokenPerintah.replace(/@.+$/, "");
     if (perintah === "/start" || perintah === "/menu" || perintah === "/harga") {
       await tampilkanPromoGrup(env, chatId);
+    } else if (perintah === "/trial") {
+      // Trial KHUSUS ADMIN (26 Nov 2026) — dan trial tidak jalan di
+      // grup supaya config tidak bocor ke anggota: admin diarahkan
+      // ke chat pribadi, non-admin ditolak singkat.
+      if (adalahAdmin(env, msg.from.id)) {
+        await sendTelegram(env, chatId, "Trial khusus admin — ketik /trial di chat pribadi ya.");
+      } else {
+        await sendTelegram(env, chatId, "Maaf, trial sudah tidak tersedia.");
+      }
     } else if (!text.startsWith("/")) {
       const aksi = cocokPemicuReseller(text);
       if (aksi) await balasPemicuReseller(env, chatId, aksi);
@@ -905,9 +900,10 @@ async function handleTelegram(env, update) {
   }
 
   if (text === "/trial") {
-    if (!adalahAdmin(env, chatId)) {
-      const j = await ambilJatahTrial(env, chatId);
-      if (j.sisa <= 0) { await sendTelegram(env, chatId, pesanJatahTrialHabis()); return; }
+    // Trial KHUSUS ADMIN (26 Nov 2026) — cek pengirim, bukan chat.
+    if (!adalahAdmin(env, msg.from.id)) {
+      await sendTelegram(env, chatId, "Maaf, trial sudah tidak tersedia.");
+      return;
     }
     await tampilkanTrialServer(env, chatId);
     return;
@@ -987,7 +983,9 @@ async function handleTelegram(env, update) {
   if (text === "/harga") {
     const buka = await tokoBuka(env);
     await sendTelegram(env, chatId,
-      "💰 Harga SANDEKALA VPN\n\n1 hari — Rp800\n7 hari — Rp3.300\n30 hari — Rp10.000\n\n🎁 Trial gratis 30 menit (kuota 1 GB).\nTOKO: " + (buka ? "🟢 BUKA" : "🔴 TUTUP"),
+      "💰 Harga SANDEKALA VPN\n\n1 hari — Rp800\n7 hari — Rp3.300\n30 hari — Rp10.000" +
+      (adalahAdmin(env, msg.from.id) ? "\n\n🎁 Trial gratis 30 menit (kuota 1 GB)." : "") +
+      "\nTOKO: " + (buka ? "🟢 BUKA" : "🔴 TUTUP"),
       [[{ text: "🛒 Beli VPN", callback_data: "menu:beli" }]]);
     return;
   }
@@ -997,7 +995,7 @@ async function handleTelegram(env, update) {
     if (!adalahAdmin(env, chatId)) return;
     await setToko(env, text === "/buka");
     await sendTelegram(env, chatId, text === "/buka"
-      ? "🟢 Toko DIBUKA. Pembeli sudah bisa order, trial, dan perpanjang lagi."
+      ? "🟢 Toko DIBUKA. Pembeli sudah bisa order dan perpanjang lagi."
       : "🔴 Toko DITUTUP. Pembeli hanya bisa lihat-lihat (menu, daftar server, status, akun).");
     await siarkanStatusToko(env, text === "/buka");
     return;
@@ -1150,14 +1148,13 @@ async function ambilSaldoReseller(env) {
 }
 
 // Mode grup: di grup bot hanya jadi etalase — info singkat + tombol
-// ke DM. Jualan (beli/trial/config) HANYA di chat pribadi supaya
+// ke DM. Jualan (beli/config) HANYA di chat pribadi supaya
 // config pembeli tidak bocor ke semua anggota grup.
 async function tampilkanPromoGrup(env, chatId) {
   const buka = await tokoBuka(env);
   const teks =
     "🛡️ SANDEKALA VPN\n\n" +
     "Harga: Rp10.000 / bulan\n" +
-    "🎁 Trial gratis 30 menit (kuota 1 GB).\n" +
     "TOKO: " + (buka ? "🟢 BUKA" : "🔴 TUTUP") + "\n\n" +
     "Order lewat chat pribadi ya — klik tombol di bawah.";
   await sendTelegram(env, chatId, teks,
@@ -1185,9 +1182,12 @@ async function tampilkanMenuUtama(env, chatId, from, messageId) {
   const html = baris.map((x) => (x === "MENU UTAMA" || x === "INFORMASI PELANGGAN") ? "<b>" + escapeHtml(x) + "</b>" : (x === "OWNER: @Asepbesot" ? 'OWNER: <a href="https://t.me/Asepbesot">@Asepbesot</a>' : escapeHtml(x))).join("\n");
   const tombol = [
     [{ text: "🛒 Beli VPN", callback_data: "menu:beli" }],
-    [{ text: "🎁 Trial Gratis", callback_data: "menu:trial" }, { text: "📦 Status Order", callback_data: "menu:status" }],
+    [{ text: "📦 Status Order", callback_data: "menu:status" }],
     [{ text: "👤 Akun Saya", callback_data: "menu:akun" }],
   ];
+  // Tombol trial HANYA untuk admin (26 Nov 2026) — pembeli tidak
+  // bisa trial lagi, jadi tombolnya disembunyikan dari menu mereka.
+  if (isAdmin) tombol[1] = [{ text: "🎁 Trial Gratis", callback_data: "menu:trial" }, { text: "📦 Status Order", callback_data: "menu:status" }];
   if (isAdmin) tombol.push([{ text: "📋 Semua Akun", callback_data: "menu:semua" }]);
   if (isAdmin) tombol.push([{ text: "🔍 Cek Nadia", callback_data: "menu:ceknadia" }]);
   if (isAdmin) tombol.push([{ text: buka ? "🔴 Tutup Toko" : "🟢 Buka Toko", callback_data: "menu:toko" }]);
@@ -1696,7 +1696,7 @@ function akunExpired(order) {
 async function tampilkanAkun(env, chatId, messageId) {
   const daftar = await daftarAkunUser(env, chatId);
   if (!daftar.length) {
-    const teks = "Kamu belum punya akun aktif di bot ini. Ketik /beli untuk pesan, atau /trial untuk coba gratis.";
+    const teks = "Kamu belum punya akun aktif di bot ini. Ketik /beli untuk pesan.";
     if (messageId) await editHtml(env, chatId, messageId, escapeHtml(teks), [[{ text: "🔙 Kembali ke Menu", callback_data: "menu:utama" }]]);
     else await sendTelegram(env, chatId, teks);
     return;
@@ -1727,7 +1727,7 @@ function namaPembeli(from) {
 // Tombol "Chat Pembeli" di semua notif order ke admin — satu ketuk
 // langsung buka chat pembeli (pakai ID Telegram, jadi jalan walau
 // pembeli tidak punya @username). Dipakai di notif order baru,
-// gagal buat akun, terjual, perpanjang berhasil, dan trial baru.
+// gagal buat akun, terjual, dan perpanjang berhasil.
 function tombolChatPembeli(chatIdPembeli) {
   return [{ text: "💬 Chat Pembeli", url: "tg://user?id=" + chatIdPembeli }];
 }
@@ -2082,15 +2082,6 @@ async function selesaikanOrder(env, orderId, order) {
     hasil.config += "\n\nBerlaku sampai: " + formatExpired(new Date(dasar + hari * 86400000));
   }
   order.status = "selesai";
-  // Trial: beli/perpanjang MINGGUAN atau BULANAN = +1 jatah trial.
-  // Harian tidak dapat jatah. Jatah tidak kedaluwarsa. (Admin tidak
-  // dihitung — dia bebas trial tanpa jatah.)
-  let infoTrialBaru = "";
-  const paketOrder = PAKET.find((p) => p.kode === order.paket);
-  if (paketOrder && (paketOrder.nadiaType === "week" || paketOrder.nadiaType === "month") && String(order.chatId) !== String(env.ADMIN_CHAT_ID)) {
-    const j = await tambahJatahTrial(env, order.chatId);
-    infoTrialBaru = "\n🎁 Kamu dapat +1 jatah trial (sisa: " + j.sisa + ").";
-  }
   if (order.kind === "renew") {
     // Perpanjang: perbarui order akun lama (nama paket + config).
     // Respons renew biasanya TIDAK membawa link (config tidak berubah,
@@ -2116,9 +2107,9 @@ async function selesaikanOrder(env, orderId, order) {
       " — " + order.namaPaket + " — Rp" + order.nominalUnik.toLocaleString("id-ID") + " sudah masuk.",
       [tombolChatPembeli(order.chatId)]);
     if (configKirim) await kirimConfig(env, order.chatId,
-      "✅ Akun " + (order.username || "") + " berhasil diperpanjang (" + order.namaPaket + ")." + infoTrialBaru + "\n\nConfig terbaru:", configKirim);
+      "✅ Akun " + (order.username || "") + " berhasil diperpanjang (" + order.namaPaket + ").\n\nConfig terbaru:", configKirim);
     else await sendTelegram(env, order.chatId,
-      "✅ Akun " + (order.username || "") + " berhasil diperpanjang (" + order.namaPaket + ")." + infoTrialBaru);
+      "✅ Akun " + (order.username || "") + " berhasil diperpanjang (" + order.namaPaket + ").");
     return;
   }
   // Akun baru: simpan account_id Nadia (UUID) — WAJIB untuk
@@ -2136,7 +2127,7 @@ async function selesaikanOrder(env, orderId, order) {
     [tombolChatPembeli(order.chatId)]);
   await kirimConfig(env, order.chatId,
     "✅ Pembayaran diterima! Ini config " + order.namaPaket + " kamu:", hasil.config,
-    "Masa aktif mulai hari ini. Selamat memakai!" + infoTrialBaru);
+    "Masa aktif mulai hari ini. Selamat memakai!");
 }
 
 // (22 Nov 2026) Handoff ke @autosetdark_bot: simpan akun pembeli di KV
@@ -2521,8 +2512,8 @@ function portSingkat(grid) {
 // Format Account (WS/TLS port pertama saja). Tanpa seksi Payload,
 // Squid/OpenVPN/SNI/Path, dan tanpa Masa Aktif (Berlaku sampai /
 // Sisa waktu ditempel sebagai baris biasa oleh ambilConfigDariData
-// atau handler trial). Berlaku untuk SEMUA config SSH: trial,
-// order, perpanjang, perbaiki, pindah server, ganti protokol.
+// atau handler trial (admin). Berlaku untuk SEMUA config SSH: trial
+// (admin), order, perpanjang, perbaiki, pindah server, ganti protokol.
 function renderSSH(entri, o) {
   const peta = new Map(entri.map((e) => [e.label, e.nilai]));
   const garis = "────────────────────";
@@ -3112,49 +3103,11 @@ async function renewNadiaAccount(env, order) {
   return { ok: true, config: ambilConfigDariData(r.data), accountId: cariAccountIdKetat(r.data) };
 }
 
-// ---- Jatah trial (kuota) — anti-spam trial (20 Nov 2026) ----
-// Aturan (keputusan Asep):
-// - Pengguna baru otomatis dapat 1 jatah trial.
-// - Beli/perpanjang paket MINGGUAN atau BULANAN = +1 jatah trial.
-// - Beli HARIAN tidak dapat jatah (sengaja — biar pembeli didorong
-//   ke mingguan/bulanan; kalau harian juga dapat, rugi di penjual).
-// - Jatah TIDAK kedaluwarsa — disimpan sampai dipakai.
-// - Admin tidak kena batas (bebas ngetes trial).
-// Disimpan di KV ORDERS kunci "TRIAL:<chatId>": {sisa, total}.
-const TRIAL_AWAL = 1;
-
-async function ambilJatahTrial(env, chatId) {
-  const kunci = "TRIAL:" + chatId;
-  const lama = await env.ORDERS.get(kunci, "json").catch(() => null);
-  if (lama && typeof lama.sisa === "number") return lama;
-  const baru = { sisa: TRIAL_AWAL, total: TRIAL_AWAL };
-  await env.ORDERS.put(kunci, JSON.stringify(baru));
-  return baru;
-}
-
-async function simpanJatahTrial(env, chatId, jatah) {
-  await env.ORDERS.put("TRIAL:" + chatId, JSON.stringify(jatah));
-}
-
-// Tambah 1 jatah trial (dipanggil saat beli/perpanjang mingguan/
-// bulanan selesai). Kembalikan catatan terbaru.
-async function tambahJatahTrial(env, chatId) {
-  const j = await ambilJatahTrial(env, chatId);
-  j.sisa += 1;
-  j.total += 1;
-  await simpanJatahTrial(env, chatId, j);
-  return j;
-}
-
 // Durasi trial menurut aturan Nadia: 60 menit untuk NUSA ID &
 // CLOUDFRONT MEDIA, 30 menit untuk server lain. (zivpn tidak
 // didukung trial — sudah difilter di daftar protokol trial.)
 function durasiTrialMenit(serverKode) {
   return (serverKode === "nusaid" || serverKode === "media") ? 60 : 30;
-}
-
-function pesanJatahTrialHabis() {
-  return "🎁 Jatah trial kamu sudah habis.\n\nCara dapat jatah trial lagi: beli paket mingguan (Rp3.300) atau bulanan (Rp10.000) — setiap pembelian itu dapat +1 jatah trial. Jatah trial tidak kedaluwarsa, jadi bisa dipakai kapan saja.\n\nBeli harian (Rp800) tidak dapat jatah trial.";
 }
 
 // Trial gratis: POST /vpn/trial {server_id, protocol} — 30 menit,
