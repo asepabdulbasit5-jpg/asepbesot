@@ -57,7 +57,8 @@
 //        CLOUDFRONT NEOLITE PRO (ID, sisa 211/300, semua protokol,
 //        CloudFront d18hybc8il36ui.cloudfront.net)
 //        NADIA_SERVER_ID = 01a1ca6a-b60e-73b9-a2fa-8684c0b25d62
-//      Cadangan: CLOUDFRONT (ATI) = 01a133f2-e422-73e9-bc1d-3d3621d704c6
+//      Cadangan: CLOUDFRONT (CLOUDMATIKA) = 01a133f2-e422-73e9-bc1d-3d3621d704c6
+//      (dulu "CLOUDFRONT (ATI)" — diganti Nadia, /ceknadia 26 Nov 2026)
 //      Detail lengkap: files/nadia-servers-2026-11-19.md
 //   2. Harga modal per akun (dari katalog server) — supaya harga
 //      jual di PAKET di bawah bisa disesuaikan, jangan sampai
@@ -165,7 +166,7 @@ const SERVERS = [
   { kode: "mitra",     nama: "CLOUDFRONT [MITRA]",            serverId: "01a16cd0-e727-70b4-822c-c96c0a502535", protocols: ["ssh", "vmess", "vless", "trojan"], used: 215, limit: 250 },
   { kode: "bizgio",    nama: "CLOUDFRONT BIZNET GIO",         serverId: "01a06443-8a9c-7254-b6f5-d59e4cfc3edd", protocols: ["ssh", "vmess", "vless", "trojan"], used: 199, limit: 200 },
   { kode: "binet",     nama: "CLOUDFRONT BINET NEO",          serverId: "01a11353-0afc-7193-8c02-08d3de1a50b8", protocols: ["ssh", "vmess", "vless", "trojan"], used: 85, limit: 200 },
-  { kode: "ati",       nama: "CLOUDFRONT (ATI)",              serverId: "01a133f2-e422-73e9-bc1d-3d3621d704c6", protocols: ["ssh", "vmess", "vless", "trojan"], used: 52, limit: 250 },
+  { kode: "ati",       nama: "CLOUDFRONT (CLOUDMATIKA)",     serverId: "01a133f2-e422-73e9-bc1d-3d3621d704c6", protocols: ["ssh", "vmess", "vless", "trojan"], used: 52, limit: 250 },
 ];
 // Name Server SlowDNS per domain server (25 Nov 2026).
 // API Nadia TIDAK mengirim nameserver di respons order — nilainya
