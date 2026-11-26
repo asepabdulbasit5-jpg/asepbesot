@@ -243,6 +243,14 @@ export default {
       return new Response("ok");
     }
 
+    // ---- Callback pembayaran Duitku (otomatis, 26 Nov 2026) ----
+    // POST x-www-form-urlencoded dari server Duitku ke
+    // /duitku-callback (URL ini didaftarkan di proyek Duitku).
+    // Dicek SEBELUM webhook Telegram supaya tidak dikira update bot.
+    if (url.pathname === "/duitku-callback" && req.method === "POST") {
+      return await handleDuitkuCallback(env, req);
+    }
+
     // ---- Relay data Nadia untuk auto-sync GitHub Actions ----
     // GitHub Actions kena HTTP 403 kalau langsung memanggil API Nadia
     // (20 Nov 2026: token valid — curl dari mesin lain dapat HTTP 200 —
@@ -1348,6 +1356,9 @@ async function buatRenewOrder(env, chatId, target, kodePaket) {
     await sendPhoto(env, chatId, env.QRIS_IMAGE_URL,
       "QRIS DANA Bisnis SANDEKALA — bayar Rp" + nominalUnik.toLocaleString("id-ID") + ". Order " + orderId);
   }
+  // Duitku (26 Nov 2026): link bayar otomatis sebagai TAMBAHAN —
+  // gagal / nonaktif = diam, bayar manual di atas tetap jalan.
+  await kirimLinkBayarDuitku(env, order);
 }
 
 // Ganti protokol via Nadia. Ke SSH: sertakan ssh_password yang diketik.
@@ -1726,6 +1737,180 @@ async function kabariGagal(env, chatId, judul, error) {
   }
 }
 
+// ---- Duitku (payment gateway, SANDBOX — 26 Nov 2026) ----
+// Mode Pop (halaman bayar milik Duitku): bot cuma membuat invoice
+// lalu mengirim paymentUrl ke pembeli; pembeli memilih metode bayar
+// di halaman Duitku (QRIS, VA, e-wallet, retail). Bayar manual via
+// QRIS DANA tetap jalan sebagai fallback — invoice Duitku hanya
+// TAMBAHAN, bukan pengganti. Kalau createInvoice gagal / env tidak
+// ada, order tetap jalan manual (jangan gagalkan order).
+// Docs resmi (docs.duitku.com/pop/en/, dibaca 26 Nov 2026):
+// - createInvoice: POST {sandbox https://api-sandbox.duitku.com |
+//   prod https://api-prod.duitku.com}/api/merchant/createInvoice,
+//   header x-duitku-signature = HMAC_SHA256(merchantCode+timestamp,
+//   apiKey), x-duitku-timestamp (ms), x-duitku-merchantcode.
+//   Respons: paymentUrl, reference, statusCode "00".
+// - Callback: POST x-www-form-urlencoded ke callbackUrl;
+//   signature = HMAC_SHA256(merchantCode+amount+merchantOrderId,
+//   apiKey); resultCode "00" = sukses.
+// - Changelog Apr 2026: MD5 / SHA256-polos sudah OBSOLETE —
+//   yang berlaku sekarang HMAC-SHA256 di semua titik.
+// Env (Secrets/vars Worker):
+//   DUITKU_MERCHANT_CODE (vars, bukan rahasia — mis. DSxxxxx)
+//   DUITKU_API_KEY       (Secret — jangan taruh di [vars])
+//   DUITKU_SANDBOX       (vars, "1" = sandbox, "0" = production)
+// Kalau DUITKU_MERCHANT_CODE / DUITKU_API_KEY tidak ada, fitur
+// Duitku nonaktif diam-diam — order tetap jalan manual.
+const DUITKU_CALLBACK_URL = "https://sandekala.radencitraksih.workers.dev/duitku-callback";
+const DUITKU_RETURN_URL = "https://t.me/sandekalavpn_bot";
+// Masa berlaku invoice Duitku (menit) — disamakan dengan ORDER_TTL_MS
+// (30 menit). Docs menyebut contoh 5/10/60 — verifikasi di sandbox
+// apakah 30 diterima; kalau createInvoice ditolak, order tetap jalan
+// manual (fallback).
+const DUITKU_EXPIRY_MENIT = 30;
+
+function duitkuAktif(env) {
+  return Boolean(env.DUITKU_MERCHANT_CODE && env.DUITKU_API_KEY);
+}
+
+function duitkuBaseUrl(env) {
+  return (env.DUITKU_SANDBOX === "0" || env.DUITKU_SANDBOX === "false")
+    ? "https://api-prod.duitku.com"
+    : "https://api-sandbox.duitku.com";
+}
+
+// HMAC-SHA256 -> hex lowercase (WebCrypto; ada di Workers & Node 19+).
+async function hmacSha256Hex(key, message) {
+  const k = await crypto.subtle.importKey(
+    "raw", new TextEncoder().encode(key),
+    { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(message));
+  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Bandingkan dua string tanpa bocor lewat waktu (hindari early-exit).
+function samakanString(a, b) {
+  const x = String(a || ""), y = String(b || "");
+  if (x.length !== y.length) return false;
+  let beda = 0;
+  for (let i = 0; i < x.length; i++) beda |= x.charCodeAt(i) ^ y.charCodeAt(i);
+  return beda === 0;
+}
+
+// Buat invoice Duitku untuk sebuah order. Kembalikan
+// { paymentUrl, reference } kalau berhasil, null kalau gagal /
+// fitur nonaktif — pemanggil TIDAK BOLEH menggagalkan order
+// kalau ini null (bayar manual tetap jalan).
+// Pemetaan merchantOrderId <-> order: merchantOrderId = ID order
+// (ORD-...) — jadi callback tinggal GET order itu dari KV, tanpa
+// tabel pemetaan tambahan.
+async function buatInvoiceDuitku(env, order) {
+  if (!duitkuAktif(env)) return null;
+  const merchantCode = env.DUITKU_MERCHANT_CODE;
+  const timestamp = String(Date.now());
+  try {
+    const signature = await hmacSha256Hex(env.DUITKU_API_KEY, merchantCode + timestamp);
+    const r = await fetch(duitkuBaseUrl(env) + "/api/merchant/createInvoice", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-duitku-signature": signature,
+        "x-duitku-timestamp": timestamp,
+        "x-duitku-merchantcode": merchantCode,
+      },
+      body: JSON.stringify({
+        paymentAmount: order.nominalUnik,
+        merchantOrderId: order.id,
+        productDetails: "SANDEKALA " + (order.namaPaket || "VPN"),
+        additionalParam: "",
+        merchantUserInfo: String(order.chatId || ""),
+        paymentMethod: "",
+        customerVaName: order.pembeli || "Pembeli SANDEKALA",
+        // Bot Telegram tidak mengumpulkan email pembeli; Duitku
+        // mewajibkan kolom email, jadi kirim alamat sintetis per
+        // pembeli (format valid, tidak dipakai untuk kirim apa pun).
+        email: "tg" + String(order.chatId || "0") + "@sandekala.eu.cc",
+        phoneNumber: "",
+        itemDetails: [{ name: order.namaPaket || "VPN", price: order.nominalUnik, quantity: 1 }],
+        callbackUrl: DUITKU_CALLBACK_URL,
+        returnUrl: DUITKU_RETURN_URL,
+        expiryPeriod: DUITKU_EXPIRY_MENIT,
+      }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || j.statusCode !== "00" || !j.paymentUrl) {
+      order.duitkuError = "createInvoice: HTTP " + r.status + " " + (j.statusMessage || "");
+      await env.ORDERS.put(order.id, JSON.stringify(order));
+      return null;
+    }
+    return { paymentUrl: j.paymentUrl, reference: j.reference || null };
+  } catch (e) {
+    order.duitkuError = "createInvoice: " + String((e && e.message) || e);
+    await env.ORDERS.put(order.id, JSON.stringify(order)).catch(() => {});
+    return null;
+  }
+}
+
+// Kirim link bayar Duitku ke pembeli + simpan referensinya di order.
+// Dipanggil SETELAH pesan bayar manual terkirim, supaya kalau
+// invoice gagal, pembeli tetap bisa bayar manual.
+async function kirimLinkBayarDuitku(env, order) {
+  const inv = await buatInvoiceDuitku(env, order);
+  if (!inv) return;
+  order.duitkuReference = inv.reference;
+  order.duitkuPaymentUrl = inv.paymentUrl;
+  await env.ORDERS.put(order.id, JSON.stringify(order));
+  await sendTelegram(env, order.chatId,
+    "💳 Atau bayar otomatis lewat Duitku (bisa QRIS, VA bank, e-wallet, retail):\n" +
+    inv.paymentUrl + "\n" +
+    "Nominal sama: Rp" + order.nominalUnik.toLocaleString("id-ID") + ". " +
+    "Setelah bayar di halaman Duitku, config langsung dikirim otomatis ke sini — tidak perlu tunggu admin.\n" +
+    "Link berlaku 30 menit, sama seperti order ini.",
+    [[{ text: "💳 Bayar via Duitku", url: inv.paymentUrl }]]);
+}
+
+// Callback Duitku: POST form ke /duitku-callback.
+// Selalu balas HTTP 200 ("SUCCESS") supaya Duitku tidak retry —
+// kecuali request-nya bukan POST (bukan callback). Order yang tidak
+// valid / signature salah / amount tidak cocok / resultCode bukan
+// "00" / order sudah selesai → diabaikan diam-diam (tetap 200).
+// Hanya order "menunggu bayar" yang diproses, dan fulfillment-nya
+// SAMA PERSIS dengan konfirmasi manual (selesaikanOrder).
+async function handleDuitkuCallback(env, req) {
+  try {
+    if (!duitkuAktif(env)) return new Response("SUCCESS");
+    const ct = req.headers.get("Content-Type") || "";
+    let p = {};
+    if (ct.includes("application/json")) {
+      p = await req.json().catch(() => ({}));
+    } else {
+      const teks = await req.text().catch(() => "");
+      p = Object.fromEntries(new URLSearchParams(teks));
+    }
+    const merchantCode = String(p.merchantCode || "");
+    const amount = String(p.amount || "");
+    const merchantOrderId = String(p.merchantOrderId || "");
+    const signature = String(p.signature || "");
+    const resultCode = String(p.resultCode || "");
+    if (!merchantCode || !amount || !merchantOrderId || !signature) return new Response("SUCCESS");
+    if (merchantCode !== env.DUITKU_MERCHANT_CODE) return new Response("SUCCESS");
+    const hitung = await hmacSha256Hex(env.DUITKU_API_KEY, merchantCode + amount + merchantOrderId);
+    if (!samakanString(hitung, signature.toLowerCase())) return new Response("SUCCESS");
+    const order = await env.ORDERS.get(merchantOrderId, "json").catch(() => null);
+    if (!order) return new Response("SUCCESS");
+    if (Number(amount) !== Number(order.nominalUnik)) return new Response("SUCCESS");
+    if (resultCode !== "00") return new Response("SUCCESS");
+    if (order.status !== "menunggu bayar") return new Response("SUCCESS");
+    order.duitkuReferencePaid = String(p.reference || "");
+    order.bayarVia = "duitku";
+    await env.ORDERS.put(order.id, JSON.stringify(order));
+    await selesaikanOrder(env, order.id, order);
+    return new Response("SUCCESS");
+  } catch {
+    return new Response("SUCCESS");
+  }
+}
+
 async function buatOrder(env, chatId, kodePaket, protocol, customUsername, serverKode, from, sshPassword) {
   const paket = PAKET.find((p) => p.kode === kodePaket);
   if (!paket) return;
@@ -1784,6 +1969,9 @@ async function buatOrder(env, chatId, kodePaket, protocol, customUsername, serve
     await sendTelegram(env, chatId,
       "Catatan: gambar QRIS belum dipasang di bot ini — minta gambar QRIS ke admin dulu, lalu bayar sesuai nominal harga yang tertera di atas.");
   }
+  // Duitku (26 Nov 2026): link bayar otomatis sebagai TAMBAHAN —
+  // gagal / nonaktif = diam, bayar manual di atas tetap jalan.
+  await kirimLinkBayarDuitku(env, order);
 }
 
 // Cari order pending dengan nominal yang sama (dari notif DANA).
