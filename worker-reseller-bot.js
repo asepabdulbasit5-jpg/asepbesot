@@ -928,6 +928,44 @@ async function handleTelegram(env, update) {
     return;
   }
 
+  // Perintah admin: /cekduitku [ORDER_ID] — diagnosa Duitku (26 Nov 2026).
+  // READ-ONLY: tidak memanggil API Duitku, tidak mengubah order, tidak
+  // mengirim pesan ke pembeli. Menjawab kenapa order tidak dapat link
+  // "Bayar via Duitku": fitur nonaktif (env kosong di Worker) atau
+  // createInvoice ditolak (error mentah tersimpan di order.duitkuError).
+  if (text === "/cekduitku" || text.startsWith("/cekduitku ")) {
+    if (!adalahAdmin(env, chatId)) {
+      await sendTelegram(env, chatId, "Perintah ini hanya untuk admin.");
+      return;
+    }
+    const arg = text.slice("/cekduitku".length).trim();
+    let order = null;
+    if (arg) {
+      order = await env.ORDERS.get(arg, "json").catch(() => null);
+    } else {
+      order = await orderTerakhir(env, chatId);
+    }
+    if (!order) {
+      await sendTelegram(env, chatId, arg ? "Order " + arg + " tidak ditemukan." : "Belum ada order terakhir.");
+      return;
+    }
+    const aktif = duitkuAktif(env);
+    const baris = [
+      "🔍 Cek Duitku — " + order.id,
+      "Status: " + order.status,
+      "Nominal: Rp" + Number(order.nominalUnik || 0).toLocaleString("id-ID"),
+      "Duitku: " + (aktif ? "AKTIF" : "NONAKTIF (env DUITKU_MERCHANT_CODE / DUITKU_API_KEY kosong)"),
+    ];
+    if (order.duitkuReference) baris.push("Reference: " + order.duitkuReference);
+    if (order.duitkuPaymentUrl) baris.push("Payment URL: " + order.duitkuPaymentUrl);
+    if (order.duitkuError) baris.push("Error: " + order.duitkuError);
+    if (!order.duitkuReference && !order.duitkuPaymentUrl && !order.duitkuError) {
+      baris.push(aktif ? "Belum ada invoice Duitku untuk order ini." : "Invoice tidak dibuat karena fitur nonaktif.");
+    }
+    await sendTelegram(env, chatId, baris.join("\n"));
+    return;
+  }
+
   if (text === "/cekotomatis") {
     if (!adalahAdmin(env, chatId)) return;
     const lap = await susunLaporanAutoCek(env);
