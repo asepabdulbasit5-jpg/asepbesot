@@ -1601,7 +1601,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.30";
+const VERSI_BOT = "v2.9.31";
 
 const PESAN_START =
   "👋 <b>Selamat datang di Generator Config Dark Tunnel</b>\n\n" +
@@ -4211,9 +4211,11 @@ async function handleTemplateTipe(env, chatId, tipe, notice, messageId) {
     return;
   }
   const daftarTampil = daftar.slice(0, 20);
+  // (v2.9.31) Daftar keterangan template (nomor + operator · kategori ·
+  // metode — tanggal) DIHAPUS atas perintah Asep — nama template sudah
+  // ada di tombolnya, jadi pesan cuma judul + petunjuk + tombol.
   const teks = awalan + judul + "\n\n" +
-    daftarTampil.map((e, i) => (i + 1) + ". <b>" + escapeHtml(e.nama) + "</b> (" + escapeHtml(labelOperator(e.operator)) + " · " + escapeHtml(labelKategori(e.operator, e.kategori)) + (e.metode ? " · " + escapeHtml(labelMetode(e.tipe, e.metode)) : "") + ") — " + e.tanggal).join("\n") +
-    "\n\nKetuk satu template buat generate pakai template itu." + (isAdmin ? " (Admin: tombol ✏️ Edit / 🗑️ Hapus ada di bawah tiap nama.)" : "");
+    "Ketuk satu template buat generate pakai template itu." + (isAdmin ? " (Admin: tombol ✏️ Edit / 🗑️ Hapus ada di bawah tiap nama.)" : "");
   const keyboard = [];
   for (const e of daftarTampil) {
     // (v2.9.10) Nama template SELALU satu baris penuh — tombol ✏️/🗑️
