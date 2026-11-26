@@ -1892,7 +1892,12 @@ async function buatInvoiceDuitku(env, order) {
 // Kirim link bayar Duitku ke pembeli + simpan referensinya di order.
 // Dipanggil SETELAH pesan bayar manual terkirim, supaya kalau
 // invoice gagal, pembeli tetap bisa bayar manual.
+// Tombol HANYA tampil di mode PRODUKSI (26 Nov 2026): di sandbox
+// pembeli beneran tidak bisa bayar (cuma kartu tes/simulasi), jadi
+// sembunyikan supaya tidak membingungkan. Kalau mau tes sandbox
+// lagi lewat bot, balik gate ini sementara.
 async function kirimLinkBayarDuitku(env, order) {
+  if (env.DUITKU_SANDBOX !== "0" && env.DUITKU_SANDBOX !== "false") return;
   const inv = await buatInvoiceDuitku(env, order);
   if (!inv) return;
   order.duitkuReference = inv.reference;
