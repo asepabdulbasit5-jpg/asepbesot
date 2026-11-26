@@ -428,9 +428,10 @@ async function kvList(env, prefix) {
 // jadi pola yang sama dipasang di sini. Cache memori per-isolate (Workers
 // memakai ulang isolate yang sama untuk banyak request), tanpa ubah
 // perilaku yang terlihat pengguna:
-//   - USER: / KBRM: yang sudah dikenal diingat di Set (batas 5000 entri)
-//     — tidak GET lagi di isolate itu. Kedua kunci ini tulis-sekali
+//   - USER: yang sudah dikenal diingat di Set (batas 5000 entri)
+//     — tidak GET lagi di isolate itu. Kunci ini tulis-sekali
 //     (tidak pernah diubah), jadi Set tidak bisa basi.
+//     (v2.9.30: KBRM: dihapus bersama pesan hapus-keyboard.)
 //   - Aktivitas grup: throttle 5 menit dicek di memori dulu.
 //   - Roast: 1 LIST prefix "ROAST_" (dulu 2 LIST: BUKA + TUTUP).
 //   - Nudge sepi: maks. 1x/jam per akun (dulu tiap cron 10 menit),
@@ -438,7 +439,6 @@ async function kvList(env, prefix) {
 //   - SENGAJA TIDAK di-cache: daftar template & BUGS (ditulis langsung
 //     ke KV di beberapa jalur; cache memori bisa basi & bikin tes rapuh).
 const penggunaDikenal = new Set();
-const kbrmDikenal = new Set();
 const aktivitasGrupTerakhir = new Map();
 const BATAS_SET_DIKEANAL = 5000;
 
@@ -446,7 +446,6 @@ const BATAS_SET_DIKEANAL = 5000;
 // per-isolate harus dingin lagi; di produksi tidak pernah dipanggil).
 export function resetCacheHematKv() {
   penggunaDikenal.clear();
-  kbrmDikenal.clear();
   aktivitasGrupTerakhir.clear();
 }
 
@@ -1602,7 +1601,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.29";
+const VERSI_BOT = "v2.9.30";
 
 const PESAN_START =
   "👋 <b>Selamat datang di Generator Config Dark Tunnel</b>\n\n" +
@@ -2856,8 +2855,6 @@ async function tampilkanMenuUtama(env, chatId, messageId, diGrup) {
   } else {
     await sendTelegram(env, chatId, teks, kb);
   }
-  // Di grup jangan kirim pesan hapus-keyboard (numpang di obrolan grup).
-  if (!diGrup) await hapusKeyboardBawahSekali(env, chatId);
 }
 
 // ================= PEMICU KATA DI GRUP (v2.9.13, v2.9.14) =================
@@ -3142,26 +3139,6 @@ export async function cekGrupSepi(env) {
     await sendTelegram(env, Number(chatId), "sepi amat ini grup! ngobrol kek!");
     try { await env.DATA.put("GRUP_NUDGE:" + chatId, String(sekarang)); } catch { /* abaikan */ }
   }
-}
-
-// Hapus reply keyboard "▶️ Start" lama — sekali per pengguna (KV KBRM).
-// Telegram tidak bisa menghapus reply keyboard lewat pesan inline_keyboard;
-// harus pesan khusus dengan remove_keyboard. Tanpa KV: dilewati diam-diam.
-async function hapusKeyboardBawahSekali(env, chatId) {
-  if (!env.DATA) return;
-  try {
-    // (v2.9.22) KBRM tulis-sekali: yang sudah dikenal tidak di-GET lagi.
-    if (kbrmDikenal.has(String(chatId))) return;
-    if (await env.DATA.get("KBRM:" + chatId)) { kbrmDikenal.add(String(chatId)); if (kbrmDikenal.size > BATAS_SET_DIKEANAL) kbrmDikenal.clear(); return; }
-    await telegramApi(env, "sendMessage", {
-      chat_id: chatId,
-      text: "Tombol ▶️ Start di bawah sudah dihapus.",
-      reply_markup: { remove_keyboard: true },
-    });
-    await env.DATA.put("KBRM:" + chatId, "1");
-    kbrmDikenal.add(String(chatId));
-    if (kbrmDikenal.size > BATAS_SET_DIKEANAL) kbrmDikenal.clear();
-  } catch { /* abaikan */ }
 }
 
 // ================= HANDLER TELEGRAM =================
