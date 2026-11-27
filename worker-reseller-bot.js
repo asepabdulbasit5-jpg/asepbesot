@@ -1231,9 +1231,9 @@ async function tampilkanMenuUtama(env, chatId, from, messageId) {
     "ROLE: " + (isAdmin ? "admin" : "member"),
     "TOTAL VPN: " + daftar.length + " AKUN"];
   if (saldo !== null) baris.push("SALDO VPN: Rp" + saldo.toLocaleString("id-ID"));
-  baris.push(GARIS_PANEL, "SERVER TERSEDIA: " + tersedia + " / " + SERVERS.length + " SERVERS", "TOKO: " + (buka ? "🟢 BUKA" : "🔴 TUTUP"), GARIS_PANEL, "OWNER: @Asepbesot", GARIS_PANEL);
+  baris.push(GARIS_PANEL, "SERVER TERSEDIA: " + tersedia + " / " + SERVERS.length + " SERVERS", "TOKO: " + (buka ? "🟢 BUKA" : "🔴 TUTUP"), GARIS_PANEL, "Admin: @Asepbesot", GARIS_PANEL);
   if (isAdmin) baris.push("ADMIN: /semuaakun • /broadcast PESAN • /konfirmasi ORDER_ID • /buka • /tutup • /ceknadia", GARIS_PANEL);
-  const html = baris.map((x) => (x === "MENU UTAMA" || x === "INFORMASI PELANGGAN") ? "<b>" + escapeHtml(x) + "</b>" : (x === "OWNER: @Asepbesot" ? 'OWNER: <a href="https://t.me/Asepbesot">@Asepbesot</a>' : escapeHtml(x))).join("\n");
+  const html = baris.map((x) => (x === "MENU UTAMA" || x === "INFORMASI PELANGGAN") ? "<b>" + escapeHtml(x) + "</b>" : escapeHtml(x)).join("\n");
   const tombol = [
     [{ text: "🛒 Beli VPN", callback_data: "menu:beli", style: "success" }],
     [{ text: "📦 Status Order", callback_data: "menu:status", style: "primary" }],
@@ -3163,14 +3163,14 @@ async function telegramApi(env, method, body) {
   } catch (e) { return null; }
 }
 async function sendHtml(env, chatId, html, keyboard) {
-  const body = { chat_id: chatId, text: String(html).slice(0, 4000), parse_mode: "HTML" };
+  const body = { chat_id: chatId, text: String(html).slice(0, 4000), parse_mode: "HTML", link_preview_options: { is_disabled: true } };
   if (keyboard) body.reply_markup = { inline_keyboard: keyboard };
   const j = await telegramApi(env, "sendMessage", body);
   return j?.result?.message_id || null;
 }
 async function editHtml(env, chatId, messageId, html, keyboard) {
   if (!messageId) return sendHtml(env, chatId, html, keyboard);
-  const body = { chat_id: chatId, message_id: messageId, text: String(html).slice(0, 4000), parse_mode: "HTML" };
+  const body = { chat_id: chatId, message_id: messageId, text: String(html).slice(0, 4000), parse_mode: "HTML", link_preview_options: { is_disabled: true } };
   if (keyboard) body.reply_markup = { inline_keyboard: keyboard };
   let j = await telegramApi(env, "editMessageText", body);
   if (!j?.ok) {
@@ -3191,7 +3191,7 @@ async function editReplyMarkup(env, chatId, messageId, keyboard) {
 }
 
 async function sendTelegram(env, chatId, text, keyboard) {
-  const body = { chat_id: chatId, text: String(text).slice(0, 4000) };
+  const body = { chat_id: chatId, text: String(text).slice(0, 4000), link_preview_options: { is_disabled: true } };
   if (keyboard) body.reply_markup = { inline_keyboard: keyboard };
   await fetch("https://api.telegram.org/bot" + env.BOT_TOKEN + "/sendMessage", {
     method: "POST",
