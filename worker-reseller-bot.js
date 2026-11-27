@@ -1169,7 +1169,9 @@ function styleServer(s, live) {
 // peringatan pop-up "server penuh, pilih server lain".
 // ================= TAMPILAN ALA PANEL (gaya bot panel, isi tetap SANDEKALA) ====
 // /start & /menu -> kotak MENU UTAMA (monospace) + tombol inline hijau.
-// Daftar server -> kotak per server + pagination Page 1/2, footer -SANDEKALA-.
+// Daftar server -> teks ringkas (legenda warna + baris harga sekali +
+// pagination Page 1/2, footer - SANDEKALAVPN - tebal); nama + sisa slot
+// ada di tombol, bukan di teks (27 Nov 2026).
 // Yang ditampilkan HANYA data asli bot ini: ID/username Telegram, jumlah
 // akun pembeli di bot, status slot live, harga jual SANDEKALA, saldo
 // reseller (khusus admin, live dari GET /user/balance). Tidak ada angka
@@ -1265,19 +1267,17 @@ async function tampilkanMenuUtama(env, chatId, from, messageId) {
   } else await sendHtml(env, chatId, html, tombol);
 }
 
-function teksDaftarServer(daftar, live, judul, halaman, totalHalaman) {
-  const bagian = daftar.map((s) => {
-    const st = statusServer(s, live);
-    const nama = s.nama.replace(" — PENUH", "");
-    const pakai = (st.used !== null && st.limit !== null) ? st.used + "/" + st.limit : "?";
-    return "🔰 Nama Server: " + nama +
-      "\n💵 Harga: 1 hari Rp800 • 7 hari Rp3.300 • 30 hari Rp10.000" +
-      "\n🧮 Total Akun Dibuat: " + pakai + (st.sisa !== null ? " (sisa " + st.sisa + ")" : "") +
-      (st.penuh ? "\n❌ PENUH" : "") +
-      "\n" + GARIS_PANEL;
-  });
-  return judul + "\n" + GARIS_PANEL + "\n" + bagian.join("\n") +
-    "\nHalaman " + (halaman + 1) + "/" + totalHalaman + "\n" + GARIS_PANEL + "\n-SANDEKALA-\n" + GARIS_PANEL;
+function teksDaftarServer(judul, halaman, totalHalaman, tampilkanHarga) {
+  // Teks ringkas (27 Nov 2026, perintah Asep): blok per-server dihapus —
+  // nama + sisa slot sudah terwakili tombol (warna = status slot).
+  // Baris harga cuma mode beli; mode trial tidak (trial gratis).
+  // Footer SANDEKALAVPN di-bold — jadi <b> dikeluarkan literal, judul
+  // di-escape sendiri; pemanggil JANGAN escapeHtml lagi hasilnya.
+  const barisHarga = tampilkanHarga
+    ? "\n💵 Harga: 1 hari Rp800 • 7 hari Rp3.300 • 30 hari Rp10.000\n" + GARIS_PANEL
+    : "";
+  return escapeHtml(judul) + "\n" + GARIS_PANEL + barisHarga +
+    "\nHalaman " + (halaman + 1) + "/" + totalHalaman + "\n" + GARIS_PANEL + "\n- <b>SANDEKALAVPN</b> -\n" + GARIS_PANEL;
 }
 
 function tombolDaftarServer(daftar, live, mode, halaman, totalHalaman) {
@@ -1315,7 +1315,9 @@ async function tampilkanDaftarServer(env, chatId, mode, halaman, messageId) {
     : "Pilih servernya:\n🟢 Hijau: tersedia  •  🔵 Biru: hampir penuh (sisa ≤ 10 slot)  •  🔴 Merah: PENUH tidak bisa dipilih\nAngka = slot kosong" + (live.map ? " (status terbaru)." : " (status per 19 Nov — gagal ambil status terbaru).");
   // Teks biasa (bukan <pre>) supaya tidak muncul tombol SALIN KODE
   // bawaan Telegram — sama seperti menu (permintaan Asep 19 Nov 2026).
-  const html = escapeHtml(teksDaftarServer(daftar, live, judul, halaman, totalHalaman));
+  // teksDaftarServer sudah meng-escape judul sendiri + mengeluarkan
+  // <b> footer literal — jangan escapeHtml lagi di sini.
+  const html = teksDaftarServer(judul, halaman, totalHalaman, mode === "beli");
   const tombol = tombolDaftarServer(daftar, live, mode, halaman, totalHalaman);
   if (messageId) await editHtml(env, chatId, messageId, html, tombol);
   else await sendHtml(env, chatId, html, tombol);
