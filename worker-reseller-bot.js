@@ -2205,6 +2205,12 @@ async function kirimConfig(env, chatId, pembuka, config, penutup, keyboard, mess
       const t = b.trim();
       if (/^(vless|vmess|trojan|ss):\/\//i.test(t)) return "<pre>" + escapeHtml(t) + "</pre>";
       if (t === "") return "";
+      // Header Xray disamain kaya SSH (27 Nov 2026): baris polos
+      // "SANDEKALAVPN" dari susunInfoAkun jadi tebal + emoji di sini
+      // — config tersimpan tetap polos, yang di-bold hanya output
+      // terkirim (kalau tag-nya ditaruh di susunInfoAkun, baris ini
+      // jatuh ke escapeHtml di bawah dan tampil sebagai teks tag).
+      if (t === "SANDEKALAVPN") return "<b>😈 SANDEKALAVPN 😈</b>";
       const m = t.match(/^([^:]+):\s*(.+)$/);
       if (m) return escapeHtml(m[1]) + ": <code>" + escapeHtml(m[2]) + "</code>";
       return escapeHtml(b);
@@ -2355,8 +2361,11 @@ async function createResellerAccount(env, order) {
     const accountId = cariAccountId(d);
     const hasil = ambilConfigDariData(d);
     // Tambah baris Username kalau hasil parse belum menyebutnya
-    // (mis. kalau config berupa link vless:// saja).
-    let config = hasil.includes("Username:") ? hasil : "Username: " + username + "\n" + hasil;
+    // (mis. kalau config berupa link vless:// saja). renderSSH
+    // menulis "Username : " (spasi sebelum titik dua), jadi cek
+    // kedua bentuk — kalau tidak, config SSH ketambahan baris
+    // "Username: ..." nyempil di atas header (27 Nov 2026).
+    let config = (hasil.includes("Username:") || hasil.includes("Username :")) ? hasil : "Username: " + username + "\n" + hasil;
     // SSH: pastikan password yang dikirim ke Nadia ikut tampil di
     // config — kalau respons Nadia tidak menyebutkannya, pembeli
     // tidak akan tahu password akunnya.
@@ -2524,7 +2533,8 @@ function portSingkat(grid) {
 }
 
 // Render config SSH FORMAT RINGKAS SANDEKALAVPN (22 Nov 2026, spek
-// Asep): header SANDEKALAVPN, Informasi Akun (Username/Password),
+// Asep): header <b>😈 SANDEKALAVPN 😈</b> (tebal + emoji, 27 Nov 2026,
+// mockup editan Asep), Informasi Akun (Username/Password),
 // Domain & Koneksi (Domain/Server/Pubkey/Name Server/DNS + satu baris Port),
 // Name Server dari API kalau ada, kalau tidak dari tabel NS_PER_DOMAIN,
 // Format Account (WS/TLS port pertama saja). Tanpa seksi Payload,
@@ -2570,7 +2580,7 @@ function renderSSH(entri, o) {
     if (tlsPort) fmt.push("TLS :\n" + kode(domain + ":" + tlsPort + "@" + user + ":" + pass));
     tambah("Format Account", fmt);
   }
-  return "SANDEKALAVPN\n\n" + seksi.join("\n\n");
+  return "<b>😈 SANDEKALAVPN 😈</b>\n\n" + seksi.join("\n\n");
 }
 
 // Ubah nilai config apa pun (string / object) jadi teks yang bisa
