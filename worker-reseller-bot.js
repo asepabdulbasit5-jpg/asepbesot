@@ -282,17 +282,22 @@ export default {
   },
 
   // ---- Cron Trigger (v2.9.14 reseller) ----
-  // Jadwal di wrangler.toml (live, deploy-worker.yml): ["0 0 * * *"] saja.
-  // - 07:00 WIB (00:00 UTC): auto-cek Nadia + cek grup sepi -> roast
-  //   autodark ("brisik banget sih lu!") sesudah nudge autodark.
-  //   (Koreksi 24 Nov 2026: cron tiap jam "5 * * * *" di komentar lama
-  //   TIDAK PERNAH live — jadi cron bukan biang boros KV.)
+  // Jadwal di wrangler.toml (live, deploy-worker.yml): ["5 * * * *", "0 0 * * *"]
+  // + "* * * * *" (27 Nov 2026, PENDING: tambah di workflow deploy-worker.yml
+  // lewat web UI — auto-hapus broadcast baru aktif sesudah deploy itu).
+  // - Setiap invocasi: sapuHapusOtomatis (hapus broadcast buka/tutup yang
+  //   sudah berumur >1 menit; saat antrean kosong cuma 1 GET KV).
+  // - 07:00 WIB (00:00 UTC): auto-cek Nadia.
+  // - Menit :05 tiap jam: cek grup sepi -> roast autodark ("brisik banget
+  //   sih lu!") sesudah nudge autodark. Dibatasi menit :05 supaya LIST
+  //   GRUP_AKTIF: tidak jalan tiap menit (batas LIST KV gratis 1000/hari).
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
       const d = new Date(event.scheduledTime || Date.now());
       const jamWib = (d.getUTCHours() + 7) % 24;
       if (jamWib === 7 && d.getUTCMinutes() === 0) await jalankanCekNadiaOtomatis(env);
-      await cekGrupSepiReseller(env);
+      if (d.getUTCMinutes() === 5) await cekGrupSepiReseller(env);
+      await sapuHapusOtomatis(env);
     })());
   },
 };
@@ -491,14 +496,22 @@ async function siarkanKeSemuaPengguna(env, teks, buka) {
   const grup = await daftarSemuaGrup(env);
   if (!tujuan.size && !grup.size) { await sendTelegram(env, env.ADMIN_CHAT_ID, "Belum ada pengguna yang tercatat di bot."); return; }
   let ok = 0, okGrup = 0;
+  // (27 Nov 2026) Auto-hapus: catat message_id tiap pesan terkirim,
+  // dihapus otomatis 1 menit kemudian (lihat sapuHapusOtomatis).
+  const antreHapus = [];
+  const hapusPada = Date.now() + HAPUS_OTOMATIS_JEDA_MS;
   for (const id of tujuan) {
     const j = await telegramApi(env, "sendMessage", { chat_id: Number(id), text: teks.slice(0, 4000) });
-    if (j?.ok) ok++;
+    if (j?.ok) {
+      ok++;
+      if (j?.result?.message_id) antreHapus.push({ c: Number(id), m: j.result.message_id, t: hapusPada });
+    }
   }
   for (const id of grup) {
     const j = await telegramApi(env, "sendMessage", { chat_id: Number(id), text: teks.slice(0, 4000) });
     if (j?.ok) {
       okGrup++;
+      if (j?.result?.message_id) antreHapus.push({ c: Number(id), m: j.result.message_id, t: hapusPada });
       // (22 Nov 2026) Tandai buat autodark: biar dia nyautin
       // broadcast ini ("kemana aja lu?" / "bot kok tutup njng!").
       // Ditulis ke KV DATA (milik autodark, di-bind ke worker ini
@@ -510,7 +523,43 @@ async function siarkanKeSemuaPengguna(env, teks, buka) {
       } catch { /* abaikan */ }
     }
   }
+  await antreHapusOtomatis(env, antreHapus);
   await sendTelegram(env, env.ADMIN_CHAT_ID, "📣 Info buka/tutup terkirim ke " + ok + " pengguna" + (okGrup ? " dan " + okGrup + " grup" : "") + ".");
+}
+
+// ---- Auto-hapus broadcast buka/tutup (27 Nov 2026) ----
+// Pesan buka/tutup dihapus otomatis dari chat pengguna 1 menit sesudah
+// terkirim — biar chat pembeli tidak penuh pengumuman. Antrean disimpan
+// di KV DATA satu key (tanpa LIST): [{c: chatId, m: messageId, t: ms}].
+// Sweep jalan di setiap invocasi cron; saat antrean kosong cuma 1 GET.
+const KUNCI_HAPUS_OTOMATIS = "HAPUS_OTOMATIS";
+const HAPUS_OTOMATIS_JEDA_MS = 60000;
+const HAPUS_OTOMATIS_MAKS = 500;
+async function antreHapusOtomatis(env, entriBaru) {
+  if (!env.DATA || !entriBaru?.length) return;
+  try {
+    const lama = await env.DATA.get(KUNCI_HAPUS_OTOMATIS, "json").catch(() => null);
+    const gabung = [...(Array.isArray(lama) ? lama : []), ...entriBaru].slice(-HAPUS_OTOMATIS_MAKS);
+    await env.DATA.put(KUNCI_HAPUS_OTOMATIS, JSON.stringify(gabung));
+  } catch { /* abaikan */ }
+}
+async function sapuHapusOtomatis(env) {
+  if (!env.DATA) return;
+  let antrean;
+  try { antrean = await env.DATA.get(KUNCI_HAPUS_OTOMATIS, "json"); } catch { return; }
+  if (!Array.isArray(antrean) || !antrean.length) return; // kosong: tanpa PUT
+  const sekarang = Date.now();
+  const jatuhTempo = antrean.filter((e) => e && Number(e.t) <= sekarang);
+  const sisa = antrean.filter((e) => e && Number(e.t) > sekarang);
+  for (const e of jatuhTempo) {
+    // Gagal diabaikan: pesan mungkin sudah dihapus user / bot diblokir.
+    // Entri tetap dibuang dari antrean (tidak di-retry).
+    try { await telegramApi(env, "deleteMessage", { chat_id: e.c, message_id: e.m }); } catch { /* abaikan */ }
+  }
+  try {
+    if (sisa.length) await env.DATA.put(KUNCI_HAPUS_OTOMATIS, JSON.stringify(sisa));
+    else await env.DATA.delete(KUNCI_HAPUS_OTOMATIS);
+  } catch { /* abaikan */ }
 }
 
 async function handleTelegram(env, update) {
