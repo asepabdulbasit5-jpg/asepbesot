@@ -330,7 +330,7 @@ function keyboardOperatorBug() {
   const ops = Object.entries(BUG_DB);
   const rows = [];
   for (let i = 0; i < ops.length; i += 2) {
-    const row = ops.slice(i, i + 2).map(([k, v]) => ({ text: v.label, callback_data: "bug:op:" + k }));
+    const row = ops.slice(i, i + 2).map(([k, v]) => ({ text: v.label, callback_data: "bug:op:" + k, style: "primary" }));
     rows.push(row);
   }
   rows.push(...TOMBOL_KEMBALI);
@@ -344,8 +344,8 @@ function keyboardKategoriBug(opKey, kvKats) {
     const ia = URUTAN_KATEGORI.indexOf(a), ib = URUTAN_KATEGORI.indexOf(b);
     return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
   });
-  const rows = baris2(semua.map((k) => ({ text: labelKategori(opKey, k), callback_data: "bug:kat:" + opKey + ":" + k })));
-  rows.push([{ text: "⬅️ Ganti operator", callback_data: "bug:back" }]);
+  const rows = baris2(semua.map((k) => ({ text: labelKategori(opKey, k), callback_data: "bug:kat:" + opKey + ":" + k, style: "primary" })));
+  rows.push([{ text: "⬅️ Ganti operator", callback_data: "bug:back", style: "danger" }]);
   rows.push(...TOMBOL_KEMBALI);
   return rows;
 }
@@ -1587,11 +1587,11 @@ const PAYLOAD_METODE = {
 
 function keyboardMetodePayload() {
   return [
-    [{ text: "WS standar", callback_data: "metode:ws" }, { text: "SSH+payload", callback_data: "metode:sshpayload" }],
-    [{ text: "Enhanced", callback_data: "metode:enhanced" }, { text: "Direct", callback_data: "metode:direct" }],
-    [{ text: "PATCH /ssh-ws", callback_data: "metode:patchws" }, { text: "CF Trace", callback_data: "metode:cftrace" }],
-    [{ text: "✨ Otomatis", callback_data: "metode:auto" }],
-    [{ text: "⬅️ Kembali ke Menu", callback_data: "menu:utama" }],
+    [{ text: "WS standar", callback_data: "metode:ws", style: "primary" }, { text: "SSH+payload", callback_data: "metode:sshpayload", style: "primary" }],
+    [{ text: "Enhanced", callback_data: "metode:enhanced", style: "primary" }, { text: "Direct", callback_data: "metode:direct", style: "primary" }],
+    [{ text: "PATCH /ssh-ws", callback_data: "metode:patchws", style: "primary" }, { text: "CF Trace", callback_data: "metode:cftrace", style: "primary" }],
+    [{ text: "✨ Otomatis", callback_data: "metode:auto", style: "primary" }],
+    [{ text: "⬅️ Kembali ke Menu", callback_data: "menu:utama", style: "danger" }],
   ];
 }
 
@@ -1624,7 +1624,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.34";
+const VERSI_BOT = "v2.9.35";
 
 const PESAN_START =
   "👋 <b>Selamat datang di Generator Config Dark Tunnel</b>\n\n" +
@@ -2626,32 +2626,32 @@ function keyboardStart(isAdmin, diGrup) {
     // Anggota grup mengetik perintahnya; bot kirim hasilnya sebagai
     // pesan biasa. Buat Config tetap ada tapi ketukannya dialihkan ke
     // DM (akun rahasia).
-    return [[{ text: "⚡ Buat Config", callback_data: "buat:config" }]];
+    return [[{ text: "⚡ Buat Config", callback_data: "buat:config", style: "success" }]];
   }
   const kb = [
-    [{ text: "⚡ Buat Config", callback_data: "buat:config" }, { text: "✏️ Buat Manual", callback_data: "buat:manual" }],
-    [{ text: "🔍 Cari Bug", callback_data: "bug:menu" }, { text: "🌐 Cek Domain", callback_data: "cek:mulai" }],
-    [{ text: "📥 dark tunnel", url: "https://sfile.co/H26JBeTBi1o" }, { text: "🆕 Update Terbaru", callback_data: "update:lihat" }],
-    [{ text: "🛒 Beli Akun VPN", url: "https://t.me/sandekalavpn_bot" }, { text: "👥 Gabung Grup", url: "https://t.me/sand3kala" }],
+    [{ text: "⚡ Buat Config", callback_data: "buat:config", style: "success" }, { text: "✏️ Buat Manual", callback_data: "buat:manual", style: "success" }],
+    [{ text: "🔍 Cari Bug", callback_data: "bug:menu", style: "primary" }, { text: "🌐 Cek Domain", callback_data: "cek:mulai", style: "primary" }],
+    [{ text: "📥 dark tunnel", url: "https://sfile.co/H26JBeTBi1o", style: "primary" }, { text: "🆕 Update Terbaru", callback_data: "update:lihat", style: "primary" }],
+    [{ text: "🛒 Beli Akun VPN", url: "https://t.me/sandekalavpn_bot", style: "primary" }, { text: "👥 Gabung Grup", url: "https://t.me/sand3kala", style: "primary" }],
   ];
-  if (isAdmin) kb.push([{ text: "⚙️ Admin", callback_data: "admin:panel" }]);
+  if (isAdmin) kb.push([{ text: "⚙️ Admin", callback_data: "admin:panel", style: "primary" }]);
   return kb;
 }
 
-const TOMBOL_APK = [[{ text: "📥 Download APK Dark Tunnel", url: "https://sfile.co/H26JBeTBi1o" }]];
+const TOMBOL_APK = [[{ text: "📥 Download APK Dark Tunnel", url: "https://sfile.co/H26JBeTBi1o", style: "primary" }]];
 
 // Tombol kembali ke menu utama — dipasang di akhir hampir semua alur
 // (operator/kategori bug, pemandu buat config & cek domain, /update,
 // /config, daftar bug, pilihan metode payload, pesan gagal parsing).
-const TOMBOL_KEMBALI = [[{ text: "⬅️ Kembali ke Menu", callback_data: "menu:utama" }]];
+const TOMBOL_KEMBALI = [[{ text: "⬅️ Kembali ke Menu", callback_data: "menu:utama", style: "danger" }]];
 
 // Tombol kembali ke daftar kategori operator + kembali ke menu utama
 // (dipakai di pesan terakhir daftar bug). Admin juga dapat tombol
 // "🗑️ Hapus Bug" untuk masuk mode hapus bug kategori itu (v2.8.0).
 function keyboardKembaliBug(opKey, katKey, isAdmin) {
   const rows = [];
-  if (isAdmin) rows.push([{ text: "🗑️ Hapus Bug", callback_data: "bug:hapus:" + opKey + ":" + katKey }]);
-  rows.push([{ text: "⬅️ Kembali", callback_data: "bug:op:" + opKey }]);
+  if (isAdmin) rows.push([{ text: "🗑️ Hapus Bug", callback_data: "bug:hapus:" + opKey + ":" + katKey, style: "danger" }]);
+  rows.push([{ text: "⬅️ Kembali", callback_data: "bug:op:" + opKey, style: "danger" }]);
   rows.push(...TOMBOL_KEMBALI);
   return rows;
 }
@@ -2659,8 +2659,8 @@ function keyboardKembaliBug(opKey, katKey, isAdmin) {
 // Panel admin (tombol "⚙️ Admin" di menu utama).
 function keyboardAdmin() {
   return [
-    [{ text: "➕ Tambah Bug", callback_data: "admin:tambahbug" }, { text: "➕ Tambah Config", callback_data: "admin:tambahconfig" }],
-    [{ text: "📢 Broadcast", callback_data: "admin:broadcast" }, { text: "📊 Status", callback_data: "admin:status" }],
+    [{ text: "➕ Tambah Bug", callback_data: "admin:tambahbug", style: "success" }, { text: "➕ Tambah Config", callback_data: "admin:tambahconfig", style: "success" }],
+    [{ text: "📢 Broadcast", callback_data: "admin:broadcast", style: "primary" }, { text: "📊 Status", callback_data: "admin:status", style: "primary" }],
     ...TOMBOL_KEMBALI,
   ];
 }
@@ -2668,22 +2668,22 @@ function keyboardAdmin() {
 // ---- Keyboard wizard Template Config (v2.7) ----
 function keyboardTemplateTipe() {
   return [
-    [{ text: "SSH", callback_data: "tw:tipe:SSH" }, { text: "Xray / V2Ray", callback_data: "tw:tipe:XRAY" }],
-    [{ text: "❌ Batal", callback_data: "admin:batal" }],
+    [{ text: "SSH", callback_data: "tw:tipe:SSH", style: "primary" }, { text: "Xray / V2Ray", callback_data: "tw:tipe:XRAY", style: "primary" }],
+    [{ text: "❌ Batal", callback_data: "admin:batal", style: "danger" }],
   ];
 }
 
 function keyboardTemplateMetode(tipe, manual) {
   const daftar = METODE_TEMPLATE[tipe] || [];
-  const rows = baris2(daftar.map((m) => ({ text: m.label, callback_data: "tw:metode:" + m.id })));
+  const rows = baris2(daftar.map((m) => ({ text: m.label, callback_data: "tw:metode:" + m.id, style: "primary" })));
   if (manual) {
     // (v2.9.9) Buat Manual: tanpa "Kembali ke Tipe" (tipe sudah dari
     // akun) dan Batal = "mn:batal" (bukan admin:batal).
-    rows.push([{ text: "❌ Batal", callback_data: "mn:batal" }]);
+    rows.push([{ text: "❌ Batal", callback_data: "mn:batal", style: "danger" }]);
     return rows;
   }
-  rows.push([{ text: "⬅️ Kembali ke Tipe", callback_data: "tw:kembali:tipe" }]);
-  rows.push([{ text: "❌ Batal", callback_data: "admin:batal" }]);
+  rows.push([{ text: "⬅️ Kembali ke Tipe", callback_data: "tw:kembali:tipe", style: "danger" }]);
+  rows.push([{ text: "❌ Batal", callback_data: "admin:batal", style: "danger" }]);
   return rows;
 }
 
@@ -2691,20 +2691,20 @@ function keyboardTemplateOperator() {
   const ops = Object.entries(BUG_DB);
   const rows = [];
   for (let i = 0; i < ops.length; i += 2) {
-    rows.push(ops.slice(i, i + 2).map(([k, v]) => ({ text: v.label, callback_data: "tw:op:" + k })));
+    rows.push(ops.slice(i, i + 2).map(([k, v]) => ({ text: v.label, callback_data: "tw:op:" + k, style: "primary" })));
   }
-  rows.push([{ text: "⬅️ Kembali ke Metode", callback_data: "tw:kembali:metode" }]);
-  rows.push([{ text: "❌ Batal", callback_data: "admin:batal" }]);
+  rows.push([{ text: "⬅️ Kembali ke Metode", callback_data: "tw:kembali:metode", style: "danger" }]);
+  rows.push([{ text: "❌ Batal", callback_data: "admin:batal", style: "danger" }]);
   return rows;
 }
 
 function keyboardTemplateKategori(opKey) {
   const op = BUG_DB[opKey];
   const kats = op ? Object.keys(op.kategori) : [];
-  const rows = baris2(kats.map((k) => ({ text: labelKategori(opKey, k), callback_data: "tw:kat:" + k })));
-  rows.push([{ text: "➕ Kategori Baru", callback_data: "tw:kat:baru" }]);
-  rows.push([{ text: "⬅️ Kembali ke Operator", callback_data: "tw:kembali:op" }]);
-  rows.push([{ text: "❌ Batal", callback_data: "admin:batal" }]);
+  const rows = baris2(kats.map((k) => ({ text: labelKategori(opKey, k), callback_data: "tw:kat:" + k, style: "primary" })));
+  rows.push([{ text: "➕ Kategori Baru", callback_data: "tw:kat:baru", style: "success" }]);
+  rows.push([{ text: "⬅️ Kembali ke Operator", callback_data: "tw:kembali:op", style: "danger" }]);
+  rows.push([{ text: "❌ Batal", callback_data: "admin:batal", style: "danger" }]);
   return rows;
 }
 
@@ -2729,9 +2729,9 @@ function keyboardPilihBugOperator() {
   const ops = Object.entries(BUG_DB);
   const rows = [];
   for (let i = 0; i < ops.length; i += 2) {
-    rows.push(ops.slice(i, i + 2).map(([k, v]) => ({ text: v.label, callback_data: "tw:bug:op:" + k })));
+    rows.push(ops.slice(i, i + 2).map(([k, v]) => ({ text: v.label, callback_data: "tw:bug:op:" + k, style: "primary" })));
   }
-  rows.push([{ text: "⬅️ Kembali", callback_data: "tw:bug:kembali" }]);
+  rows.push([{ text: "⬅️ Kembali", callback_data: "tw:bug:kembali", style: "danger" }]);
   return rows;
 }
 
@@ -2742,9 +2742,9 @@ function keyboardPilihBugKategori(opKey, kvKats) {
     const ia = URUTAN_KATEGORI.indexOf(a), ib = URUTAN_KATEGORI.indexOf(b);
     return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
   });
-  const rows = baris2(semua.map((k) => ({ text: labelKategori(opKey, k), callback_data: "tw:bug:kat:" + opKey + ":" + k })));
-  rows.push([{ text: "⬅️ Ganti operator", callback_data: "tw:bug" }]);
-  rows.push([{ text: "⬅️ Kembali", callback_data: "tw:bug:kembali" }]);
+  const rows = baris2(semua.map((k) => ({ text: labelKategori(opKey, k), callback_data: "tw:bug:kat:" + opKey + ":" + k, style: "primary" })));
+  rows.push([{ text: "⬅️ Ganti operator", callback_data: "tw:bug", style: "danger" }]);
+  rows.push([{ text: "⬅️ Kembali", callback_data: "tw:bug:kembali", style: "danger" }]);
   return rows;
 }
 
@@ -2763,13 +2763,13 @@ function keyboardPilihBugHost(st) {
   // (batas Telegram) — host KV yang lebih panjang akan gagal. Indeks
   // selalu aman; op:kat diikutkan supaya tombol pesan lama yang sudah
   // tidak berlaku (kategori diganti) tidak salah isi.
-  const rows = pb.hosts.slice(awal, awal + per).map((h, i) => ([{ text: h, callback_data: "tw:bug:host:" + pb.op + ":" + pb.kat + ":" + (awal + i) }]));
+  const rows = pb.hosts.slice(awal, awal + per).map((h, i) => ([{ text: h, callback_data: "tw:bug:host:" + pb.op + ":" + pb.kat + ":" + (awal + i), style: "primary" }]));
   const nav = [];
-  if (hal > 0) nav.push({ text: "⬅️ Sebelumnya", callback_data: "tw:bug:hal:" + (hal - 1) });
-  if (hal < totalHal - 1) nav.push({ text: "Berikutnya ➡️", callback_data: "tw:bug:hal:" + (hal + 1) });
+  if (hal > 0) nav.push({ text: "⬅️ Sebelumnya", callback_data: "tw:bug:hal:" + (hal - 1), style: "danger" });
+  if (hal < totalHal - 1) nav.push({ text: "Berikutnya ➡️", callback_data: "tw:bug:hal:" + (hal + 1), style: "primary" });
   if (nav.length) rows.push(nav);
-  rows.push([{ text: "⬅️ Ganti kategori", callback_data: "tw:bug:op:" + pb.op }]);
-  rows.push([{ text: "⬅️ Kembali", callback_data: "tw:bug:kembali" }]);
+  rows.push([{ text: "⬅️ Ganti kategori", callback_data: "tw:bug:op:" + pb.op, style: "danger" }]);
+  rows.push([{ text: "⬅️ Kembali", callback_data: "tw:bug:kembali", style: "danger" }]);
   return rows;
 }
 
@@ -2794,12 +2794,12 @@ function keyboardHapusBug(hosts, opKey, katKey, hal) {
   const h = Math.min(Math.max(hal || 0, 0), totalHal - 1);
   const awal = h * per;
   const rows = hosts.slice(awal, awal + per).map((host, i) =>
-    ([{ text: host, callback_data: "bug:hapus:host:" + opKey + ":" + katKey + ":" + (awal + i) + ":" + hashHostSingkat(host) }]));
+    ([{ text: host, callback_data: "bug:hapus:host:" + opKey + ":" + katKey + ":" + (awal + i) + ":" + hashHostSingkat(host), style: "primary" }]));
   const nav = [];
-  if (h > 0) nav.push({ text: "⬅️ Sebelumnya", callback_data: "bug:hapus:hal:" + opKey + ":" + katKey + ":" + (h - 1) });
-  if (h < totalHal - 1) nav.push({ text: "Berikutnya ➡️", callback_data: "bug:hapus:hal:" + opKey + ":" + katKey + ":" + (h + 1) });
+  if (h > 0) nav.push({ text: "⬅️ Sebelumnya", callback_data: "bug:hapus:hal:" + opKey + ":" + katKey + ":" + (h - 1), style: "danger" });
+  if (h < totalHal - 1) nav.push({ text: "Berikutnya ➡️", callback_data: "bug:hapus:hal:" + opKey + ":" + katKey + ":" + (h + 1), style: "primary" });
   if (nav.length) rows.push(nav);
-  rows.push([{ text: "⬅️ Kembali ke Daftar", callback_data: "bug:kat:" + opKey + ":" + katKey }]);
+  rows.push([{ text: "⬅️ Kembali ke Daftar", callback_data: "bug:kat:" + opKey + ":" + katKey, style: "danger" }]);
   return rows;
 }
 
@@ -2816,7 +2816,7 @@ async function tampilkanModeHapusBug(env, chatId, messageId, opKey, katKey, hal,
   const awalan = notice ? notice + "\n\n" : "";
   if (!hosts.length) {
     await editAtauKirim(env, chatId, messageId, awalan + judul + "\n\nKategori ini sudah tidak ada bug lagi.", [
-      [{ text: "⬅️ Kembali ke Kategori", callback_data: "bug:op:" + opKey }],
+      [{ text: "⬅️ Kembali ke Kategori", callback_data: "bug:op:" + opKey, style: "danger" }],
       ...TOMBOL_KEMBALI,
     ]);
     return;
@@ -2848,15 +2848,15 @@ async function kirimPilihBug(env, chatId, st) {
 
 function keyboardTemplateYaTidak(prefix, batal) {
   return [
-    [{ text: "Ya", callback_data: prefix + ":ya" }, { text: "Tidak", callback_data: prefix + ":tidak" }],
-    [{ text: "❌ Batal", callback_data: batal || "admin:batal" }],
+    [{ text: "Ya", callback_data: prefix + ":ya", style: "success" }, { text: "Tidak", callback_data: prefix + ":tidak", style: "primary" }],
+    [{ text: "❌ Batal", callback_data: batal || "admin:batal", style: "danger" }],
   ];
 }
 
 function keyboardTemplateSimpan() {
   return [
-    [{ text: "💾 Simpan", callback_data: "tw:simpan" }],
-    [{ text: "❌ Batal", callback_data: "admin:batal" }],
+    [{ text: "💾 Simpan", callback_data: "tw:simpan", style: "success" }],
+    [{ text: "❌ Batal", callback_data: "admin:batal", style: "danger" }],
   ];
 }
 
@@ -3062,7 +3062,7 @@ async function kirimHasilCek(env, chatId, domain, diGrup) {
   catch { hasilCek = { domain, ok: false, status: 0, ms: 0, cdn: "", server: "", ips: [], hostname: "", subdomains: null }; }
   // (v2.9.17) Di grup: hasil saja, tanpa tombol.
   await sendTelegram(env, chatId, formatHasilCek(hasilCek), diGrup ? undefined : [
-    [{ text: "🔄 Cek Lagi", callback_data: "cek:mulai" }],
+    [{ text: "🔄 Cek Lagi", callback_data: "cek:mulai", style: "primary" }],
     ...TOMBOL_KEMBALI,
   ]);
 }
@@ -3261,7 +3261,7 @@ async function simpanBug(env, op, kat, host, catatan) {
   }
   const label = labelOperator(op) + " — " + labelKategori(op, kat);
   await catatUpdate(env, "Bug " + (aksi === "diupdate" ? "diupdate" : "baru") + ": " + host + " (" + label + ")");
-  const terkirim = await siarkanUpdate(env, "🆕 Update: bug " + (aksi === "diupdate" ? "diupdate" : "baru") + " — <code>" + escapeHtml(host) + "</code> (" + label + "). Ketik /bug buat lihat daftar terbaru.", [[{ text: "🐛 Lihat Daftar Bug", callback_data: "bug:menu" }]]);
+  const terkirim = await siarkanUpdate(env, "🆕 Update: bug " + (aksi === "diupdate" ? "diupdate" : "baru") + " — <code>" + escapeHtml(host) + "</code> (" + label + "). Ketik /bug buat lihat daftar terbaru.", [[{ text: "🐛 Lihat Daftar Bug", callback_data: "bug:menu", style: "primary" }]]);
   return { aksi, terkirim };
 }
 
@@ -3330,7 +3330,7 @@ async function simpanConfigContoh(env, chatId, pending, cfg, hasil) {
     (rincian ? "\n\n" + rincian : "") + "\n\n" + CARA_IMPOR + catatanBug;
   await sendDocument(env, chatId, namaFileDark(pending.nama, cfg.type), link + "\n", caption, TOMBOL_APK);
   await catatUpdate(env, "Config " + (aksi === "diupdate" ? "diupdate" : "baru") + ": " + pending.nama + " (" + labelOperator(pending.op) + " — " + labelKategori(pending.op, pending.kat) + ")");
-  const terkirim = await siarkanUpdate(env, "🆕 Config " + (aksi === "diupdate" ? "diupdate" : "baru") + ": <b>" + escapeHtml(pending.nama) + "</b> (" + labelOperator(pending.op) + " — " + labelKategori(pending.op, pending.kat) + "). Ketik /config buat ambil.", [[{ text: "🧩 Lihat Template", callback_data: "buat:template" }]]);
+  const terkirim = await siarkanUpdate(env, "🆕 Config " + (aksi === "diupdate" ? "diupdate" : "baru") + ": <b>" + escapeHtml(pending.nama) + "</b> (" + labelOperator(pending.op) + " — " + labelKategori(pending.op, pending.kat) + "). Ketik /config buat ambil.", [[{ text: "🧩 Lihat Template", callback_data: "buat:template", style: "primary" }]]);
   await sendTelegram(env, chatId, "📣 Update terkirim ke " + frasaTerkirim(terkirim) + ".");
   return true;
 }
@@ -3401,20 +3401,20 @@ async function handleDokumenConfig(env, msg) {
 // pendingAdmin: {jenis: "bug", tahap, op, kat, host, catatan, ts}.
 // Tahap teks (kategori_baru, host, catatan) ditangani handleBugTeks;
 // tahap tombol (operator, kategori, ringkasan) di router callback "ab:".
-const TOMBOL_BATAL_BUG = [[{ text: "❌ Batal", callback_data: "admin:batal" }]];
+const TOMBOL_BATAL_BUG = [[{ text: "❌ Batal", callback_data: "admin:batal", style: "danger" }]];
 
 // Keyboard tahap catatan yang bisa dikosongkan: Lewati + Batal.
 const TOMBOL_LEWATI_BUG = [
-  [{ text: "⏭️ Lewati", callback_data: "ab:lewati" }, { text: "❌ Batal", callback_data: "admin:batal" }],
+  [{ text: "⏭️ Lewati", callback_data: "ab:lewati", style: "primary" }, { text: "❌ Batal", callback_data: "admin:batal", style: "danger" }],
 ];
 
 function keyboardBugOperator() {
   const ops = Object.entries(BUG_DB);
   const rows = [];
   for (let i = 0; i < ops.length; i += 2) {
-    rows.push(ops.slice(i, i + 2).map(([k, v]) => ({ text: v.label, callback_data: "ab:op:" + k })));
+    rows.push(ops.slice(i, i + 2).map(([k, v]) => ({ text: v.label, callback_data: "ab:op:" + k, style: "primary" })));
   }
-  rows.push([{ text: "❌ Batal", callback_data: "admin:batal" }]);
+  rows.push([{ text: "❌ Batal", callback_data: "admin:batal", style: "danger" }]);
   return rows;
 }
 
@@ -3428,17 +3428,17 @@ function keyboardBugKategori(opKey, kvKats) {
     const ia = URUTAN_KATEGORI.indexOf(a), ib = URUTAN_KATEGORI.indexOf(b);
     return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
   });
-  const rows = baris2(semua.map((k) => ({ text: labelKategori(opKey, k), callback_data: "ab:kat:" + opKey + ":" + k })));
-  rows.push([{ text: "➕ Kategori Baru", callback_data: "ab:kat:baru" }]);
-  rows.push([{ text: "⬅️ Ganti operator", callback_data: "ab:kembali:op" }]);
-  rows.push([{ text: "❌ Batal", callback_data: "admin:batal" }]);
+  const rows = baris2(semua.map((k) => ({ text: labelKategori(opKey, k), callback_data: "ab:kat:" + opKey + ":" + k, style: "primary" })));
+  rows.push([{ text: "➕ Kategori Baru", callback_data: "ab:kat:baru", style: "success" }]);
+  rows.push([{ text: "⬅️ Ganti operator", callback_data: "ab:kembali:op", style: "danger" }]);
+  rows.push([{ text: "❌ Batal", callback_data: "admin:batal", style: "danger" }]);
   return rows;
 }
 
 function keyboardBugSimpan() {
   return [
-    [{ text: "💾 Simpan", callback_data: "ab:simpan" }],
-    [{ text: "❌ Batal", callback_data: "admin:batal" }],
+    [{ text: "💾 Simpan", callback_data: "ab:simpan", style: "success" }],
+    [{ text: "❌ Batal", callback_data: "admin:batal", style: "danger" }],
   ];
 }
 
@@ -3522,41 +3522,41 @@ function parseHostPort(s) {
   return { host: m[1].toLowerCase(), port };
 }
 
-const TOMBOL_BATAL_TEMPLATE = [[{ text: "❌ Batal", callback_data: "admin:batal" }]];
+const TOMBOL_BATAL_TEMPLATE = [[{ text: "❌ Batal", callback_data: "admin:batal", style: "danger" }]];
 
 // Keyboard tahap teks yang bisa dikosongkan: Lewati + Batal.
 const TOMBOL_LEWATI_TEMPLATE = [
-  [{ text: "⏭️ Lewati", callback_data: "tw:lewati" }, { text: "❌ Batal", callback_data: "admin:batal" }],
+  [{ text: "⏭️ Lewati", callback_data: "tw:lewati", style: "primary" }, { text: "❌ Batal", callback_data: "admin:batal", style: "danger" }],
 ];
 
 // Keyboard tahap yang isinya host/bug: pilih dari daftar bug + Lewati + Batal.
 const TOMBOL_PILIH_BUG_TEMPLATE = [
-  [{ text: "📋 Pilih dari Daftar Bug", callback_data: "tw:bug" }],
-  [{ text: "⏭️ Lewati", callback_data: "tw:lewati" }, { text: "❌ Batal", callback_data: "admin:batal" }],
+  [{ text: "📋 Pilih dari Daftar Bug", callback_data: "tw:bug", style: "primary" }],
+  [{ text: "⏭️ Lewati", callback_data: "tw:lewati", style: "primary" }, { text: "❌ Batal", callback_data: "admin:batal", style: "danger" }],
 ];
 
 // Keyboard tahap teks yang isinya host/bug dan WAJIB diisi (tanpa Lewati):
 // pilih dari daftar bug + Batal saja.
 const TOMBOL_PILIH_BUG_WAJIB_TEMPLATE = [
-  [{ text: "📋 Pilih dari Daftar Bug", callback_data: "tw:bug" }],
-  [{ text: "❌ Batal", callback_data: "admin:batal" }],
+  [{ text: "📋 Pilih dari Daftar Bug", callback_data: "tw:bug", style: "primary" }],
+  [{ text: "❌ Batal", callback_data: "admin:batal", style: "danger" }],
 ];
 
 // ---- Keyboard tahap mode MANUAL (v2.9.9, pengguna biasa) ----
 // Sama seperti keyboard template, tapi tombol Batal pakai "mn:batal"
 // (bukan "admin:batal" yang khusus admin). Lewati / Pilih Bug tetap
 // "tw:*" — handler tw: sudah mode-aware (izinkan state manual).
-const TOMBOL_BATAL_MANUAL = [[{ text: "❌ Batal", callback_data: "mn:batal" }]];
+const TOMBOL_BATAL_MANUAL = [[{ text: "❌ Batal", callback_data: "mn:batal", style: "danger" }]];
 const TOMBOL_LEWATI_MANUAL = [
-  [{ text: "⏭️ Lewati", callback_data: "tw:lewati" }, { text: "❌ Batal", callback_data: "mn:batal" }],
+  [{ text: "⏭️ Lewati", callback_data: "tw:lewati", style: "primary" }, { text: "❌ Batal", callback_data: "mn:batal", style: "danger" }],
 ];
 const TOMBOL_PILIH_BUG_MANUAL = [
-  [{ text: "📋 Pilih dari Daftar Bug", callback_data: "tw:bug" }],
-  [{ text: "⏭️ Lewati", callback_data: "tw:lewati" }, { text: "❌ Batal", callback_data: "mn:batal" }],
+  [{ text: "📋 Pilih dari Daftar Bug", callback_data: "tw:bug", style: "primary" }],
+  [{ text: "⏭️ Lewati", callback_data: "tw:lewati", style: "primary" }, { text: "❌ Batal", callback_data: "mn:batal", style: "danger" }],
 ];
 const TOMBOL_PILIH_BUG_WAJIB_MANUAL = [
-  [{ text: "📋 Pilih dari Daftar Bug", callback_data: "tw:bug" }],
-  [{ text: "❌ Batal", callback_data: "mn:batal" }],
+  [{ text: "📋 Pilih dari Daftar Bug", callback_data: "tw:bug", style: "primary" }],
+  [{ text: "❌ Batal", callback_data: "mn:batal", style: "danger" }],
 ];
 
 // Tahap teks wizard yang bisa dikosongkan (tombol Lewati tampil).
@@ -4047,7 +4047,7 @@ async function handleManualAkun(env, chatId, teks) {
   if (!hasil.configs.length) {
     let alasan = "tidak ditemukan akun di pesan itu";
     if (hasil.adaSsh && hasil.kurangSsh.length) alasan = "akun SSH belum lengkap — tidak ketemu: " + hasil.kurangSsh.join(", ");
-    await sendTelegram(env, chatId, "😕 Buat Manual: <b>" + escapeHtml(alasan) + "</b>. Kirim ulang akunnya (SSH atau link Xray).", [[{ text: "❌ Batal", callback_data: "mn:batal" }], ...TOMBOL_KEMBALI]);
+    await sendTelegram(env, chatId, "😕 Buat Manual: <b>" + escapeHtml(alasan) + "</b>. Kirim ulang akunnya (SSH atau link Xray).", [[{ text: "❌ Batal", callback_data: "mn:batal", style: "danger" }], ...TOMBOL_KEMBALI]);
     return true; // tetap menunggu
   }
   pendingManualAkun.delete(chatId);
@@ -4127,7 +4127,7 @@ async function handleAdminTertunda(env, chatId, teks) {
     }
     pendingAdmin.delete(chatId);
     pendingConfig.set(chatId, { op, kat, nama, ts: Date.now() });
-    await sendTelegram(env, chatId, "📋 Config <b>" + escapeHtml(nama) + "</b> (" + labelOperator(op) + " — " + labelKategori(op, kat) + ").\n\nKirim akunnya — teks, link darktunnel://, atau file .dark.", [[{ text: "❌ Batal", callback_data: "admin:batal" }]]);
+    await sendTelegram(env, chatId, "📋 Config <b>" + escapeHtml(nama) + "</b> (" + labelOperator(op) + " — " + labelKategori(op, kat) + ").\n\nKirim akunnya — teks, link darktunnel://, atau file .dark.", [[{ text: "❌ Batal", callback_data: "admin:batal", style: "danger" }]]);
     return true;
   }
   if (st.jenis === "broadcast") {
@@ -4189,7 +4189,7 @@ async function handleConfig(env, chatId, notice, messageId) {
   const isAdmin = cekAdmin(env, chatId) === "ya";
   const awalan = notice ? notice + "\n\n" : "";
   if (!arr.length && !templates.length) {
-    await editAtauKirim(env, chatId, messageId, awalan + "📋 <b>Config & Template</b>\n\nBelum ada config contoh atau template.", [[{ text: "📡 Template Xray (0)", callback_data: "tpl:tipe:xray" }, { text: "🔐 Template SSH (0)", callback_data: "tpl:tipe:ssh" }], ...TOMBOL_KEMBALI]);
+    await editAtauKirim(env, chatId, messageId, awalan + "📋 <b>Config & Template</b>\n\nBelum ada config contoh atau template.", [[{ text: "📡 Template Xray (0)", callback_data: "tpl:tipe:xray", style: "primary" }, { text: "🔐 Template SSH (0)", callback_data: "tpl:tipe:ssh", style: "primary" }], ...TOMBOL_KEMBALI]);
     return;
   }
   const bagian = [];
@@ -4198,7 +4198,7 @@ async function handleConfig(env, chatId, notice, messageId) {
     const daftar = arr.slice(0, 10);
     bagian.push("📋 <b>Config Contoh</b>\n\n" +
       daftar.map((e, i) => (i + 1) + ". <b>" + escapeHtml(e.nama) + "</b> (" + labelOperator(e.operator) + " — " + labelKategori(e.operator, e.kategori) + ") — " + e.tanggal).join("\n"));
-    for (const e of daftar) keyboard.push([{ text: String(e.nama).slice(0, 40), callback_data: "cfg:" + e.id }]);
+    for (const e of daftar) keyboard.push([{ text: String(e.nama).slice(0, 40), callback_data: "cfg:" + e.id, style: "primary" }]);
   }
   // (v2.9.4) Template Config dibagi dua bagian per TIPE (Xray & SSH) —
   // bukan lagi per operator. Kedua tombol selalu tampil, walau N=0.
@@ -4209,7 +4209,7 @@ async function handleConfig(env, chatId, notice, messageId) {
   } else {
     bagian.push("🧩 <b>Template Config</b>\n\nBelum ada template. Admin bisa buat lewat panel admin.");
   }
-  keyboard.push([{ text: "📡 Template Xray (" + nXray + ")", callback_data: "tpl:tipe:xray" }, { text: "🔐 Template SSH (" + nSsh + ")", callback_data: "tpl:tipe:ssh" }]);
+  keyboard.push([{ text: "📡 Template Xray (" + nXray + ")", callback_data: "tpl:tipe:xray", style: "primary" }, { text: "🔐 Template SSH (" + nSsh + ")", callback_data: "tpl:tipe:ssh", style: "primary" }]);
   let teks = awalan + bagian.join("\n\n");
   if (arr.length) teks += "\n\nKetuk satu config buat ambil file-nya.";
   keyboard.push(...TOMBOL_KEMBALI);
@@ -4228,7 +4228,7 @@ async function handleTemplateTipe(env, chatId, tipe, notice, messageId) {
   const awalan = notice ? notice + "\n\n" : "";
   if (!daftar.length) {
     await editAtauKirim(env, chatId, messageId, awalan + judul + "\n\nBelum ada template " + (isXray ? "Xray" : "SSH") + ".", [
-      [{ text: "⬅️ Kembali", callback_data: "tpl:tipe:daftar" }],
+      [{ text: "⬅️ Kembali", callback_data: "tpl:tipe:daftar", style: "danger" }],
       ...TOMBOL_KEMBALI,
     ]);
     return;
@@ -4245,13 +4245,13 @@ async function handleTemplateTipe(env, chatId, tipe, notice, messageId) {
     // tidak boleh sebaris dengan nama (Telegram membagi lebar baris
     // rata ke semua tombol, nama jadi terpotong). Admin: baris ke-2
     // berisi ✏️ Edit + 🗑️ Hapus. Pengguna biasa: cuma baris nama.
-    keyboard.push([{ text: "🧩 " + String(e.nama).slice(0, 60), callback_data: "tpl:pakai:" + e.id }]);
+    keyboard.push([{ text: "🧩 " + String(e.nama).slice(0, 60), callback_data: "tpl:pakai:" + e.id, style: "primary" }]);
     if (isAdmin) keyboard.push([
-      { text: "✏️ Edit", callback_data: "tpl:edit:" + e.id },
-      { text: "🗑️ Hapus", callback_data: "tpl:del:" + e.id },
+      { text: "✏️ Edit", callback_data: "tpl:edit:" + e.id, style: "primary" },
+      { text: "🗑️ Hapus", callback_data: "tpl:del:" + e.id, style: "danger" },
     ]);
   }
-  keyboard.push([{ text: "⬅️ Kembali", callback_data: "tpl:tipe:daftar" }]);
+  keyboard.push([{ text: "⬅️ Kembali", callback_data: "tpl:tipe:daftar", style: "danger" }]);
   keyboard.push(...TOMBOL_KEMBALI);
   await editAtauKirim(env, chatId, messageId, teks, keyboard);
 }
@@ -4363,7 +4363,7 @@ async function handleTelegram(env, update) {
       await jawabCallback(env, cb.id);
       pendingManualAkun.delete(chatIdCb);
       await sendTelegram(env, chatIdCb, "⚡ <b>Buat Config</b>\n\nKirim akun kamu — bot deteksi jenisnya otomatis.",
-        [[{ text: "🧩 Template Config", callback_data: "buat:template" }, { text: "✏️ Buat Manual", callback_data: "buat:manual" }], ...TOMBOL_KEMBALI]);
+        [[{ text: "🧩 Template Config", callback_data: "buat:template", style: "primary" }, { text: "✏️ Buat Manual", callback_data: "buat:manual", style: "success" }], ...TOMBOL_KEMBALI]);
       return;
     }
     // Tombol "✏️ Buat Manual" di /start (v2.9.9, pengguna biasa) —
@@ -4376,7 +4376,7 @@ async function handleTelegram(env, update) {
       pendingTemplate.delete(chatIdCb);
       pendingManualAkun.set(chatIdCb, { ts: Date.now() });
       await sendTelegram(env, chatIdCb, "✏️ <b>Buat Config Manual</b>\n\nKirim akun kamu dulu — SSH (<code>host:port@user:pass</code>) atau link Xray (VLESS / VMess / Trojan / Shadowsocks).\n\nSetelah itu kamu pilih sendiri metodenya, isi bug / SNI / payload / proxy-nya, lalu kasih nama bebas. File jadinya <code>&lt;nama&gt; by @autosetdark_bot.dark</code> — config tidak disimpan sebagai template.",
-        [[{ text: "❌ Batal", callback_data: "mn:batal" }], ...TOMBOL_KEMBALI]);
+        [[{ text: "❌ Batal", callback_data: "mn:batal", style: "danger" }], ...TOMBOL_KEMBALI]);
       return;
     }
     // Tombol "🧩 Template Config" di alur Buat Config — buka daftar
@@ -4472,7 +4472,7 @@ async function handleTelegram(env, update) {
       if (cekAdmin(env, chatIdCb) !== "ya") { await jawabAlert(env, cb.id, "⛔ Perintah ini khusus admin."); return; }
       await jawabCallback(env, cb.id);
       pendingAdmin.set(chatIdCb, { jenis: "broadcast", ts: Date.now() });
-      await sendTelegram(env, chatIdCb, "📢 <b>Broadcast</b>\n\nKirim pesan broadcast-nya — akan dikirim ke semua pengguna tercatat.", [[{ text: "❌ Batal", callback_data: "admin:batal" }]]);
+      await sendTelegram(env, chatIdCb, "📢 <b>Broadcast</b>\n\nKirim pesan broadcast-nya — akan dikirim ke semua pengguna tercatat.", [[{ text: "❌ Batal", callback_data: "admin:batal", style: "danger" }]]);
       return;
     }
     if (data === "admin:status") {
@@ -4620,7 +4620,7 @@ async function handleTelegram(env, update) {
         const hosts = await daftarHostKategori(env, op, kat);
         if (!hosts.length) {
           // (v2.9.2: error mengedit pesan picker yang sama.)
-          st.msgId = await editAtauKirim(env, chatIdCb, st.msgId, "😕 Kategori <b>" + escapeHtml(labelKategori(op, kat)) + "</b> belum ada bug-nya. Pilih kategori lain ya.", [[{ text: "⬅️ Ganti kategori", callback_data: "tw:bug:op:" + op }], [{ text: "⬅️ Kembali", callback_data: "tw:bug:kembali" }]]);
+          st.msgId = await editAtauKirim(env, chatIdCb, st.msgId, "😕 Kategori <b>" + escapeHtml(labelKategori(op, kat)) + "</b> belum ada bug-nya. Pilih kategori lain ya.", [[{ text: "⬅️ Ganti kategori", callback_data: "tw:bug:op:" + op, style: "danger" }], [{ text: "⬅️ Kembali", callback_data: "tw:bug:kembali", style: "danger" }]]);
           return;
         }
         st.pilihBug = { langkah: "host", tahap: st.tahap, op, kat, hosts, page: 0 }; st.ts = Date.now();
@@ -4643,7 +4643,7 @@ async function handleTelegram(env, update) {
         const pb = st.pilihBug;
         if (parts.length !== 3 || !TAHAP_PILIH_BUG.has(st.tahap) || !pb || pb.langkah !== "host" || st.tahap !== pb.tahap || pb.op !== op || pb.kat !== kat || !Number.isInteger(idx) || idx < 0 || idx >= pb.hosts.length) {
           // (v2.9.2: error mengedit pesan picker yang sama + tombol Kembali.)
-          st.msgId = await editAtauKirim(env, chatIdCb, st.msgId, "😕 Pilihan itu sudah tidak berlaku — pilih lagi dari daftar terbaru ya.", [[{ text: "⬅️ Kembali", callback_data: "tw:bug:kembali" }]]);
+          st.msgId = await editAtauKirim(env, chatIdCb, st.msgId, "😕 Pilihan itu sudah tidak berlaku — pilih lagi dari daftar terbaru ya.", [[{ text: "⬅️ Kembali", callback_data: "tw:bug:kembali", style: "danger" }]]);
           return;
         }
         const host = pb.hosts[idx];
@@ -4717,12 +4717,12 @@ async function handleTelegram(env, update) {
         // tombol Tambah Lagi / Kembali ke Panel, tanpa pesan baru.)
         // (v2.9.9) Mode edit: tombol kembali ke daftar tipe itu.
         const tombolSukses = st.editId
-          ? [[{ text: "⬅️ Kembali ke Daftar " + (st.tipe === "SSH" ? "SSH" : "Xray"), callback_data: "tpl:tipe:" + (st.tipe === "SSH" ? "ssh" : "xray") }],
-             [{ text: "⬅️ Kembali ke Panel Admin", callback_data: "admin:panel" }]]
-          : [[{ text: "➕ Tambah Template Lagi", callback_data: "admin:tambahconfig" }],
-             [{ text: "⬅️ Kembali ke Panel Admin", callback_data: "admin:panel" }]];
+          ? [[{ text: "⬅️ Kembali ke Daftar " + (st.tipe === "SSH" ? "SSH" : "Xray"), callback_data: "tpl:tipe:" + (st.tipe === "SSH" ? "ssh" : "xray"), style: "danger" }],
+             [{ text: "⬅️ Kembali ke Panel Admin", callback_data: "admin:panel", style: "danger" }]]
+          : [[{ text: "➕ Tambah Template Lagi", callback_data: "admin:tambahconfig", style: "success" }],
+             [{ text: "⬅️ Kembali ke Panel Admin", callback_data: "admin:panel", style: "danger" }]];
         await catatUpdate(env, "Template " + (hasil.aksi === "diupdate" ? "diupdate" : "baru") + ": " + hasil.entri.nama + " (" + labelOperator(hasil.entri.operator) + " — " + labelKategori(hasil.entri.operator, hasil.entri.kategori) + ")");
-        const terkirim = await siarkanUpdate(env, "🆕 Template " + (hasil.aksi === "diupdate" ? "diupdate" : "baru") + ": <b>" + escapeHtml(hasil.entri.nama) + "</b> (" + labelOperator(hasil.entri.operator) + " — " + labelKategori(hasil.entri.operator, hasil.entri.kategori) + "). Ketik /config buat ambil.", [[{ text: "🧩 Lihat Template", callback_data: "buat:template" }]]);
+        const terkirim = await siarkanUpdate(env, "🆕 Template " + (hasil.aksi === "diupdate" ? "diupdate" : "baru") + ": <b>" + escapeHtml(hasil.entri.nama) + "</b> (" + labelOperator(hasil.entri.operator) + " — " + labelKategori(hasil.entri.operator, hasil.entri.kategori) + "). Ketik /config buat ambil.", [[{ text: "🧩 Lihat Template", callback_data: "buat:template", style: "primary" }]]);
         await editAtauKirim(env, chatIdCb, st.msgId, "✅ Template " + hasil.aksi + ": <b>" + escapeHtml(hasil.entri.nama) + "</b>.\n\n" + ringkasanTemplate(hasil.entri) + "\n\nPengguna bisa pakai lewat /config.\n\n📣 Update terkirim ke " + frasaTerkirim(terkirim) + ".",
           tombolSukses);
         return;
@@ -4811,8 +4811,8 @@ async function handleTelegram(env, update) {
         // (v2.9.2: sukses mengedit pesan wizard jadi pesan sukses —
         // tanpa pesan baru. Broadcast update tetap terkirim terpisah.)
         await editAtauKirim(env, chatIdCb, st.msgId, teksSukses + "\n\n📣 Update terkirim ke " + frasaTerkirim(hasil.terkirim) + ".",
-          [[{ text: "➕ Tambah Bug Lagi", callback_data: "admin:tambahbug" }],
-           [{ text: "⬅️ Kembali ke Panel Admin", callback_data: "admin:panel" }]]);
+          [[{ text: "➕ Tambah Bug Lagi", callback_data: "admin:tambahbug", style: "success" }],
+           [{ text: "⬅️ Kembali ke Panel Admin", callback_data: "admin:panel", style: "danger" }]]);
         return;
       }
       return;
@@ -4871,7 +4871,7 @@ async function handleTelegram(env, update) {
       await jawabCallback(env, cb.id);
       if (!t) { await sendTelegram(env, chatIdCb, "😕 Template itu sudah tidak ada."); return; }
       await editAtauKirim(env, chatIdCb, cb.message.message_id, "🗑️ Hapus template <b>" + escapeHtml(t.nama) + "</b>?", [
-        [{ text: "✅ Ya, hapus", callback_data: "tpl:del:ya:" + id }, { text: "❌ Batal", callback_data: "tpl:del:batal:" + (t.tipe === "SSH" ? "ssh" : "xray") }],
+        [{ text: "✅ Ya, hapus", callback_data: "tpl:del:ya:" + id, style: "danger" }, { text: "❌ Batal", callback_data: "tpl:del:batal:" + (t.tipe === "SSH" ? "ssh" : "xray"), style: "danger" }],
       ]);
       return;
     }
@@ -4902,7 +4902,7 @@ async function handleTelegram(env, update) {
       pendingTemplate.set(chatIdCb, { templateId: id, ts: Date.now() });
       const butuh = t.tipe === "SSH" ? "akun SSH (<code>host:port@user:pass</code>)" : "link Xray (<b>VLESS / VMess / Trojan / Shadowsocks</b>)";
       // (v2.9.2: edit pesan daftar jadi prompt kirim akun.)
-      await editAtauKirim(env, chatIdCb, cb.message.message_id, "🧩 <b>Template: " + escapeHtml(t.nama) + "</b>\n\n" + ringkasanTemplate(t) + "\n\nKirim " + butuh + " kamu — bot akan buatkan config pakai setting template ini.", [[{ text: "❌ Batal", callback_data: "tpl:batal" }]]);
+      await editAtauKirim(env, chatIdCb, cb.message.message_id, "🧩 <b>Template: " + escapeHtml(t.nama) + "</b>\n\n" + ringkasanTemplate(t) + "\n\nKirim " + butuh + " kamu — bot akan buatkan config pakai setting template ini.", [[{ text: "❌ Batal", callback_data: "tpl:batal", style: "danger" }]]);
       return;
     }
     // ---- Batal pakai template (tpl:batal) ----
@@ -5026,7 +5026,7 @@ async function handleTelegram(env, update) {
       await editAtauKirim(env, chatIdCb, cb.message.message_id,
         "🗑️ Hapus bug <code>" + escapeHtml(host) + "</code> dari " + escapeHtml(labelOperator(opKey)) + " — " + escapeHtml(labelKategori(opKey, katKey)) + "?",
         [
-          [{ text: "✅ Ya, Hapus", callback_data: "bug:hapus:ya:" + opKey + ":" + katKey + ":" + idx + ":" + hash }, { text: "❌ Batal", callback_data: "bug:hapus:batal:" + opKey + ":" + katKey }],
+          [{ text: "✅ Ya, Hapus", callback_data: "bug:hapus:ya:" + opKey + ":" + katKey + ":" + idx + ":" + hash, style: "danger" }, { text: "❌ Batal", callback_data: "bug:hapus:batal:" + opKey + ":" + katKey, style: "danger" }],
         ]);
       return;
     }
@@ -5330,7 +5330,7 @@ async function handleTelegram(env, update) {
     try { hasilCek = await cekDomain(domain); }
     catch { hasilCek = { domain, ok: false, status: 0, ms: 0, cdn: "", server: "", ips: [], hostname: "", subdomains: null }; }
     await sendTelegram(env, chatId, formatHasilCek(hasilCek), [
-      [{ text: "🔄 Cek Lagi", callback_data: "cek:mulai" }],
+      [{ text: "🔄 Cek Lagi", callback_data: "cek:mulai", style: "primary" }],
       ...TOMBOL_KEMBALI,
     ]);
     return;
