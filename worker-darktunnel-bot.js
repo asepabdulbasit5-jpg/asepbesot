@@ -1601,7 +1601,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.31";
+const VERSI_BOT = "v2.9.32";
 
 const PESAN_START =
   "👋 <b>Selamat datang di Generator Config Dark Tunnel</b>\n\n" +
@@ -2959,7 +2959,7 @@ async function balasPemicuGrup(env, chatId, aksi, teksAsli) {
     // (v2.9.17) Grup tanpa tombol — teks saja.
     await sendTelegram(env, chatId,
       "💰 <b>Bot ini GRATIS</b> — buat config Dark Tunnel nggak bayar. Kirim akunmu ke @autosetdark_bot di chat pribadi, langsung jadi file .dark.\n\n" +
-      "Kalau mau beli akun VPN-nya, di @sandekalavpn_bot: 1 hari Rp1.000, 7 hari Rp5.000, 30 hari Rp10.000.");
+      "Kalau mau beli akun VPN-nya, di @sandekalavpn_bot: 30 hari Rp10.000.");
     return true;
   }
   if (aksi === "cara") {
@@ -2977,7 +2977,7 @@ async function balasPemicuGrup(env, chatId, aksi, teksAsli) {
   }
   if (aksi === "beli") {
     await sendTelegram(env, chatId,
-      "🛒 Beli akun VPN / trial di @sandekalavpn_bot — 1 hari Rp1.000, 7 hari Rp5.000, 30 hari Rp10.000. Trial gratis tersedia buat pengguna baru.");
+      "🛒 Beli akun VPN di @sandekalavpn_bot — 30 hari Rp10.000.");
     return true;
   }
   if (aksi === "belicanda") {
