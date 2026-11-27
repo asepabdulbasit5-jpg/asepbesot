@@ -837,8 +837,9 @@ async function catatUpdate(env, teks) {
 
 // Kirim pengumuman ke semua pengguna tercatat (kecuali admin).
 // Return jumlah yang berhasil terkirim; yang gagal (mis. blokir bot)
-// dilewati diam-diam, tidak dilaporkan.
-async function siarkanUpdate(env, teks) {
+// dilewati diam-diam, tidak dilaporkan. `keyboard` (opsional) ditempel
+// di pesan siaran — mis. tombol buka daftar (bug/template).
+async function siarkanUpdate(env, teks, keyboard) {
   if (!env.DATA) return 0;
   const keys = await kvList(env, "USER:");
   const adminId = adminChatId(env);
@@ -847,7 +848,7 @@ async function siarkanUpdate(env, teks) {
     const chatId = k.slice("USER:".length);
     if (adminId && chatId === adminId) continue;
     try {
-      const r = await sendTelegram(env, chatId, teks);
+      const r = await sendTelegram(env, chatId, teks, keyboard);
       if (r && r.ok) terkirim++;
     } catch { /* abaikan */ }
   }
@@ -1601,7 +1602,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.32";
+const VERSI_BOT = "v2.9.33";
 
 const PESAN_START =
   "👋 <b>Selamat datang di Generator Config Dark Tunnel</b>\n\n" +
@@ -3238,7 +3239,7 @@ async function simpanBug(env, op, kat, host, catatan) {
   }
   const label = labelOperator(op) + " — " + labelKategori(op, kat);
   await catatUpdate(env, "Bug " + (aksi === "diupdate" ? "diupdate" : "baru") + ": " + host + " (" + label + ")");
-  const terkirim = await siarkanUpdate(env, "🆕 Update: bug " + (aksi === "diupdate" ? "diupdate" : "baru") + " — <code>" + escapeHtml(host) + "</code> (" + label + "). Ketik /bug buat lihat daftar terbaru.");
+  const terkirim = await siarkanUpdate(env, "🆕 Update: bug " + (aksi === "diupdate" ? "diupdate" : "baru") + " — <code>" + escapeHtml(host) + "</code> (" + label + "). Ketik /bug buat lihat daftar terbaru.", [[{ text: "🐛 Lihat Daftar Bug", callback_data: "bug:menu" }]]);
   return { aksi, terkirim };
 }
 
@@ -3307,7 +3308,7 @@ async function simpanConfigContoh(env, chatId, pending, cfg, hasil) {
     (rincian ? "\n\n" + rincian : "") + "\n\n" + CARA_IMPOR + catatanBug;
   await sendDocument(env, chatId, namaFileDark(pending.nama, cfg.type), link + "\n", caption, TOMBOL_APK);
   await catatUpdate(env, "Config " + (aksi === "diupdate" ? "diupdate" : "baru") + ": " + pending.nama + " (" + labelOperator(pending.op) + " — " + labelKategori(pending.op, pending.kat) + ")");
-  const terkirim = await siarkanUpdate(env, "🆕 Config " + (aksi === "diupdate" ? "diupdate" : "baru") + ": <b>" + escapeHtml(pending.nama) + "</b> (" + labelOperator(pending.op) + " — " + labelKategori(pending.op, pending.kat) + "). Ketik /config buat ambil.");
+  const terkirim = await siarkanUpdate(env, "🆕 Config " + (aksi === "diupdate" ? "diupdate" : "baru") + ": <b>" + escapeHtml(pending.nama) + "</b> (" + labelOperator(pending.op) + " — " + labelKategori(pending.op, pending.kat) + "). Ketik /config buat ambil.", [[{ text: "🧩 Lihat Template", callback_data: "buat:template" }]]);
   await sendTelegram(env, chatId, "📣 Update terkirim ke " + terkirim + " pengguna.");
   return true;
 }
@@ -4698,9 +4699,10 @@ async function handleTelegram(env, update) {
              [{ text: "⬅️ Kembali ke Panel Admin", callback_data: "admin:panel" }]]
           : [[{ text: "➕ Tambah Template Lagi", callback_data: "admin:tambahconfig" }],
              [{ text: "⬅️ Kembali ke Panel Admin", callback_data: "admin:panel" }]];
-        await editAtauKirim(env, chatIdCb, st.msgId, "✅ Template " + hasil.aksi + ": <b>" + escapeHtml(hasil.entri.nama) + "</b>.\n\n" + ringkasanTemplate(hasil.entri) + "\n\nPengguna bisa pakai lewat /config.",
-          tombolSukses);
         await catatUpdate(env, "Template " + (hasil.aksi === "diupdate" ? "diupdate" : "baru") + ": " + hasil.entri.nama + " (" + labelOperator(hasil.entri.operator) + " — " + labelKategori(hasil.entri.operator, hasil.entri.kategori) + ")");
+        const terkirim = await siarkanUpdate(env, "🆕 Template " + (hasil.aksi === "diupdate" ? "diupdate" : "baru") + ": <b>" + escapeHtml(hasil.entri.nama) + "</b> (" + labelOperator(hasil.entri.operator) + " — " + labelKategori(hasil.entri.operator, hasil.entri.kategori) + "). Ketik /config buat ambil.", [[{ text: "🧩 Lihat Template", callback_data: "buat:template" }]]);
+        await editAtauKirim(env, chatIdCb, st.msgId, "✅ Template " + hasil.aksi + ": <b>" + escapeHtml(hasil.entri.nama) + "</b>.\n\n" + ringkasanTemplate(hasil.entri) + "\n\nPengguna bisa pakai lewat /config.\n\n📣 Update terkirim ke " + terkirim + " pengguna.",
+          tombolSukses);
         return;
       }
       return;
