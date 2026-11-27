@@ -39,8 +39,8 @@
 //   - Parser SSH kenal format `Ssh: host:port@user:pass`, label
 //     "Proxy:" / "Sni:" (nilai "-" = direct), dan "Sni = host".
 //   - Admin (ADMIN_CHAT_ID): /tambahbug & /tambahconfig — bug/config
-//     baru disimpan di KV lalu diumumkan ke semua pengguna (broadcast)
-//     + masuk feed /update; /config untuk ambil config contoh.
+//     baru disimpan di KV lalu diumumkan ke semua pengguna dan grup
+//     (broadcast; grup tanpa tombol) + masuk feed /update; /config untuk ambil config contoh.
 //
 //  Secrets Worker (di dashboard Cloudflare):
 //   - BOT_TOKEN (wajib): token bot Telegram dari BotFather.
@@ -835,24 +835,46 @@ async function catatUpdate(env, teks) {
   } catch { /* abaikan */ }
 }
 
-// Kirim pengumuman ke semua pengguna tercatat (kecuali admin).
-// Return jumlah yang berhasil terkirim; yang gagal (mis. blokir bot)
-// dilewati diam-diam, tidak dilaporkan. `keyboard` (opsional) ditempel
-// di pesan siaran — mis. tombol buka daftar (bug/template).
+// Kirim pengumuman ke semua pengguna tercatat (kecuali admin) dan ke
+// semua grup tercatat. Grup menerima teks SAJA tanpa tombol (aturan
+// grup v2.9.17: grup tanpa tombol kecuali ⚡ Buat Config).
+// Return {pengguna, grup} — jumlah yang berhasil terkirim di tiap
+// jalur; yang gagal (mis. blokir bot / bot dikeluarkan dari grup)
+// dilewati diam-diam, tidak dilaporkan. `keyboard` (opsional) hanya
+// ditempel di pesan DM — mis. tombol buka daftar (bug/template).
 async function siarkanUpdate(env, teks, keyboard) {
-  if (!env.DATA) return 0;
+  if (!env.DATA) return { pengguna: 0, grup: 0 };
   const keys = await kvList(env, "USER:");
   const adminId = adminChatId(env);
-  let terkirim = 0;
+  let pengguna = 0;
   for (const k of keys) {
     const chatId = k.slice("USER:".length);
     if (adminId && chatId === adminId) continue;
     try {
       const r = await sendTelegram(env, chatId, teks, keyboard);
-      if (r && r.ok) terkirim++;
+      if (r && r.ok) pengguna++;
     } catch { /* abaikan */ }
   }
-  return terkirim;
+  let grup = 0;
+  const kunciGrup = await kvList(env, "GRUP_AKTIF:");
+  for (const k of kunciGrup) {
+    const chatId = k.slice("GRUP_AKTIF:".length);
+    try {
+      const r = await sendTelegram(env, chatId, teks);
+      if (r && r.ok) grup++;
+    } catch { /* abaikan */ }
+  }
+  return { pengguna, grup };
+}
+
+// Frasa jumlah terkirim untuk laporan ke admin:
+// "2 pengguna" / "2 pengguna dan 1 grup" / "1 grup".
+function frasaTerkirim(h) {
+  const p = (h && h.pengguna) || 0;
+  const g = (h && h.grup) || 0;
+  if (p > 0 && g > 0) return p + " pengguna dan " + g + " grup";
+  if (g > 0) return g + " grup";
+  return p + " pengguna";
 }
 
 // Catatan bug untuk caption file hasil generate (dipakai generate utama
@@ -1602,7 +1624,7 @@ export async function pilihMetodeOtomatis(env, teks) {
 // bug + "." + host server.
 // v2.7 = Template Config (wizard admin terstruktur; SlowDNS SSH +
 // Xray; akun dari pengguna saat template dipakai).
-const VERSI_BOT = "v2.9.33";
+const VERSI_BOT = "v2.9.34";
 
 const PESAN_START =
   "👋 <b>Selamat datang di Generator Config Dark Tunnel</b>\n\n" +
@@ -3212,7 +3234,7 @@ async function handlePesanAkun(env, chatId, teks, opts = {}) {
 // Simpan bug admin ke KV (upsert): bila host sudah ada di kategori itu,
 // catatannya diperbarui dan ts-nya disegarkan. Lalu catat update +
 // siarkan ke pengguna. Dipakai /tambahbug dan tombol "➕ Tambah Bug".
-// Return {aksi: "ditambahkan"|"diupdate", terkirim} atau null bila gagal.
+// Return {aksi: "ditambahkan"|"diupdate", terkirim: {pengguna, grup}} atau null bila gagal.
 async function simpanBug(env, op, kat, host, catatan) {
   const bugs = await ambilBugsKv(env);
   bugs[op] = bugs[op] || {};
@@ -3278,7 +3300,7 @@ async function handleTambahBug(env, chatId, teks) {
     return;
   }
   await sendTelegram(env, chatId, "✅ Bug " + hasil.aksi + ": <code>" + escapeHtml(host) + "</code> (" + labelOperator(op) + " — " + labelKategori(op, kat) + ").");
-  await sendTelegram(env, chatId, "📣 Update terkirim ke " + hasil.terkirim + " pengguna.");
+  await sendTelegram(env, chatId, "📣 Update terkirim ke " + frasaTerkirim(hasil.terkirim) + ".");
 }
 
 // Simpan satu TunnelConfig sebagai config contoh (upsert menurut nama):
@@ -3309,7 +3331,7 @@ async function simpanConfigContoh(env, chatId, pending, cfg, hasil) {
   await sendDocument(env, chatId, namaFileDark(pending.nama, cfg.type), link + "\n", caption, TOMBOL_APK);
   await catatUpdate(env, "Config " + (aksi === "diupdate" ? "diupdate" : "baru") + ": " + pending.nama + " (" + labelOperator(pending.op) + " — " + labelKategori(pending.op, pending.kat) + ")");
   const terkirim = await siarkanUpdate(env, "🆕 Config " + (aksi === "diupdate" ? "diupdate" : "baru") + ": <b>" + escapeHtml(pending.nama) + "</b> (" + labelOperator(pending.op) + " — " + labelKategori(pending.op, pending.kat) + "). Ketik /config buat ambil.", [[{ text: "🧩 Lihat Template", callback_data: "buat:template" }]]);
-  await sendTelegram(env, chatId, "📣 Update terkirim ke " + terkirim + " pengguna.");
+  await sendTelegram(env, chatId, "📣 Update terkirim ke " + frasaTerkirim(terkirim) + ".");
   return true;
 }
 
@@ -4111,7 +4133,7 @@ async function handleAdminTertunda(env, chatId, teks) {
   if (st.jenis === "broadcast") {
     pendingAdmin.delete(chatId);
     const terkirim = await siarkanUpdate(env, teks);
-    await sendTelegram(env, chatId, "📣 Broadcast terkirim ke " + terkirim + " pengguna.");
+    await sendTelegram(env, chatId, "📣 Broadcast terkirim ke " + frasaTerkirim(terkirim) + ".");
     return true;
   }
   return false;
@@ -4701,7 +4723,7 @@ async function handleTelegram(env, update) {
              [{ text: "⬅️ Kembali ke Panel Admin", callback_data: "admin:panel" }]];
         await catatUpdate(env, "Template " + (hasil.aksi === "diupdate" ? "diupdate" : "baru") + ": " + hasil.entri.nama + " (" + labelOperator(hasil.entri.operator) + " — " + labelKategori(hasil.entri.operator, hasil.entri.kategori) + ")");
         const terkirim = await siarkanUpdate(env, "🆕 Template " + (hasil.aksi === "diupdate" ? "diupdate" : "baru") + ": <b>" + escapeHtml(hasil.entri.nama) + "</b> (" + labelOperator(hasil.entri.operator) + " — " + labelKategori(hasil.entri.operator, hasil.entri.kategori) + "). Ketik /config buat ambil.", [[{ text: "🧩 Lihat Template", callback_data: "buat:template" }]]);
-        await editAtauKirim(env, chatIdCb, st.msgId, "✅ Template " + hasil.aksi + ": <b>" + escapeHtml(hasil.entri.nama) + "</b>.\n\n" + ringkasanTemplate(hasil.entri) + "\n\nPengguna bisa pakai lewat /config.\n\n📣 Update terkirim ke " + terkirim + " pengguna.",
+        await editAtauKirim(env, chatIdCb, st.msgId, "✅ Template " + hasil.aksi + ": <b>" + escapeHtml(hasil.entri.nama) + "</b>.\n\n" + ringkasanTemplate(hasil.entri) + "\n\nPengguna bisa pakai lewat /config.\n\n📣 Update terkirim ke " + frasaTerkirim(terkirim) + ".",
           tombolSukses);
         return;
       }
@@ -4788,7 +4810,7 @@ async function handleTelegram(env, update) {
           : "✅ Bug <code>" + escapeHtml(host) + "</code> ditambahkan ke " + labelOperator(op) + " — " + labelKategori(op, kat) + ".";
         // (v2.9.2: sukses mengedit pesan wizard jadi pesan sukses —
         // tanpa pesan baru. Broadcast update tetap terkirim terpisah.)
-        await editAtauKirim(env, chatIdCb, st.msgId, teksSukses + "\n\n📣 Update terkirim ke " + hasil.terkirim + " pengguna.",
+        await editAtauKirim(env, chatIdCb, st.msgId, teksSukses + "\n\n📣 Update terkirim ke " + frasaTerkirim(hasil.terkirim) + ".",
           [[{ text: "➕ Tambah Bug Lagi", callback_data: "admin:tambahbug" }],
            [{ text: "⬅️ Kembali ke Panel Admin", callback_data: "admin:panel" }]]);
         return;
