@@ -54,7 +54,7 @@ jobs:
           main = "worker-reseller-bot.js"
           compatibility_date = "2026-11-20"
           [triggers]
-          crons = ["5 * * * *", "0 0 * * *"]
+          crons = ["5 * * * *", "0 0 * * *", "* * * * *"]
           [[kv_namespaces]]
           binding = "ORDERS"
           id = "5ed5f1f0bc824dc6b1fd5ac3f9a6e03b"
