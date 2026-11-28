@@ -144,8 +144,13 @@ const PAKET = [
 // Server CLOUDFRONT NUSA tidak dukung VLESS.
 // Alur beli: /beli -> pilih SERVER -> pilih protokol ->
 // pilih durasi -> ketik username (atau "-") -> order dibuat.
+// Domain per server hanya diketahui untuk SELOW (vip.sshvpn.web.id,
+// dari respons trial Nadia) — server lain belum diketahui, jadi
+// /ceknadia hanya membandingkan domain yang bot tahu (28 Nov 2026).
+// NS_PER_DOMAIN di bawah tahu 2 domain (SELOW + vpn14); server
+// pemilik vpn14 tidak diketahui, jadi tidak ditulis di sini.
 const SERVERS = [
-  { kode: "slowmini",  nama: "SSH SELOW DNS & UDP MINI",      serverId: "01a1a126-b5c7-710c-953a-68e8d0ea6e98", protocols: ["ssh"], used: 162, limit: 250 },
+  { kode: "slowmini",  nama: "SSH SELOW DNS & UDP MINI",      serverId: "01a1a126-b5c7-710c-953a-68e8d0ea6e98", protocols: ["ssh"], used: 162, limit: 250, domain: "vip.sshvpn.web.id" },
   { kode: "cloudmat",  nama: "CLOUDMATIKA",                   serverId: "019ecafe-9826-7339-8939-8c6c03daaac5", protocols: ["ssh", "vmess", "vless", "trojan"], used: 149, limit: 155 },
   { kode: "sgcloud",   nama: "SGCLOUDHOST",              serverId: "019d416c-91ab-70cf-ae93-98251456366e", protocols: ["ssh", "vmess", "vless", "trojan"], used: 124, limit: 127 },
   { kode: "rajasa",    nama: "PT.RAJASA — PENUH",             serverId: "01a03c0a-b07a-736c-a192-a3be583503ae", protocols: ["ssh", "vmess", "vless", "trojan"], penuh: true, used: 100, limit: 100 },
@@ -1422,13 +1427,28 @@ function bandingkanServerLive(list) {
     if (id) liveById.set(String(id), x);
   }
   const namaLive = (x) => String(x.name || x.nama || x.server_name || x.domain || "?").replace(/\s+/g, " ").trim();
+  // Domain live per server — bentuk respons /servers tidak
+  // didokumentasikan Nadia; ambil dari field yang paling mungkin
+  // (domain/host/hostname/server_domain, atau object server.*).
+  // IP mentah ditolak (bukan domain). Kembalikan null kalau tidak ada.
+  const domainLive = (x) => {
+    const srv = x.server && typeof x.server === "object" ? x.server : null;
+    const cand = [x.domain, x.host, x.hostname, x.server_domain, x.server_host, srv?.domain, srv?.host, x.address];
+    for (const v of cand) {
+      if (typeof v !== "string" || !v.trim()) continue;
+      const d = v.trim().toLowerCase().split(":")[0];
+      if (/^\d{1,3}(\.\d{1,3}){3}$/.test(d)) continue; // IP, bukan domain
+      if (d.includes(".")) return d;
+    }
+    return null;
+  };
   const protoLive = (x) => {
     const p = x.protocols || x.protocol || x.supported_protocols || [];
     if (typeof p === "string") return p.split(",").map((v) => v.trim().toLowerCase()).filter(Boolean);
     if (Array.isArray(p)) return p.map((v) => String(v).toLowerCase());
     return [];
   };
-  const baru = [], hilang = [], gantiNama = [], gantiProto = [];
+  const baru = [], hilang = [], gantiNama = [], gantiProto = [], gantiDomain = [];
   for (const [id, x] of liveById) {
     const b = SERVERS.find((s) => String(s.serverId) === id);
     if (!b) { baru.push(x); continue; }
@@ -1437,17 +1457,39 @@ function bandingkanServerLive(list) {
     const pl = protoLive(x).slice().sort().join(",");
     const pb = (b.protocols || []).slice().sort().join(",");
     if (pl && pl !== pb) gantiProto.push({ bot: b, live: protoLive(x) });
+    // Domain: hanya dibandingkan kalau bot tahu domain lama server
+    // itu (b.domain) DAN live membawa domain. Beda → laporkan.
+    const dl = domainLive(x);
+    if (dl && b.domain && dl !== String(b.domain).toLowerCase()) gantiDomain.push({ bot: b, lama: b.domain, baru: dl });
   }
   for (const s of SERVERS) {
     if (!liveById.has(String(s.serverId))) hilang.push(s);
   }
-  return { liveById, baru, hilang, gantiNama, gantiProto, namaLive, protoLive };
+  // Domain di tabel NS yang sudah tidak muncul di daftar live —
+  // sinyal tabel NS ketinggalan (mis. domain server diganti Nadia
+  // padahal bot tidak tahu domain lamanya). Hanya dicek kalau
+  // SEMUA server live membawa domain; kalau respons tidak membawa
+  // domain (sebagian/tidak sama sekali), diam saja — bukan sinyal.
+  // Domain yang sudah dilaporkan sebagai "lama" di gantiDomain
+  // tidak dilaporkan lagi di sini.
+  const domainNsYatim = [];
+  const semuaAdaDomain = liveById.size > 0 && [...liveById.values()].every((x) => domainLive(x));
+  if (semuaAdaDomain) {
+    const liveDomains = new Set([...liveById.values()].map((x) => domainLive(x)));
+    const sudahDilaporkan = new Set(gantiDomain.map((g) => String(g.lama).toLowerCase()));
+    for (const d of Object.keys(NS_PER_DOMAIN)) {
+      if (!liveDomains.has(d.toLowerCase()) && !sudahDilaporkan.has(d.toLowerCase())) domainNsYatim.push(d);
+    }
+  }
+  return { liveById, baru, hilang, gantiNama, gantiProto, gantiDomain, domainNsYatim, namaLive, protoLive, domainLive };
 }
 
 // /ceknadia (admin saja): bandingkan daftar server live dari
 // penyedia dengan daftar di bot. Lapor server baru, server hilang,
-// nama berubah, protokol berubah. Harga modal TIDAK bisa dicek lewat
-// API — harus manual di dashboard penyedia.
+// nama berubah, protokol berubah, domain berubah (28 Nov 2026 —
+// domain penting karena tabel NS_PER_DOMAIN dikunci per domain).
+// Harga modal TIDAK bisa dicek lewat API — harus manual di
+// dashboard penyedia.
 async function tampilkanCekNadia(env, chatId, messageId) {
   if (!adalahAdmin(env, chatId)) return;
   const kirim = async (teks) => {
@@ -1456,14 +1498,14 @@ async function tampilkanCekNadia(env, chatId, messageId) {
   };
   const { list, debug } = await ambilDaftarServerLive(env);
   if (!list) { await kirim("❌ Gagal ambil daftar server dari penyedia: " + debug); return; }
-  const { liveById, baru, hilang, gantiNama, gantiProto, namaLive, protoLive } = bandingkanServerLive(list);
+  const { liveById, baru, hilang, gantiNama, gantiProto, gantiDomain, domainNsYatim, namaLive, protoLive, domainLive } = bandingkanServerLive(list);
   const baris = ["🔍 Cek Nadia — daftar server live vs bot", "Live: " + liveById.size + " server • Bot: " + SERVERS.length + " server", ""];
-  if (!baru.length && !hilang.length && !gantiNama.length && !gantiProto.length) {
+  if (!baru.length && !hilang.length && !gantiNama.length && !gantiProto.length && !gantiDomain.length && !domainNsYatim.length) {
     baris.push("✅ Semua sama — tidak ada perubahan.");
   } else {
     if (baru.length) {
       baris.push("🆕 BARU di Nadia (belum ada di bot):");
-      for (const x of baru) baris.push("• " + namaLive(x) + " — protokol: " + (protoLive(x).join(", ") || "?") + " — ID: " + (x.server_id || x.id || "?"));
+      for (const x of baru) baris.push("• " + namaLive(x) + (domainLive(x) ? " — domain: " + domainLive(x) : "") + " — protokol: " + (protoLive(x).join(", ") || "?") + " — ID: " + (x.server_id || x.id || "?"));
     }
     if (hilang.length) {
       baris.push("🗑️ HILANG dari Nadia (masih ada di bot):");
@@ -1476,6 +1518,14 @@ async function tampilkanCekNadia(env, chatId, messageId) {
     if (gantiProto.length) {
       baris.push("🔀 PROTOKOL BERUBAH:");
       for (const g of gantiProto) baris.push("• " + g.bot.nama + ": bot [" + (g.bot.protocols || []).join(", ") + "] → Nadia [" + g.live.join(", ") + "]");
+    }
+    if (gantiDomain.length) {
+      baris.push("🌐 DOMAIN BERUBAH:");
+      for (const g of gantiDomain) baris.push("• " + g.bot.nama + ": " + g.lama + " → " + g.baru + " (cek tabel NS)");
+    }
+    if (domainNsYatim.length) {
+      baris.push("⚠️ DOMAIN DI TABEL NS TIDAK ADA LAGI DI NADIA:");
+      for (const d of domainNsYatim) baris.push("• " + d + " (cek tabel NS_PER_DOMAIN)");
     }
   }
   baris.push("", "Catatan: harga modal tidak bisa dicek lewat API — cek manual di dashboard Nadia.");
