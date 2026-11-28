@@ -178,6 +178,7 @@ const SERVERS = [
 // tapi SlowDNS server ini baru jalan kalau Nadia memperbaiki DNS-nya.
 const NS_PER_DOMAIN = {
   "vip.sshvpn.web.id": "nsbiz.vpnstore28.my.id", // SSH SELOW DNS & UDP MINI (ISP Biznet Gio, Bogor)
+  "vpn14.nadiastore.web.id": "dns14.nadiastore.web.id", // SSH vpn14 (28 Nov 2026, dari website Nadia)
 };
 // Alur beli sekarang: /beli (atau tombol 🛒 Beli VPN) -> pilih
 // SERVER -> pilih protokol -> pilih durasi -> ketik username sendiri
