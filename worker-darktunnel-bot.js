@@ -2596,9 +2596,8 @@ export function deteksiCDN(headers, edgeHostname) {
 // dan subdomain dari catatan sertifikat (CertSpotter, fallback crt.sh).
 // Return {domain, ok, status, ms, cdn, server, ips, hostname, cname,
 // subdomains} — subdomains = null bila DNS gagal total; tiap subdomain
-// {nama, ip, server} (server = provider CDN atau "" bila tak terdeteksi;
-// ip "" = nama dari catatan sertifikat yang DoH-nya gagal atau di luar
-// batas 12 yang diperkaya — lihat perkaya CT di bawah).
+// {nama} saja (28 Nov 2026, revisi Asep: daftar tampil nama saja,
+// tanpa perkaya IP/server per subdomain).
 export async function cekDomain(domain) {
   const t0 = Date.now();
   const ambil = (url, method) =>
@@ -2648,51 +2647,27 @@ export async function cekDomain(domain) {
       if (j) dnsOk = true;
       const ips = ipsDariDoh(j);
       if (!ips.length) return null;
-      // Provider subdomain: PTR IP pertama → hostname edge → deteksi
-      // dari hostname saja (tanpa header — tidak ada fetch ke tiap
-      // subdomain). PTR gagal → server "" (tetap tampil dengan IP saja).
-      // Jalan paralel di dalam map yang sama, tidak menambah round-trip
-      // berurutan.
-      let server = "";
-      const ipParts = ips[0].split(".");
-      if (ipParts.length === 4) {
-        const ptrSub = await dohQuery(ipParts.reverse().join(".") + ".in-addr.arpa", "PTR");
-        if (ptrSub) server = deteksiCDN(null, hostnameDariPtr(ptrSub)).cdn;
-      }
-      // PTR gagal -> CNAME dari jawaban DoH yang sama (tanpa fetch
-      // tambahan) sebagai sinyal cadangan.
-      if (!server) {
-        const c = cnameDariDoh(j);
-        if (c) server = deteksiCDN(null, c).cdn;
-      }
-      return { nama: sub + "." + domain, ip: ips[0], server };
+      // (28 Nov 2026, revisi Asep) Daftar subdomain tampil NAMA SAJA —
+      // DoH A di sini hanya untuk mengetahui subdomain itu ada
+      // (penemuan), bukan untuk perkaya: tanpa PTR/CNAME per subdomain.
+      return { nama: sub + "." + domain };
     }));
     if (ptrP) hasil.hostname = hostnameDariPtr(await ptrP);
     if (dnsOk) {
-      // Gabung: hasil probe DoH dulu (ada IP-nya), lalu nama dari
-      // catatan sertifikat yang belum ketemu (tanpa IP).
+      // Gabung: hasil probe DoH dulu, lalu nama dari catatan sertifikat
+      // yang belum ketemu. Daftar tampil NAMA SAJA (28 Nov 2026,
+      // revisi Asep) — tanpa perkaya DoH per subdomain.
       const dariProbe = cekSub.filter(Boolean);
       const ada = new Set(dariProbe.map((s) => s.nama.toLowerCase()));
-      const dariCT = (ctP ? await ctP : []).filter((n) => !ada.has(n.toLowerCase())).map((n) => ({ nama: n, ip: "", server: "" }));
+      const dariCT = (ctP ? await ctP : []).filter((n) => !ada.has(n.toLowerCase())).map((n) => ({ nama: n }));
       hasil.subdomains = dariProbe.concat(dariCT);
-      // Perkaya subdomain CT (tanpa IP) dengan DoH A — maks 12,
-      // paralel. Satu query DoH per subdomain: IP pertama + CNAME
-      // (gratis dari jawaban yang sama) -> label server dari pemetaan
-      // CNAME yang sudah ada. DoH gagal / tanpa IP -> tampil nama saja.
-      // Anggaran subrequest (Workers Free: 50/invocation): HEAD/GET
+      // Anggaran subrequest (Workers Free: 50/invocation) — TANPA
+      // perkaya per subdomain (28 Nov 2026, revisi Asep): HEAD/GET
       // <= 2 (worst 4 dgn semua fallback), DoH A domain 1, PTR IP
-      // pertama 1, CT 1 (+1 fallback crt.sh), probe 12x DoH A, PTR
-      // probe <= 12, perkaya CT <= 12 -> worst ~44, aman.
-      const tanpaIp = hasil.subdomains.filter((s) => !s.ip).slice(0, 12);
-      await Promise.all(tanpaIp.map(async (s) => {
-        const j = await dohQuery(s.nama, "A");
-        const ips = ipsDariDoh(j);
-        if (ips.length) {
-          s.ip = ips[0];
-          const c = cnameDariDoh(j);
-          if (c) s.server = deteksiCDN(null, c).cdn;
-        }
-      }));
+      // pertama 1, CT 1 (+1 fallback crt.sh), probe 12x DoH A (hanya
+      // untuk mengetahui subdomain itu ada) -> worst ~20, jauh di
+      // bawah batas 50. Jumlah nama yang ditampilkan tidak menambah
+      // fetch sama sekali.
     }
   }
   // CDN + Server — ditentukan SETELAH hostname diketahui, karena
@@ -2727,15 +2702,14 @@ export function formatHasilCek(r) {
     ? "🌐 IP: " + r.ips.map((ip) => escapeHtml(ip)).join(", ") : "";
   const barisHost = r.hostname
     ? "🔁 Hostname: <code>" + escapeHtml(r.hostname) + "</code>" : "";
-  // Subdomain: satu per baris, format nama, ip (Provider) — contoh
-  // Asep: access.iflix.com, 123.456.78.9 (cloudflare). Provider dalam
-  // kurung bila terdeteksi, tanpa kurung bila tidak. Nama yang hanya
-  // dari catatan sertifikat (tanpa IP) tampil nama saja.
-  // Maks 20 nama; sisanya diringkas "(+N subdomain lain)".
+  // Subdomain: satu per baris, NAMA SAJA (28 Nov 2026, revisi Asep —
+  // tanpa IP/server per subdomain; baris utama domain tetap tampil
+  // IP/CDN/Server seperti biasa). SEMUA nama ditampilkan, tanpa batas
+  // 20 dan tanpa ringkasan "(+N subdomain lain)". Pesan panjang
+  // dipecah jadi beberapa kiriman oleh kirimHasilCekPanjang.
   const barisSub = r.subdomains
     ? (r.subdomains.length
-      ? "🔎 Subdomain yang ditemukan:\n" + r.subdomains.slice(0, 20).map((s) => "• " + escapeHtml(s.nama) + (s.ip ? ", " + escapeHtml(s.ip) : "") + (s.server ? " (" + escapeHtml(s.server) + ")" : "")).join("\n") +
-        (r.subdomains.length > 20 ? "\n• ... (+" + (r.subdomains.length - 20) + " subdomain lain)" : "")
+      ? "🔎 Subdomain yang ditemukan:\n" + r.subdomains.map((s) => "• " + escapeHtml(s.nama)).join("\n")
       : "🔎 Subdomain: tidak ditemukan")
     : "";
   if (!r.ok) {
@@ -3088,14 +3062,51 @@ const CATATAN_PEMICU =
   "ℹ️ <code>/start</code> polos di grup — promo toko, bot ini diam\n\n" +
   "Satu kata yang sama cuma dibalas sekali per 60 detik biar nggak spam.";
 
+// Pecah teks panjang jadi beberapa potongan (maks ~3500 karakter per
+// potongan), dipotong di batas baris supaya tidak memotong baris
+// subdomain di tengah. Baris tunggal yang lebih panjang dari batas
+// dipotong paksa. Dipakai hasil /cek yang daftar subdomainnya kini
+// tanpa batas (28 Nov 2026, perintah Asep).
+export function pecahPesan(teks, maks = 3500) {
+  const potongan = [];
+  let kini = "";
+  for (const baris of String(teks).split("\n")) {
+    let sisa = baris;
+    while (sisa.length > maks) {
+      if (kini) { potongan.push(kini); kini = ""; }
+      potongan.push(sisa.slice(0, maks));
+      sisa = sisa.slice(maks);
+    }
+    if (kini && kini.length + 1 + sisa.length > maks) {
+      potongan.push(kini);
+      kini = "";
+    }
+    kini = kini ? kini + "\n" + sisa : sisa;
+  }
+  if (kini) potongan.push(kini);
+  return potongan.length ? potongan : [""];
+}
+
+// Kirim hasil /cek yang bisa sangat panjang (daftar subdomain tanpa
+// batas) dalam beberapa pesan berurutan; tombol hanya di pesan
+// terakhir supaya tidak mengotori tiap potongan.
+async function kirimHasilCekPanjang(env, chatId, teks, keyboard) {
+  const potongan = pecahPesan(teks);
+  for (let i = 0; i < potongan.length; i++) {
+    const terakhir = i === potongan.length - 1;
+    await sendTelegram(env, chatId, potongan[i], terakhir ? keyboard : undefined);
+  }
+}
+
 // Jalankan cek domain lalu kirim hasilnya (dipakai mulaiCekDomain
 // + alur pendingCek di grup).
 async function kirimHasilCek(env, chatId, domain, diGrup) {
   let hasilCek;
   try { hasilCek = await cekDomain(domain); }
   catch { hasilCek = { domain, ok: false, status: 0, ms: 0, cdn: "", server: "", ips: [], hostname: "", cname: "", subdomains: null }; }
-  // (v2.9.17) Di grup: hasil saja, tanpa tombol.
-  await sendTelegram(env, chatId, formatHasilCek(hasilCek), diGrup ? undefined : [
+  // (v2.9.17) Di grup: hasil saja, tanpa tombol. Daftar subdomain
+  // tanpa batas bisa sangat panjang — kirim bertahap (28 Nov 2026).
+  await kirimHasilCekPanjang(env, chatId, formatHasilCek(hasilCek), diGrup ? undefined : [
     [{ text: "🔄 Cek Lagi", callback_data: "cek:mulai", style: "primary" }],
     ...TOMBOL_KEMBALI,
   ]);
@@ -5787,7 +5798,8 @@ async function handleTelegram(env, update) {
     let hasilCek;
     try { hasilCek = await cekDomain(domain); }
     catch { hasilCek = { domain, ok: false, status: 0, ms: 0, cdn: "", server: "", ips: [], hostname: "", subdomains: null }; }
-    await sendTelegram(env, chatId, formatHasilCek(hasilCek), [
+    // Daftar subdomain tanpa batas bisa sangat panjang — kirim bertahap.
+    await kirimHasilCekPanjang(env, chatId, formatHasilCek(hasilCek), [
       [{ text: "🔄 Cek Lagi", callback_data: "cek:mulai", style: "primary" }],
       ...TOMBOL_KEMBALI,
     ]);
