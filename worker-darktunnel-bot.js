@@ -2515,9 +2515,12 @@ function sinyalHeader(h) {
 // Karena itu urutan deteksi: (1) hostname edge, (2) header khas
 // provider (CloudFront WAJIB sebelum Cloudflare). TIDAK ADA jalan
 // terakhir cf-ray (28 Nov 2026): kalau tidak ada sinyal yang cocok,
-// CDN tidak dilaporkan (jangan menebak). cf-cache-status tetap sinyal
-// Cloudflare yang sah karena datang dari cache asal, bukan tempelan
-// edge Worker (terverifikasi di edu.ruangguru.com: DYNAMIC).
+// CDN tidak dilaporkan (jangan menebak). cf-cache-status JUGA
+// ditempeli edge (terbukti 28 Nov 2026: origin live.iflix.com TIDAK
+// mengirim cf-cache-status — dicek langsung via curl — tapi bot tetap
+// membaca Cloudflare; satu-satunya pemicu di loop header adalah
+// cf-cache-status). Jadi cf-cache-status DIHAPUS sebagai sinyal;
+// Cloudflare hanya terdeteksi lewat hostname edge / CNAME.
 export const DAFTAR_CDN = [
   { nama: "CloudFront", server: "CloudFront",
     host: ["cloudfront.net"],
@@ -2548,7 +2551,9 @@ export const DAFTAR_CDN = [
     header: (h, s) => s.ada("x-cld-") },
   { nama: "Cloudflare", server: "cloudflare",
     host: ["cloudflare.com"],
-    header: (h) => !!h.get("cf-cache-status") },
+    // TIDAK ADA sinyal header: cf-cache-status ditempeli edge Worker
+    // (lihat catatan di atas) — hanya hostname edge / CNAME yang sah.
+    header: () => false },
 ];
 
 // Deteksi provider CDN dari header respons + hostname edge (PTR).
@@ -2561,8 +2566,9 @@ export const DAFTAR_CDN = [
 // Cloudflare — live.iflix.com (aslinya Tencent) sempat salah label
 // Cloudflare gara-gara ini. Kalau tidak ada sinyal yang cocok,
 // kembalikan kosong (CDN tidak dilaporkan, jangan menebak).
-// cf-cache-status tetap dihitung sebagai sinyal Cloudflare lewat
-// entri Cloudflare di DAFTAR_CDN (datang dari cache asal).
+// cf-cache-status JUGA dihapus sebagai sinyal (28 Nov 2026): origin
+// live.iflix.com tidak mengirimnya (dicek via curl), tapi bot tetap
+// membaca Cloudflare — header itu ditempeli edge Worker.
 export function deteksiCDN(headers, edgeHostname) {
   const kosong = { cdn: "", server: "" };
   const host = String(edgeHostname || "").toLowerCase();
@@ -2578,9 +2584,9 @@ export function deteksiCDN(headers, edgeHostname) {
     try { kena = !!p.header(headers, s, host, p.host); } catch { kena = false; }
     if (kena) return { cdn: p.nama, server: p.server };
   }
-  // cf-ray sengaja TIDAK dipakai: selalu ditempeli edge Worker di
-  // semua respons (lihat catatan di atas). cf-cache-status sudah
-  // dicek sebagai entri Cloudflare di loop DAFTAR_CDN di atas.
+  // cf-ray DAN cf-cache-status sengaja TIDAK dipakai: keduanya
+  // ditempeli edge Worker di semua respons subrequest (lihat catatan
+  // di atas). Cloudflare hanya terdeteksi lewat hostname edge / CNAME.
   return kosong;
 }
 
@@ -2591,7 +2597,8 @@ export function deteksiCDN(headers, edgeHostname) {
 // Return {domain, ok, status, ms, cdn, server, ips, hostname, cname,
 // subdomains} — subdomains = null bila DNS gagal total; tiap subdomain
 // {nama, ip, server} (server = provider CDN atau "" bila tak terdeteksi;
-// ip "" = nama hanya dari catatan sertifikat, belum dicek IP-nya).
+// ip "" = nama dari catatan sertifikat yang DoH-nya gagal atau di luar
+// batas 12 yang diperkaya — lihat perkaya CT di bawah).
 export async function cekDomain(domain) {
   const t0 = Date.now();
   const ambil = (url, method) =>
@@ -2652,6 +2659,12 @@ export async function cekDomain(domain) {
         const ptrSub = await dohQuery(ipParts.reverse().join(".") + ".in-addr.arpa", "PTR");
         if (ptrSub) server = deteksiCDN(null, hostnameDariPtr(ptrSub)).cdn;
       }
+      // PTR gagal -> CNAME dari jawaban DoH yang sama (tanpa fetch
+      // tambahan) sebagai sinyal cadangan.
+      if (!server) {
+        const c = cnameDariDoh(j);
+        if (c) server = deteksiCDN(null, c).cdn;
+      }
       return { nama: sub + "." + domain, ip: ips[0], server };
     }));
     if (ptrP) hasil.hostname = hostnameDariPtr(await ptrP);
@@ -2662,6 +2675,24 @@ export async function cekDomain(domain) {
       const ada = new Set(dariProbe.map((s) => s.nama.toLowerCase()));
       const dariCT = (ctP ? await ctP : []).filter((n) => !ada.has(n.toLowerCase())).map((n) => ({ nama: n, ip: "", server: "" }));
       hasil.subdomains = dariProbe.concat(dariCT);
+      // Perkaya subdomain CT (tanpa IP) dengan DoH A — maks 12,
+      // paralel. Satu query DoH per subdomain: IP pertama + CNAME
+      // (gratis dari jawaban yang sama) -> label server dari pemetaan
+      // CNAME yang sudah ada. DoH gagal / tanpa IP -> tampil nama saja.
+      // Anggaran subrequest (Workers Free: 50/invocation): HEAD/GET
+      // <= 2 (worst 4 dgn semua fallback), DoH A domain 1, PTR IP
+      // pertama 1, CT 1 (+1 fallback crt.sh), probe 12x DoH A, PTR
+      // probe <= 12, perkaya CT <= 12 -> worst ~44, aman.
+      const tanpaIp = hasil.subdomains.filter((s) => !s.ip).slice(0, 12);
+      await Promise.all(tanpaIp.map(async (s) => {
+        const j = await dohQuery(s.nama, "A");
+        const ips = ipsDariDoh(j);
+        if (ips.length) {
+          s.ip = ips[0];
+          const c = cnameDariDoh(j);
+          if (c) s.server = deteksiCDN(null, c).cdn;
+        }
+      }));
     }
   }
   // CDN + Server — ditentukan SETELAH hostname diketahui, karena
@@ -2696,13 +2727,14 @@ export function formatHasilCek(r) {
     ? "🌐 IP: " + r.ips.map((ip) => escapeHtml(ip)).join(", ") : "";
   const barisHost = r.hostname
     ? "🔁 Hostname: <code>" + escapeHtml(r.hostname) + "</code>" : "";
-  // Subdomain: satu per baris, format nama/ip (Provider) — provider
-  // dalam kurung bila terdeteksi, tanpa kurung bila tidak. Nama yang
-  // hanya dari catatan sertifikat (tanpa IP) tampil nama saja.
+  // Subdomain: satu per baris, format nama, ip (Provider) — contoh
+  // Asep: access.iflix.com, 123.456.78.9 (cloudflare). Provider dalam
+  // kurung bila terdeteksi, tanpa kurung bila tidak. Nama yang hanya
+  // dari catatan sertifikat (tanpa IP) tampil nama saja.
   // Maks 20 nama; sisanya diringkas "(+N subdomain lain)".
   const barisSub = r.subdomains
     ? (r.subdomains.length
-      ? "🔎 Subdomain yang ditemukan:\n" + r.subdomains.slice(0, 20).map((s) => "• " + escapeHtml(s.nama) + (s.ip ? "/" + escapeHtml(s.ip) : "") + (s.server ? " (" + escapeHtml(s.server) + ")" : "")).join("\n") +
+      ? "🔎 Subdomain yang ditemukan:\n" + r.subdomains.slice(0, 20).map((s) => "• " + escapeHtml(s.nama) + (s.ip ? ", " + escapeHtml(s.ip) : "") + (s.server ? " (" + escapeHtml(s.server) + ")" : "")).join("\n") +
         (r.subdomains.length > 20 ? "\n• ... (+" + (r.subdomains.length - 20) + " subdomain lain)" : "")
       : "🔎 Subdomain: tidak ditemukan")
     : "";
@@ -2710,8 +2742,7 @@ export function formatHasilCek(r) {
     return "🌐 <b>" + escapeHtml(r.domain) + "</b>\n\n" +
       "❌ Domain tidak merespons — tidak ditemukan atau tidak bisa dijangkau.\n" +
       "Coba cek lagi ejaannya, atau coba lagi nanti ya." +
-      (barisIp ? "\n" + barisIp : "") + (barisHost ? "\n" + barisHost : "") + (barisSub ? "\n" + barisSub : "") +
-      "\n\nTes penentu (operator ngelolosin apa nggak) tetap di HP.";
+      (barisIp ? "\n" + barisIp : "") + (barisHost ? "\n" + barisHost : "") + (barisSub ? "\n" + barisSub : "");
   }
   // Cabang sukses — urutan v2.7.9 (contoh Asep, ovo.id):
   // judul → status → IP/Hostname/CDN/Server → subdomain (paling akhir),
@@ -2724,7 +2755,7 @@ export function formatHasilCek(r) {
     "✅ Merespons — HTTP " + r.status + " (" + r.ms + " ms)"];
   if (info) blok.push(info);
   if (barisSub) blok.push(barisSub);
-  return blok.join("\n\n") + "\n\nTes penentu (operator ngelolosin apa nggak) tetap di HP.";
+  return blok.join("\n\n");
 }
 
 function keyboardStart(isAdmin, diGrup) {
