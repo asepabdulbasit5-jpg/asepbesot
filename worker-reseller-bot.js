@@ -378,6 +378,23 @@ async function toggleTerlaluCepat(env) {
 async function catatToggleToko(env) {
   try { await env.ORDERS.put(KUNCI_TOGGLE_TERAKHIR, String(Date.now())); } catch { /* abaikan */ }
 }
+// ---- Status menunggu admin dari tombol menu (28 Nov 2026) ----
+// Tombol Broadcast/Konfirmasi di menu utama tidak bisa langsung
+// jalan karena butuh teks dari admin (isi broadcast / ORDER_ID).
+// Ketukan tombol menyimpan KV PENDING_BROADCAST:<chatId> /
+// PENDING_KONFIRMASI:<chatId> berisi {dibuat: ms epoch}; pesan
+// teks DM berikutnya dari admin dipakai sebagai isinya. Berlaku
+// 10 menit — sesudah itu diabaikan + dibersihkan.
+const MASA_TUNGGU_ADMIN_MS = 10 * 60 * 1000;
+async function bacaTungguAdmin(env, chatId, kunci) {
+  const p = await env.ORDERS.get(kunci + chatId, "json").catch(() => null);
+  if (!p) return null;
+  if (Date.now() - (p.dibuat || 0) > MASA_TUNGGU_ADMIN_MS) {
+    await env.ORDERS.delete(kunci + chatId);
+    return null;
+  }
+  return p;
+}
 function adalahAdmin(env, chatId) { return String(chatId) === String(env.ADMIN_CHAT_ID); }
 const PESAN_TUTUP = "🔴 Toko lagi tutup. Lihat-lihat dulu aja, order dibuka lagi nanti ya.";
 // Deskripsi bot (tampil di profil: "Apa yang dapat bot ini lakukan?").
@@ -461,6 +478,23 @@ async function handleTelegram(env, update) {
     if (data === "menu:akun") { await tampilkanAkun(env, cb.from.id, cb.message?.message_id); return; }
     if (data === "menu:semua") { await tampilkanSemuaAkun(env, cb.from.id, cb.message?.message_id); return; }
     if (data === "menu:ceknadia") { await tampilkanCekNadia(env, cb.from.id, cb.message?.message_id); return; }
+    if (data === "menu:cekfield") { await tampilkanCekField(env, cb.from.id); return; }
+    if (data === "menu:broadcast") {
+      // Tombol Broadcast: minta isi pesan dulu (28 Nov 2026).
+      if (!adalahAdmin(env, cb.from.id)) return;
+      await env.ORDERS.put("PENDING_BROADCAST:" + cb.from.id, JSON.stringify({ dibuat: Date.now() }));
+      await env.ORDERS.delete("PENDING_KONFIRMASI:" + cb.from.id);
+      await sendTelegram(env, cb.from.id, "Ketik pesan broadcast-nya (atau /batal buat batalin):");
+      return;
+    }
+    if (data === "menu:konfirmasi") {
+      // Tombol Konfirmasi: minta ORDER_ID dulu (28 Nov 2026).
+      if (!adalahAdmin(env, cb.from.id)) return;
+      await env.ORDERS.put("PENDING_KONFIRMASI:" + cb.from.id, JSON.stringify({ dibuat: Date.now() }));
+      await env.ORDERS.delete("PENDING_BROADCAST:" + cb.from.id);
+      await sendTelegram(env, cb.from.id, "Ketik ORDER_ID-nya (atau /batal buat batalin):");
+      return;
+    }
     if (data === "menu:toko") {
       if (!adalahAdmin(env, cb.from.id)) return;
       if (await toggleTerlaluCepat(env)) { await jawabAlert(env, cb.id, "Baru saja diubah, tunggu sebentar ya."); return; }
@@ -751,10 +785,48 @@ async function handleTelegram(env, update) {
   if (text === "📦 Status Order") { await tampilkanStatus(env, chatId); return; }
   if (text === "📋 Semua Akun") { await tampilkanSemuaAkun(env, chatId); return; }
   if (text === "/batal") {
+    // (28 Nov 2026) Batalkan juga status menunggu admin
+    // (Broadcast/Konfirmasi dari tombol menu).
+    const tungguBc = await env.ORDERS.get("PENDING_BROADCAST:" + chatId, "json").catch(() => null);
+    const tungguKonf = await env.ORDERS.get("PENDING_KONFIRMASI:" + chatId, "json").catch(() => null);
+    const pendingOrder = await env.ORDERS.get("pending:" + chatId, "json").catch(() => null);
+    const pendingPassAda = await env.ORDERS.get("pendingPass:" + chatId, "json").catch(() => null);
+    await env.ORDERS.delete("PENDING_BROADCAST:" + chatId);
+    await env.ORDERS.delete("PENDING_KONFIRMASI:" + chatId);
     await env.ORDERS.delete("pending:" + chatId);
     await env.ORDERS.delete("pendingPass:" + chatId);
-    await sendTelegram(env, chatId, "Order dibatalkan. Ketik /beli kalau mau pesan lagi.");
+    if (tungguBc || tungguKonf) {
+      await sendTelegram(env, chatId, "Dibatalkan.");
+    } else if (pendingOrder || pendingPassAda) {
+      await sendTelegram(env, chatId, "Order dibatalkan. Ketik /beli kalau mau pesan lagi.");
+    } else if (adalahAdmin(env, chatId)) {
+      await sendTelegram(env, chatId, "Tidak ada yang dibatalkan.");
+    } else {
+      await sendTelegram(env, chatId, "Order dibatalkan. Ketik /beli kalau mau pesan lagi.");
+    }
     return;
+  }
+
+  // (28 Nov 2026) Status menunggu admin dari tombol Broadcast /
+  // Konfirmasi di menu utama — hanya admin, hanya DM (grup sudah
+  // kembali di atas). Pesan teks biasa (bukan perintah) dipakai
+  // sebagai isi broadcast / ORDER_ID konfirmasi. Perintah lain
+  // ("/...") membatalkan penantian lalu diproses seperti biasa.
+  if (adalahAdmin(env, chatId)) {
+    const pb = await bacaTungguAdmin(env, chatId, "PENDING_BROADCAST:");
+    const pk = await bacaTungguAdmin(env, chatId, "PENDING_KONFIRMASI:");
+    if (text.startsWith("/")) {
+      if (pb) await env.ORDERS.delete("PENDING_BROADCAST:" + chatId);
+      if (pk) await env.ORDERS.delete("PENDING_KONFIRMASI:" + chatId);
+    } else if (pb) {
+      await env.ORDERS.delete("PENDING_BROADCAST:" + chatId);
+      await kirimBroadcast(env, chatId, text);
+      return;
+    } else if (pk) {
+      await env.ORDERS.delete("PENDING_KONFIRMASI:" + chatId);
+      await konfirmasiOrderId(env, chatId, text.split(" ")[0]);
+      return;
+    }
   }
 
   // Password SSH baru saat ganti protokol ke SSH — kalau kurang dari
@@ -974,20 +1046,7 @@ async function handleTelegram(env, update) {
   // Perintah admin: /konfirmasi ORDER_ID (cara utama konfirmasi bayar:
   // cek Dana lalu /konfirmasi — MacroDroid sudah tidak dipakai).
   if (text.startsWith("/konfirmasi ")) {
-    if (String(chatId) !== String(env.ADMIN_CHAT_ID)) return;
-    const orderId = text.split(" ")[1];
-    const order = await env.ORDERS.get(orderId, "json").catch(() => null);
-    if (!order) { await sendTelegram(env, chatId, "Order tidak ditemukan."); return; }
-    // Hanya order yang sudah "selesai" yang tidak bisa dikonfirmasi
-    // ulang. Order "paid"/"gagal" (bayar masuk tapi gagal buat akun)
-    // HARUS bisa dicoba lagi — sebelumnya kondisi ini memblokir
-    // "paid" juga, jadi /konfirmasi kedua setelah gagal selalu
-    // ditolak dengan "Order ini sudah dibayar." (cek 19 Nov 2026).
-    if (order.status === "selesai") {
-      await sendTelegram(env, chatId, "Order ini sudah selesai."); return;
-    }
-    await selesaikanOrder(env, orderId, order);
-    await sendTelegram(env, chatId, "Order " + orderId + " dikonfirmasi manual.");
+    await konfirmasiOrderId(env, chatId, text.split(" ")[1]);
     return;
   }
 }
@@ -1165,8 +1224,18 @@ async function tampilkanMenuUtama(env, chatId, from, messageId) {
   // Tombol trial HANYA untuk admin (26 Nov 2026) — pembeli tidak
   // bisa trial lagi, jadi tombolnya disembunyikan dari menu mereka.
   if (isAdmin) tombol[1] = [{ text: "🎁 Trial Gratis", callback_data: "menu:trial", style: "primary" }, { text: "📦 Status Order", callback_data: "menu:status", style: "primary" }];
-  if (isAdmin) tombol.push([{ text: "📋 Semua Akun", callback_data: "menu:semua", style: "primary" }]);
-  if (isAdmin) tombol.push([{ text: "🔍 Cek Nadia", callback_data: "menu:ceknadia", style: "primary" }]);
+  // Tombol admin (28 Nov 2026): baris 1 tiga tombol (Semua Akun,
+  // Cek Nadia, Cek Field), baris 2 dua tombol (Broadcast,
+  // Konfirmasi), toggle toko sendirian di baris paling bawah.
+  if (isAdmin) tombol.push([
+    { text: "📋 Semua Akun", callback_data: "menu:semua", style: "primary" },
+    { text: "🔍 Cek Nadia", callback_data: "menu:ceknadia", style: "primary" },
+    { text: "🔍 Cek Field", callback_data: "menu:cekfield", style: "primary" },
+  ]);
+  if (isAdmin) tombol.push([
+    { text: "📣 Broadcast", callback_data: "menu:broadcast", style: "primary" },
+    { text: "✅ Konfirmasi", callback_data: "menu:konfirmasi", style: "primary" },
+  ]);
   if (isAdmin) tombol.push([{ text: buka ? "🔴 Tutup Toko" : "🟢 Buka Toko", callback_data: "menu:toko", style: "primary" }]);
   if (messageId) { await editHtml(env, chatId, messageId, html, tombol); return; }
   // Kirim menu + hapus keyboard bawah lama supaya tampilannya seperti
@@ -1791,6 +1860,25 @@ async function tampilkanSemuaAkun(env, chatId, messageId) {
     if (messageId && i === 0) await editHtml(env, chatId, messageId, escapeHtml(potong), terakhir ? tombolAkhir : []);
     else await sendTelegram(env, chatId, potong, terakhir ? tombolAkhir : undefined);
   }
+}
+
+// ---- Konfirmasi manual ORDER_ID (ADMIN saja) ----
+// Dipakai perintah teks /konfirmasi dan tombol Konfirmasi di menu
+// (28 Nov 2026). Hanya order yang sudah "selesai" yang tidak bisa
+// dikonfirmasi ulang. Order "paid"/"gagal" (bayar masuk tapi gagal
+// buat akun) HARUS bisa dicoba lagi — sebelumnya kondisi ini
+// memblokir "paid" juga, jadi /konfirmasi kedua setelah gagal
+// selalu ditolak dengan "Order ini sudah dibayar." (cek 19 Nov 2026).
+async function konfirmasiOrderId(env, chatId, orderId) {
+  if (String(chatId) !== String(env.ADMIN_CHAT_ID)) return;
+  orderId = String(orderId || "").trim();
+  const order = orderId ? await env.ORDERS.get(orderId, "json").catch(() => null) : null;
+  if (!order) { await sendTelegram(env, chatId, "Order tidak ditemukan."); return; }
+  if (order.status === "selesai") {
+    await sendTelegram(env, chatId, "Order ini sudah selesai."); return;
+  }
+  await selesaikanOrder(env, orderId, order);
+  await sendTelegram(env, chatId, "Order " + orderId + " dikonfirmasi manual.");
 }
 
 // ---- /broadcast PESAN (ADMIN saja) ----
