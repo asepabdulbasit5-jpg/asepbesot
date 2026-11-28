@@ -4213,18 +4213,21 @@ async function handleRapihin(env, chatId, teks) {
     }
     const info = ekstrakInfoRapihin(teks);
     st.akun = cfg; st.links = links; st.info = info;
-    // Yang belum ketemu: NS/pubkey cuma untuk SSH; Exp untuk semua.
+    // Host akun (untuk cek fallback NS per-server): SSH -> host SSH;
+    // Xray -> host v2ray. Dipakai juga buat nama di pesan tanya.
+    const subX = cfg.vlessTunnelConfig || cfg.vmessTunnelConfig || cfg.trojanTunnelConfig || cfg.shadowsocksTunnelConfig;
+    const hostAkun = cfg.type === "SSH" ? cfg.sshTunnelConfig.sshConfig.host : (subX?.v2rayConfig?.host || null);
+    // Yang belum ketemu: NS/pubkey untuk semua tipe (seller juga
+    // mengirim NS + pubkey terpisah untuk akun Xray); Exp untuk semua.
+    // NS dilewati kalau host ada di tabel fallback per-server.
     const hilang = [];
-    if (cfg.type === "SSH") {
-      if (!info.ns && !NS_PER_DOMAIN_RAPIHIN[cfg.sshTunnelConfig.sshConfig.host]) hilang.push("NS");
-      if (!info.pubkey) hilang.push("Pubkey");
-    }
+    if (!info.ns && !NS_PER_DOMAIN_RAPIHIN[hostAkun]) hilang.push("NS");
+    if (!info.pubkey) hilang.push("Pubkey");
     if (!info.exp) hilang.push("Exp");
     st.hilang = hilang;
     if (hilang.length) {
       st.tahap = "tambahan"; st.ts = Date.now();
-      const subX = cfg.vlessTunnelConfig || cfg.vmessTunnelConfig || cfg.trojanTunnelConfig || cfg.shadowsocksTunnelConfig;
-      const namaAkun = cfg.type === "SSH" ? cfg.sshTunnelConfig.sshConfig.host : (subX?.v2rayConfig?.host || cfg.type);
+      const namaAkun = hostAkun || cfg.type;
       const banyak = hasil.configs.length > 1 ? " (ditemukan " + hasil.configs.length + " akun, dipakai yang pertama)" : "";
       const r = await sendTelegram(env, chatId,
         "🔎 Akun " + cfg.type + " ketemu (" + escapeHtml(namaAkun) + ")" + banyak + ". Yang belum ketemu: <b>" + hilang.join(", ") + "</b>.\n\nKirim yang ada dalam satu pesan (pisah baris, contoh: <code>NS: xxx</code> / <code>Pubkey: yyy</code> / <code>Exp: 28 Nov 2026</code>), atau ketuk Lewati.",
