@@ -1695,108 +1695,163 @@ async function tampilkanCekNadia(env, chatId, messageId) {
 // /cekfield (admin saja, DM saja — pola sama seperti /ceknadia):
 // probe struktur respons /servers — melihat apakah Nadia membawa
 // angka latensi/uptime/status node seperti di dashboard Nadia
-// (28 Nov 2026). Menampilkan NAMA field + nilai field yang namanya
-// mirip latensi/uptime/status, plus ISI field pricing/trial/migrasi
-// (28 Nov 2026 — hasil live: field-field itu ADA, hanya namanya
-// yang tampil sebelumnya). Tidak pernah menampilkan token, saldo,
-// atau data akun. Satu pesan, maks ~4000 karakter.
+// (28 Nov 2026). Tampilan polos sejak 28 Nov 2026 (perintah Asep:
+// "tampilannya bikin pusing"): harga modal Rp, trial, migrasi,
+// CloudFront, aktif — tanpa JSON mentah, tanpa nama field Inggris
+// di bagian utama; daftar field mentah pindah ke paling bawah.
+// Tidak pernah menampilkan token, saldo, atau data akun. Satu
+// pesan, maks ~4000 karakter.
 async function tampilkanCekField(env, chatId) {
   if (!adalahAdmin(env, chatId)) return;
   const { list, debug, raw } = await ambilDaftarServerLive(env);
   if (!list) { await sendTelegram(env, chatId, "❌ Gagal ambil daftar server dari penyedia: " + debug); return; }
   if (!list.length) { await sendTelegram(env, chatId, "🔍 Cek Field — respons /servers Nadia\nServer: 0\n\nRespons berisi 0 server."); return; }
-  const potongNilai = (v) => {
-    let s;
-    try { s = (typeof v === "string") ? v : JSON.stringify(v); } catch { s = String(v); }
-    if (s === undefined || s === null) s = "?";
-    return s.length > 80 ? s.slice(0, 80) + "…" : s;
+  // Format baru (28 Nov 2026, perintah Asep: "tampilannya bikin
+  // pusing"): bahasa polos, tanpa JSON mentah, tanpa nama field
+  // Inggris di bagian utama. Isi data TETAP — hanya cara
+  // menampilkannya yang berubah. Logika pengambilan data (getter
+  // toleran, deteksi sama/beda antar server, sembunyikan nilai
+  // sensitif, cap 3900 karakter) tetap seperti semula.
+  const rp = (n) => "Rp" + Number(n).toLocaleString("id-ID");
+  const keAngka = (v) => {
+    if (typeof v === "number") return v;
+    if (typeof v === "string" && v.trim() !== "" && !Number.isNaN(Number(v))) return Number(v);
+    return NaN;
   };
-  const baris = ["🔍 Cek Field — respons /servers Nadia", "Server: " + list.length, ""];
-  // Field level atas.
-  const kunciAtas = (raw && typeof raw === "object" && !Array.isArray(raw)) ? Object.keys(raw) : [];
-  baris.push("Field level atas: " + (Array.isArray(raw) ? "(respons langsung array)" : (kunciAtas.length ? kunciAtas.join(", ") : "(tidak ada)")));
-  // Field satu entri server contoh (server pertama).
-  const contoh = list[0];
-  const namaContoh = contoh.name || contoh.server_id || contoh.id || "?";
-  const kunciContoh = Object.keys(contoh);
-  baris.push("Field server contoh (" + namaContoh + "): " + (kunciContoh.length ? kunciContoh.join(", ") : "(tidak ada)"));
-  baris.push("");
-  // Field yang namanya mirip latensi/uptime/status — cari di level
-  // atas dan di semua entri server (nama unik, nilai pertama yang
-  // ketemu). Nilai field yang namanya sensitif tidak ditampilkan.
-  const POLA = /latency|latensi|ping|uptime|status|health|slow|down/i;
-  const SENSITIF = /token|key|secret|password|saldo|balance/i;
-  const ketemu = [];
-  const catat = (kunci, nilai) => {
-    if (!POLA.test(kunci)) return;
-    if (ketemu.some((k) => k.kunci === kunci)) return;
-    ketemu.push({ kunci, tampil: SENSITIF.test(kunci) ? "(nilai disembunyikan)" : potongNilai(nilai) });
-  };
-  for (const k of kunciAtas) catat(k, raw[k]);
-  for (const x of list) for (const k of Object.keys(x)) catat(k, x[k]);
-  if (ketemu.length) {
-    baris.push("Field mirip latensi/uptime/status:");
-    for (const k of ketemu) baris.push("• " + k.kunci + ": " + k.tampil);
-  } else {
-    baris.push("Tidak ada field latensi/uptime/status di respons ini.");
-  }
-  // Isi field pricing + trial/migrasi (28 Nov 2026): hasil live
-  // /cekfield 21:47 WIB menunjukkan field-field ini ADA — tapi hanya
-  // namanya yang tampil. Seksi ini menampilkan ISInya untuk satu
-  // server contoh (SELOW bila ada, kalau tidak server pertama),
-  // plus apakah isinya sama di semua server atau beda. /cekfield
-  // khusus admin, jadi harga modal boleh tampil; pola SENSITIF di
-  // atas tetap berlaku untuk nilai field yang namanya sensitif.
-  baris.push("");
-  const contohIsi = list.find((x) => String(x.name || "").includes("SELOW")) || contoh;
-  const namaIsi = contohIsi.name || contohIsi.server_id || contohIsi.id || "?";
-  baris.push("💰 PRICING / TRIAL / MIGRASI (contoh: " + namaIsi + "):");
   const ringkas = (v, maks) => {
     let s;
     try { s = (typeof v === "string") ? v : JSON.stringify(v); } catch { s = String(v); }
     if (s === undefined || s === null) s = "?";
-    return s.length > maks ? s.slice(0, maks) + "… (dipotong)" : s;
+    return s.length > maks ? s.slice(0, maks) + "…" : s;
   };
-  // Kumpulkan varian nilai satu field di semua server (kunci =
-  // JSON.stringify nilai; "∅" = field tidak ada di server itu).
-  const varianField = (ambil) => {
-    const varian = new Map();
+  const potongNilai = (v) => ringkas(v, 80);
+  const namaServer = (x) => String(x.name || x.server_id || x.id || "?");
+  // Harga {day, week, month} dari pricing, kunci toleran
+  // (per_day/per_week/per_month atau "1"/"7"/"30"). null kalau
+  // tidak ada / tidak terbaca.
+  const ambilHarga = (x) => {
+    const p = x && x.pricing;
+    if (p === undefined || p === null || typeof p !== "object" || Array.isArray(p)) return null;
+    const ambil = (...kunci) => { for (const k of kunci) if (p[k] !== undefined && p[k] !== null) return p[k]; return undefined; };
+    const d = keAngka(ambil("per_day", "per_1day", "1", "day", "daily"));
+    const w = keAngka(ambil("per_week", "per_1week", "7", "week", "weekly"));
+    const m = keAngka(ambil("per_month", "per_1month", "30", "month", "monthly"));
+    if (!Number.isFinite(d) || !Number.isFinite(w) || !Number.isFinite(m)) return null;
+    return { day: d, week: w, month: m };
+  };
+  // Server contoh: SELOW bila ada, kalau tidak server pertama.
+  const contoh = list.find((x) => String(x.name || "").includes("SELOW")) || list[0];
+  const kunciContoh = Object.keys(contoh);
+
+  const baris = ["🔍 Cek Field — respons /servers Nadia", "Server: " + list.length, ""];
+
+  // 💰 Harga modal.
+  const triple = (h) => rp(h.day) + " / " + rp(h.week) + " / " + rp(h.month);
+  const varianHarga = new Map(); // "d/w/m" -> harga
+  let tanpaHarga = 0, mentahAneh = null;
+  for (const x of list) {
+    const h = ambilHarga(x);
+    if (!h) {
+      if (x.pricing === undefined || x.pricing === null) tanpaHarga++;
+      else if (mentahAneh === null) mentahAneh = x.pricing;
+      continue;
+    }
+    const k = h.day + "/" + h.week + "/" + h.month;
+    if (!varianHarga.has(k)) varianHarga.set(k, h);
+  }
+  if (!varianHarga.size) {
+    baris.push("💰 Harga modal: " + (mentahAneh !== null ? "(tidak terbaca: " + ringkas(mentahAneh, 80) + ")" : "(tidak ada)"));
+  } else {
+    const hargaUtama = ambilHarga(contoh) || varianHarga.values().next().value;
+    let jmlUtama = 0;
     for (const x of list) {
-      const v = ambil(x);
-      const k = v === undefined ? "∅" : JSON.stringify(v);
-      if (!varian.has(k)) varian.set(k, { nilai: v, nama: x.name || x.server_id || x.id || "?" });
+      const h = ambilHarga(x);
+      if (h && h.day === hargaUtama.day && h.week === hargaUtama.week && h.month === hargaUtama.month) jmlUtama++;
     }
-    return varian;
+    if (varianHarga.size === 1) {
+      let s = "💰 Harga modal: " + triple(hargaUtama) + " (sama di semua " + jmlUtama + " server)";
+      if (tanpaHarga) s += " — " + tanpaHarga + " server tanpa harga";
+      baris.push(s);
+    } else {
+      baris.push("💰 Harga modal: " + triple(hargaUtama));
+      const beda = [];
+      for (const x of list) {
+        const h = ambilHarga(x);
+        if (h && (h.day !== hargaUtama.day || h.week !== hargaUtama.week || h.month !== hargaUtama.month)) beda.push({ nama: namaServer(x), harga: h });
+      }
+      for (const b of beda.slice(0, 3)) baris.push("• " + b.nama + ": " + triple(b.harga));
+      if (beda.length > 3) baris.push("(+" + (beda.length - 3) + " server lain beda)");
+    }
+  }
+
+  // 🎁 Trial.
+  const teksDurasi = (v) => {
+    if (v === undefined || v === null) return null;
+    const n = keAngka(v);
+    return Number.isFinite(n) ? n + " menit" : String(v);
   };
-  // Satu baris per field: nilai server contoh + sama/beda antar server.
-  const barisField = (label, ambil, maks) => {
-    const v = ambil(contohIsi);
-    const varian = varianField(ambil);
-    if (varian.size === 1 && varian.has("∅")) {
-      baris.push("• " + label + ": (tidak ada di server mana pun)");
-      return;
-    }
-    const teksNilai = v === undefined
-      ? "(tidak ada di server contoh)"
-      : (SENSITIF.test(label) ? "(nilai disembunyikan)" : ringkas(v, maks));
-    if (varian.size <= 1) {
-      baris.push("• " + label + ": " + teksNilai + " — sama di semua " + list.length + " server");
-      return;
-    }
-    // Cari satu varian lain (bukan nilai contoh) sebagai contoh beda.
-    const kunciContoh = v === undefined ? "∅" : JSON.stringify(v);
-    let lain = null;
-    for (const [k, info] of varian) if (k !== kunciContoh) { lain = info; break; }
-    const contohLain = lain ? " — contoh lain (" + lain.nama + "): " + ringkas(lain.nilai, maks) : "";
-    baris.push("• " + label + ": " + teksNilai + " — beda antar server (" + varian.size + " varian)" + contohLain);
+  const teksTrial = (x) => {
+    if (x.trial_enabled === false) return "mati";
+    if (x.trial_enabled !== true) return null;
+    const d = teksDurasi(x.trial_duration);
+    return d ? "nyala, " + d : "nyala";
   };
-  barisField("pricing", (x) => x.pricing, 400);
-  barisField("trial_enabled", (x) => x.trial_enabled, 80);
-  barisField("trial_duration", (x) => x.trial_duration, 80);
-  barisField("migration_enabled", (x) => x.migration_enabled, 80);
-  barisField("migration_price", (x) => x.migration_price, 80);
-  baris.push("• domain_cloudfront: " + (contohIsi.domain_cloudfront === undefined ? "(tidak ada di server contoh)" : ringkas(contohIsi.domain_cloudfront, 80)));
-  baris.push("• is_active: " + (contohIsi.is_active === undefined ? "(tidak ada di server contoh)" : ringkas(contohIsi.is_active, 80)));
+  let trialUtama = teksTrial(contoh);
+  if (trialUtama === null) for (const x of list) { const t = teksTrial(x); if (t !== null) { trialUtama = t; break; } }
+  const varianTrial = new Map(); // teks varian -> nama server pertama
+  for (const x of list) {
+    const t = teksTrial(x);
+    if (t === null || t === trialUtama) continue;
+    if (!varianTrial.has(t)) varianTrial.set(t, namaServer(x));
+  }
+  let sTrial = "🎁 Trial: " + (trialUtama === null ? "(tidak ada)" : trialUtama);
+  if (varianTrial.size) {
+    const sebut = [...varianTrial.entries()].slice(0, 2).map(([t, n]) => n + ": " + t.replace(/^nyala, /, ""));
+    sTrial += " (" + sebut.join("; ") + (varianTrial.size > 2 ? "; +" + (varianTrial.size - 2) + " varian lain" : "") + ")";
+  }
+  baris.push(sTrial);
+
+  // 🔀 Pindah server.
+  let teksMigrasi;
+  if (contoh.migration_enabled === false) teksMigrasi = "mati";
+  else if (contoh.migration_enabled === true) {
+    const h = keAngka(contoh.migration_price);
+    teksMigrasi = "nyala" + (Number.isFinite(h) ? ", " + (h > 0 ? rp(h) : "gratis") : "");
+  } else teksMigrasi = "(tidak ada)";
+  baris.push("🔀 Pindah server: " + teksMigrasi);
+
+  // 🌐 Domain CloudFront.
+  const cf = contoh.domain_cloudfront;
+  baris.push("🌐 Domain CloudFront: " + (cf === undefined || cf === null || cf === "" ? "kosong" : ringkas(cf, 80)));
+
+  // ✅ Server aktif.
+  if (contoh.is_active === true) baris.push("✅ Server aktif");
+  else if (contoh.is_active === false) baris.push("❌ Server tidak aktif");
+  else baris.push("Server aktif: (tidak ada)");
+
+  // Latensi/uptime — cari di level atas dan di semua entri server
+  // (nama unik, nilai pertama yang ketemu). Nilai field yang
+  // namanya sensitif tidak ditampilkan. status level atas yang
+  // boolean cuma penanda API berhasil, bukan status node — tidak
+  // dihitung (data live 21:52 WIB: status: true di level atas).
+  baris.push("");
+  const POLA = /latency|latensi|ping|uptime|status|health|slow|down/i;
+  const SENSITIF = /token|key|secret|password|saldo|balance/i;
+  const ketemu = [];
+  const catat = (kunci, nilai, levelAtas) => {
+    if (!POLA.test(kunci)) return;
+    if (levelAtas && kunci === "status" && typeof nilai === "boolean") return;
+    if (ketemu.some((k) => k.kunci === kunci)) return;
+    ketemu.push({ kunci, tampil: SENSITIF.test(kunci) ? "(nilai disembunyikan)" : potongNilai(nilai) });
+  };
+  const kunciAtas = (raw && typeof raw === "object" && !Array.isArray(raw)) ? Object.keys(raw) : [];
+  for (const k of kunciAtas) catat(k, raw[k], true);
+  for (const x of list) for (const k of Object.keys(x)) catat(k, x[k], false);
+  if (ketemu.length) baris.push("Latensi/uptime: " + ketemu.map((k) => k.kunci + ": " + k.tampil).join(", "));
+  else baris.push("Latensi/uptime: tidak ada di API");
+
+  // Daftar field server contoh — paling bawah, tanpa nama server.
+  baris.push("", "Field yang ada: " + (kunciContoh.length ? kunciContoh.join(", ") : "(tidak ada)"));
   let teks = baris.join("\n");
   if (teks.length > 3900) teks = teks.slice(0, 3900);
   await sendTelegram(env, chatId, teks);
