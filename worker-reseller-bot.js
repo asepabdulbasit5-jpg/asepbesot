@@ -870,6 +870,11 @@ async function handleTelegram(env, update) {
     return;
   }
 
+  if (text === "/cekfield") {
+    await tampilkanCekField(env, chatId);
+    return;
+  }
+
   // Perintah admin: /cekduitku [ORDER_ID] — diagnosa Duitku (26 Nov 2026).
   // READ-ONLY: tidak memanggil API Duitku, tidak mengubah order, tidak
   // mengirim pesan ke pembeli. Menjawab kenapa order tidak dapat link
@@ -986,10 +991,11 @@ async function handleTelegram(env, update) {
 // server_id, baca used/limit/is_full. Kalau gagal (API mati dsb.),
 // pakai used/limit snapshot 19 Nov 2026 di daftar SERVERS di atas.
 // Ambil daftar server mentah dari API penyedia (GET /servers).
-// Return: { list, debug } — list: array objek server apa adanya
-// (null kalau gagal), debug: alasan gagal (untuk admin saja).
+// Return: { list, debug, raw } — list: array objek server apa adanya
+// (null kalau gagal), debug: alasan gagal (untuk admin saja),
+// raw: JSON level atas apa adanya (untuk /cekfield).
 async function ambilDaftarServerLive(env) {
-  const fail = (debug) => ({ list: null, debug });
+  const fail = (debug) => ({ list: null, debug, raw: null });
   try {
     const base = (env.RESELLER_API_URL || "https://www.nadiavpn.web.id/api/v1").replace(/\/$/, "");
     if (!env.RESELLER_API_KEY) return fail("RESELLER_API_KEY kosong");
@@ -1014,7 +1020,7 @@ async function ambilDaftarServerLive(env) {
     };
     cari(j, 0);
     if (!arr) return fail("tidak ada array server di balasan: " + teks.slice(0, 120));
-    return { list: arr, debug: "" };
+    return { list: arr, debug: "", raw: j };
   } catch (e) { return fail("fetch error: " + String(e && e.message || e).slice(0, 120)); }
 }
 
@@ -1547,6 +1553,57 @@ async function tampilkanCekNadia(env, chatId, messageId) {
   }
   baris.push("", "Catatan: harga modal tidak bisa dicek lewat API — cek manual di dashboard Nadia.");
   await kirim(baris.join("\n"));
+}
+
+// /cekfield (admin saja, DM saja — pola sama seperti /ceknadia):
+// probe struktur respons /servers — melihat apakah Nadia membawa
+// angka latensi/uptime/status node seperti di dashboard Nadia
+// (28 Nov 2026). Hanya menampilkan NAMA field + nilai field yang
+// namanya mirip latensi/uptime/status; tidak pernah menampilkan
+// token, saldo, atau data akun. Satu pesan, maks ~4000 karakter.
+async function tampilkanCekField(env, chatId) {
+  if (!adalahAdmin(env, chatId)) return;
+  const { list, debug, raw } = await ambilDaftarServerLive(env);
+  if (!list) { await sendTelegram(env, chatId, "❌ Gagal ambil daftar server dari penyedia: " + debug); return; }
+  if (!list.length) { await sendTelegram(env, chatId, "🔍 Cek Field — respons /servers Nadia\nServer: 0\n\nRespons berisi 0 server."); return; }
+  const potongNilai = (v) => {
+    let s;
+    try { s = (typeof v === "string") ? v : JSON.stringify(v); } catch { s = String(v); }
+    if (s === undefined || s === null) s = "?";
+    return s.length > 80 ? s.slice(0, 80) + "…" : s;
+  };
+  const baris = ["🔍 Cek Field — respons /servers Nadia", "Server: " + list.length, ""];
+  // Field level atas.
+  const kunciAtas = (raw && typeof raw === "object" && !Array.isArray(raw)) ? Object.keys(raw) : [];
+  baris.push("Field level atas: " + (Array.isArray(raw) ? "(respons langsung array)" : (kunciAtas.length ? kunciAtas.join(", ") : "(tidak ada)")));
+  // Field satu entri server contoh (server pertama).
+  const contoh = list[0];
+  const namaContoh = contoh.name || contoh.server_id || contoh.id || "?";
+  const kunciContoh = Object.keys(contoh);
+  baris.push("Field server contoh (" + namaContoh + "): " + (kunciContoh.length ? kunciContoh.join(", ") : "(tidak ada)"));
+  baris.push("");
+  // Field yang namanya mirip latensi/uptime/status — cari di level
+  // atas dan di semua entri server (nama unik, nilai pertama yang
+  // ketemu). Nilai field yang namanya sensitif tidak ditampilkan.
+  const POLA = /latency|latensi|ping|uptime|status|health|slow|down/i;
+  const SENSITIF = /token|key|secret|password|saldo|balance/i;
+  const ketemu = [];
+  const catat = (kunci, nilai) => {
+    if (!POLA.test(kunci)) return;
+    if (ketemu.some((k) => k.kunci === kunci)) return;
+    ketemu.push({ kunci, tampil: SENSITIF.test(kunci) ? "(nilai disembunyikan)" : potongNilai(nilai) });
+  };
+  for (const k of kunciAtas) catat(k, raw[k]);
+  for (const x of list) for (const k of Object.keys(x)) catat(k, x[k]);
+  if (ketemu.length) {
+    baris.push("Field mirip latensi/uptime/status:");
+    for (const k of ketemu) baris.push("• " + k.kunci + ": " + k.tampil);
+  } else {
+    baris.push("Tidak ada field latensi/uptime/status di respons ini.");
+  }
+  let teks = baris.join("\n");
+  if (teks.length > 3900) teks = teks.slice(0, 3900);
+  await sendTelegram(env, chatId, teks);
 }
 
 async function tampilkanSemuaAkun(env, chatId, messageId) {
