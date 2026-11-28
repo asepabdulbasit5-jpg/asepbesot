@@ -3983,6 +3983,44 @@ function portFormatRapihin(info) {
   return { ws: ws || 80, tls: tls || 443 };
 }
 
+// Parse tanggal exp dari tempelan jadi Date, atau null kalau tidak
+// bisa dihitung dengan andal: tanggal tanpa jam ("2026-12-23") dan
+// durasi ("30 minutes") TIDAK dihitung — jangan ditebak. Bentuk yang
+// diterima: ISO "2026-11-28 16:39:00" (dianggap WIB, aturan reseller),
+// "28 Nov 2026, 16:39 WIB" (bulan Indonesia/Inggris, singkat/panjang),
+// dan ISO ber-zona eksplisit ("...Z", "+07:00").
+const BULAN_EXP = { jan: 0, january: 0, januari: 0, feb: 1, february: 1, februari: 1, mar: 2, march: 2, maret: 2, apr: 3, april: 3, mei: 4, may: 4, jun: 5, june: 5, juni: 5, jul: 6, july: 6, juli: 6, agu: 7, aug: 7, august: 7, agustus: 7, sep: 8, sept: 8, september: 8, okt: 9, oct: 9, october: 9, oktober: 9, nov: 10, november: 10, des: 11, dec: 11, december: 11, desember: 11 };
+export function parseExpRapihin(v) {
+  if (!v || typeof v !== "string") return null;
+  const t = v.trim();
+  let m = t.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?\s*(Z|[+-]\d{2}:?\d{2})?$/);
+  if (m) {
+    if (m[7]) { const d = new Date(t.replace(" ", "T")); return isNaN(d) ? null : d; }
+    return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4] - 7, +m[5], +(m[6] || 0)));
+  }
+  m = t.match(/^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4}),?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(WIB|WITA|WIT)?$/i);
+  if (m) {
+    const bl = BULAN_EXP[m[2].toLowerCase()];
+    if (bl === undefined) return null;
+    const off = m[7] ? { WIB: 7, WITA: 8, WIT: 9 }[m[7].toUpperCase()] : 7;
+    return new Date(Date.UTC(+m[3], bl, +m[1], +m[4] - off, +m[5], +(m[6] || 0)));
+  }
+  return null;
+}
+
+// "Sisa waktu" ala reseller (sisaWaktu): "X hari Y jam" / "X jam Y menit"
+// / "habis"; null kalau exp tidak bisa diparse (lihat parseExpRapihin).
+export function sisaWaktuRapihin(exp) {
+  const d = parseExpRapihin(exp);
+  if (!d) return null;
+  const ms = d - Date.now();
+  if (ms <= 0) return "habis";
+  const jam = Math.floor(ms / 3600000);
+  const menit = Math.floor((ms % 3600000) / 60000);
+  if (jam >= 24) return Math.floor(jam / 24) + " hari " + (jam % 24) + " jam";
+  return jam + " jam " + menit + " menit";
+}
+
 // Render config SSH format ringkas SANDEKALAVPN (salinan renderSSH bot
 // reseller, 22 Nov 2026): header, Informasi Akun, Domain & Koneksi,
 // Format Account. "Berlaku sampai" ditempel pemanggil.
@@ -3999,12 +4037,17 @@ export function renderRapihinSSH(akun, info) {
     baris("Username", akun.username),
     baris("Password", akun.password),
   ]);
-  const domain = akun.host;
+  // Aturan renderSSH reseller: domain = Host/Domain, kalau tidak ada
+  // pakai Server kalau bukan IP; Server selalu tampil kalau ada
+  // nilainya (bahkan kalau sama dengan domain).
+  const bukanIP = (v) => v !== null && v !== undefined && v !== "" && !/^\d+\.\d+\.\d+\.\d+$/.test(String(v));
+  const serverVal = info.server || akun.host;
+  const domain = (bukanIP(akun.host) ? akun.host : null) || (bukanIP(info.server) ? info.server : null);
   const koneksi = [];
   if (domain) koneksi.push(baris("Domain", domain));
-  if (info.server && info.server !== domain) koneksi.push(baris("Server", info.server));
+  if (serverVal) koneksi.push(baris("Server", serverVal));
   if (info.pubkey) koneksi.push(baris("Pubkey", info.pubkey));
-  const ns = info.ns || NS_PER_DOMAIN_RAPIHIN[domain];
+  const ns = info.ns || (domain ? NS_PER_DOMAIN_RAPIHIN[domain] : null);
   if (ns) koneksi.push(baris("Name Server", ns));
   if (domain) koneksi.push(baris("DNS", domain));
   const portLine = info.portLine || String(akun.port || "");
@@ -4064,14 +4107,33 @@ export function labelLinkRapihin(link) {
   }
 }
 
+// Urutan link seperti reseller (urutkanLink): varian langsung dulu
+// (TLS, NONE, GRPC, UPTLS, UPNTLS), baru versi CloudFront dengan
+// urutan yang sama. VMess (semua varian) peringkat 0 seperti reseller.
+// Sort stabil — urutan link se-label tidak berubah.
+export function urutkanLinkRapihin(links) {
+  const rank = (l) => {
+    const lab = labelLinkRapihin(l);
+    let kunci = lab.replace(/^CF /, "");
+    if (kunci.startsWith("VMESS")) kunci = "VMESS";
+    const dasar = { "TLS": 0, "NONE": 1, "GRPC": 2, "UPTLS": 3, "UPNTLS": 4, "TROJAN TLS": 0, "TROJAN": 1, "VMESS": 0, "SS": 0 };
+    return (lab.startsWith("CF ") ? 10 : 0) + (dasar[kunci] ?? 5);
+  };
+  return links.slice().sort((a, b) => rank(a) - rank(b));
+}
+
 // Render config Xray format ringkas SANDEKALAVPN (salinan susunInfoAkun
-// + kirimConfig bot reseller): header, seksi ◆ Informasi Akun /
-// ◆ Domain & Koneksi, tiap link berlabel "— LABEL —" lalu blok <pre>.
+// + kirimConfig bot reseller, template baru 28 Nov 2026): blok info
+// DATAR (tanpa seksi ◆), dipisah BARIS KOSONG dari header, dari blok
+// "Berlaku sampai", dan dari link pertama. "Berlaku sampai" (+ "Sisa
+// waktu" kalau exp-nya datetime yang bisa dihitung) di blok sendiri
+// setelah Port. Tiap link berlabel "— LABEL —" + blok <pre>, dipisah
+// baris kosong, diurutkan seperti reseller. Port pakai info.portLine
+// kalau ada.
 // Link vmess:// membawa JSON base64 sebagai "hostname" — jangan diurai
 // pakai new URL() (Server-nya jadi blob base64); decode JSON-nya langsung.
 export function renderRapihinXray(links, info = {}) {
   const kode = (v) => "<code>" + escapeHtml(String(v)) + "</code>";
-  const garis = "────────────────────";
   let uuid = null, username = null, server = null, cfDomain = null;
   const ports = [];
   const tambahPort = (p) => { const s = String(p); if (s && !ports.includes(s)) ports.push(s); };
@@ -4100,24 +4162,35 @@ export function renderRapihinXray(links, info = {}) {
   // Pengaman: jangan pernah tampilkan blob base64 sebagai Server
   // (mis. ss:// bentuk base64 yang hostname-nya ikut terurai).
   if (server && /^[A-Za-z0-9+/=_-]{40,}$/.test(server) && !server.includes(".")) server = null;
-  const seksi = [];
-  const tambah = (judul, daftar) => {
-    const isi = daftar.filter((b) => b !== null && b !== undefined && b !== "");
-    if (isi.length) seksi.push("◆ " + judul + "\n" + garis + "\n" + isi.join("\n"));
-  };
   const cetak = (label, v) => (v !== null && v !== undefined && v !== "" ? label + ": " + kode(v) : null);
-  tambah("Informasi Akun", [cetak("Username", username), cetak("UUID", uuid)]);
-  tambah("Domain & Koneksi", [
+  // Blok info datar seperti template Xray reseller (baru, 28 Nov 2026):
+  // header, BARIS KOSONG, Username..Port, BARIS KOSONG, "Berlaku
+  // sampai" (+ "Sisa waktu" kalau exp-nya datetime yang bisa dihitung),
+  // BARIS KOSONG, lalu tiap link berlabel "— LABEL —" + blok <pre>.
+  // Port pakai baris Port dari tempelan kalau ada, kalau tidak pakai
+  // port yang dipakai link-linknya. Link diurutkan seperti reseller
+  // (varian langsung dulu, versi CloudFront belakangan).
+  const portStr = info.portLine || (ports.length ? ports.join(", ") : "");
+  const sisa = sisaWaktuRapihin(info.exp);
+  const infoBaris = [
+    cetak("Username", username),
+    cetak("UUID", uuid),
     cetak("Server", server),
     cetak("Domain CloudFront", cfDomain),
     cetak("Name Server", info.ns),
     cetak("Pubkey", info.pubkey),
-    ports.length ? "Port: " + kode(ports.join(", ")) : null,
-  ]);
+    portStr ? "Port: " + kode(portStr) : null,
+  ].filter((b) => b !== null && b !== undefined && b !== "");
+  const expBaris = [
+    info.exp ? "Berlaku sampai: " + kode(info.exp) : null,
+    sisa ? "Sisa waktu: " + kode(sisa) : null,
+  ].filter((b) => b !== null && b !== undefined && b !== "");
   const isi = ["<b>😈 SANDEKALAVPN 😈</b>"];
-  if (seksi.length) isi.push(seksi.join("\n\n"));
-  for (const l of links) isi.push("— " + labelLinkRapihin(l) + " —\n<pre>" + escapeHtml(l) + "</pre>");
-  return isi.join("\n");
+  if (infoBaris.length) isi.push(infoBaris.join("\n"));
+  if (expBaris.length) isi.push(expBaris.join("\n"));
+  const urut = urutkanLinkRapihin(links);
+  for (const l of urut) isi.push("— " + labelLinkRapihin(l) + " —\n<pre>" + escapeHtml(l) + "</pre>");
+  return isi.join("\n\n");
 }
 
 // Bangun ulang link Xray dari config hasil parse (bila tempelan cuma
@@ -4161,7 +4234,14 @@ export function susunPesanRapihin(st) {
     isi = renderRapihinXray(st.links, st.info);
   }
   let teks = "✅ Ini config VPN kamu:\n\n" + isi;
-  if (st.info.exp) teks += "\n\nBerlaku sampai: " + escapeHtml(st.info.exp);
+  // Xray: "Berlaku sampai" (+ "Sisa waktu") sudah ada di blok exp
+  // renderRapihinXray. SSH: template reseller menaruh exp di akhir
+  // pesan, "Sisa waktu" tepat di bawahnya kalau bisa dihitung.
+  if (cfg.type === "SSH" && st.info.exp) {
+    teks += "\n\nBerlaku sampai: " + escapeHtml(st.info.exp);
+    const sisa = sisaWaktuRapihin(st.info.exp);
+    if (sisa) teks += "\nSisa waktu: " + escapeHtml(sisa);
+  }
   return teks;
 }
 
