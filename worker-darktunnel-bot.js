@@ -3947,20 +3947,25 @@ const RAPIHIN_TTL_MS = 10 * 60 * 1000;
 
 // Ambil NS / pubkey / expiry / server / port dari teks akun (label
 // eksplisit). Expiry ditangkap apa adanya — ditampilkan persis seperti
-// tertulis, tanpa hitung tanggal.
+// tertulis, tanpa hitung tanggal. Awal baris boleh diawali karakter
+// hiasan (box-drawing │┃┌└, |, •, -, *, emoji) — umum di tempelan
+// akun seller lain — jadi label tidak harus menempel di awal baris.
 export function ekstrakInfoRapihin(teks) {
   const t = String(teks || "");
+  // Setelah awal baris, lewati semua karakter bukan-huruf/angka
+  // (spasi, │, |, •, -, *, emoji, dst) sebelum labelnya.
+  const AWAL = "(?:^|\\n)[^\\w\\n]*";
   const ambil = (re) => {
     const m = t.match(re);
     return m ? m[1].trim().replace(/[,\s;]+$/, "") : null;
   };
-  const ns = ambil(/(?:^|\n)\s*(?:name\s*server|nameserver|ns)\s*[:=]\s*([^\n,;]+)/i);
-  const pubkey = ambil(/(?:^|\n)\s*(?:public\s*key|pubkey|publickey)\s*[:=]\s*([^\n,;]+)/i);
-  const exp = ambil(/(?:^|\n)\s*(?:berlaku\s*sampai|expired|expires?|exp|valid\s*until|masa\s*aktif\s*sampai)\s*:?\s*([^\n]+)/i);
-  const server = ambil(/(?:^|\n)\s*(?:server|ip(?:\s*address)?)\s*[:=]\s*([^\n,;]+)/i);
-  const portLine = ambil(/(?:^|\n)\s*port\s*[:=]\s*([0-9,\s-]+)/i);
-  const wsPort = ambil(/(?:^|\n)\s*WS\s*:?\s*(?:\n\s*)?[^\n@:]*:(\d+)\s*@/i);
-  const tlsPort = ambil(/(?:^|\n)\s*TLS\s*:?\s*(?:\n\s*)?[^\n@:]*:(\d+)\s*@/i);
+  const ns = ambil(new RegExp(AWAL + "(?:name\\s*server|nameserver|ns[\\s-]*domain|ns)\\s*[:=]\\s*([^\\n,;]+)", "i"));
+  const pubkey = ambil(new RegExp(AWAL + "(?:public\\s*key|pubkey|publickey)\\s*[:=]\\s*([^\\n,;]+)", "i"));
+  const exp = ambil(new RegExp(AWAL + "(?:berlaku\\s*sampai|expired|expires?|expiry|exp|valid\\s*until|masa\\s*aktif\\s*sampai)\\s*:?\\s*([^\\n]+)", "i"));
+  const server = ambil(new RegExp(AWAL + "(?:server|ip(?:\\s*address)?)\\s*[:=]\\s*([^\\n,;]+)", "i"));
+  const portLine = ambil(new RegExp(AWAL + "port\\s*[:=]\\s*([0-9,\\s-]+)", "i"));
+  const wsPort = ambil(new RegExp(AWAL + "WS\\s*:?\\s*(?:\\n\\s*)?[^\\n@:]*:(\\d+)\\s*@", "i"));
+  const tlsPort = ambil(new RegExp(AWAL + "TLS\\s*:?\\s*(?:\\n\\s*)?[^\\n@:]*:(\\d+)\\s*@", "i"));
   return { ns, pubkey, exp, server, portLine, wsPort: wsPort ? Number(wsPort) : null, tlsPort: tlsPort ? Number(tlsPort) : null };
 }
 
@@ -4016,30 +4021,57 @@ export function renderRapihinSSH(akun, info) {
 }
 
 // Render config Xray format ringkas SANDEKALAVPN (salinan susunInfoAkun
-// + kirimConfig bot reseller): header, info akun, tiap link blok <pre>.
-export function renderRapihinXray(links, info) {
+// + kirimConfig bot reseller): header, seksi ◆ Informasi Akun /
+// ◆ Domain & Koneksi, tiap link blok <pre>. Link vmess:// membawa
+// JSON base64 sebagai "hostname" — jangan diurai pakai new URL()
+// (Server-nya jadi blob base64); decode JSON-nya langsung.
+export function renderRapihinXray(links, info = {}) {
   const kode = (v) => "<code>" + escapeHtml(String(v)) + "</code>";
+  const garis = "────────────────────";
   let uuid = null, username = null, server = null, cfDomain = null;
   const ports = [];
+  const tambahPort = (p) => { const s = String(p); if (s && !ports.includes(s)) ports.push(s); };
   for (const l of links) {
+    if (/^vmess:\/\//i.test(l)) {
+      try {
+        const j = JSON.parse(b64DecodeToleran(l.replace(/^vmess:\/\//i, "").split(/[#?]/)[0]));
+        if (j && typeof j === "object") {
+          if (!uuid && j.id) uuid = String(j.id);
+          if (!username && j.ps) username = String(j.ps);
+          if (!server && j.add) server = String(j.add);
+          if (j.port) tambahPort(j.port);
+        }
+      } catch { /* abaikan link yang tidak bisa diurai */ }
+      continue;
+    }
     try {
       const u = new URL(l);
       if (!uuid && u.username) uuid = decodeURIComponent(u.username);
       if (!username && u.hash) username = decodeURIComponent(u.hash.slice(1));
       if (u.hostname.includes("cloudfront.net")) { if (!cfDomain) cfDomain = u.hostname; }
       else if (!server) server = u.hostname;
-      if (u.port && !ports.includes(u.port)) ports.push(u.port);
+      if (u.port) tambahPort(u.port);
     } catch { /* abaikan link yang tidak bisa diurai */ }
   }
-  const baris = [];
-  const cetak = (label, v) => { if (v !== null && v !== undefined && v !== "") baris.push(label + ": " + kode(v)); };
-  cetak("Username", username);
-  cetak("UUID", uuid);
-  cetak("Server", server);
-  cetak("Domain CloudFront", cfDomain);
-  if (ports.length) baris.push("Port: " + kode(ports.join(", ")));
+  // Pengaman: jangan pernah tampilkan blob base64 sebagai Server
+  // (mis. ss:// bentuk base64 yang hostname-nya ikut terurai).
+  if (server && /^[A-Za-z0-9+/=_-]{40,}$/.test(server) && !server.includes(".")) server = null;
+  const seksi = [];
+  const tambah = (judul, daftar) => {
+    const isi = daftar.filter((b) => b !== null && b !== undefined && b !== "");
+    if (isi.length) seksi.push("◆ " + judul + "\n" + garis + "\n" + isi.join("\n"));
+  };
+  const cetak = (label, v) => (v !== null && v !== undefined && v !== "" ? label + ": " + kode(v) : null);
+  tambah("Informasi Akun", [cetak("Username", username), cetak("UUID", uuid)]);
+  tambah("Domain & Koneksi", [
+    cetak("Server", server),
+    cetak("Domain CloudFront", cfDomain),
+    cetak("Name Server", info.ns),
+    cetak("Pubkey", info.pubkey),
+    ports.length ? "Port: " + kode(ports.join(", ")) : null,
+  ]);
   const isi = ["<b>😈 SANDEKALAVPN 😈</b>"];
-  if (baris.length) isi.push(baris.join("\n"));
+  if (seksi.length) isi.push(seksi.join("\n\n"));
   for (const l of links) isi.push("<pre>" + escapeHtml(l) + "</pre>");
   return isi.join("\n");
 }
