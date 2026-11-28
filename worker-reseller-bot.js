@@ -277,7 +277,11 @@ export default {
     if (req.method === "POST") {
       let update;
       try { update = await req.json(); } catch { return new Response("ok"); }
-      await handleTelegram(env, update);
+      // (28 Nov 2026) Error di dalam handleTelegram tidak boleh jadi
+      // 500: Telegram akan me-retry update-nya dan perintah yang sudah
+      // dieksekusi sebagian (mis. /tutup) dijawab dua kali. Tetap balas
+      // 200; error-nya cukup tercatat di log Cloudflare.
+      try { await handleTelegram(env, update); } catch (e) { console.error("webhook error:", String(e?.message || e).slice(0, 200)); }
       return new Response("ok");
     }
 
@@ -458,23 +462,34 @@ async function siarkanKeSemuaPengguna(env, teks, buka) {
   const daftarGrup = grup || new Set();
   if (!daftarTujuan.size && !daftarGrup.size) { await sendTelegram(env, env.ADMIN_CHAT_ID, "Belum ada pengguna yang tercatat di bot."); return; }
   let ok = 0, okGrup = 0;
+  // (28 Nov 2026) Laporan "dimulai" DULU: siaran ke ratusan penerima
+  // bisa lama — kalau loop-nya macet, admin tetap langsung tahu siaran
+  // sudah jalan dan ke berapa penerima. Lewat telegramApi (ada timeout)
+  // supaya laporan ini sendiri tidak bisa macet.
+  await telegramApi(env, "sendMessage", { chat_id: Number(env.ADMIN_CHAT_ID), text: "📣 Siaran buka/tutup dimulai — mengirim ke " + daftarTujuan.size + " pengguna dan " + daftarGrup.size + " grup...", link_preview_options: { is_disabled: true } });
   // (27 Nov 2026) Auto-hapus: catat message_id tiap pesan terkirim,
   // dihapus otomatis 1 menit kemudian (lihat sapuHapusOtomatis).
   const antreHapus = [];
   const hapusPada = Date.now() + HAPUS_OTOMATIS_JEDA_MS;
-  for (const id of daftarTujuan) {
-    const j = await telegramApi(env, "sendMessage", { chat_id: Number(id), text: teks.slice(0, 4000) });
-    if (j?.ok) {
-      ok++;
-      if (j?.result?.message_id) antreHapus.push({ c: Number(id), m: j.result.message_id, t: hapusPada });
-    }
-  }
-  for (const id of daftarGrup) {
-    const j = await telegramApi(env, "sendMessage", { chat_id: Number(id), text: teks.slice(0, 4000) });
-    if (j?.ok) {
-      okGrup++;
-      if (j?.result?.message_id) antreHapus.push({ c: Number(id), m: j.result.message_id, t: hapusPada });
-    }
+  // (28 Nov 2026) Kirim paralel per batch (20 sekaligus): satu
+  // penerima yang lambat/macet tidak lagi menahan semua yang lain.
+  // telegramApi menelan gagal/timeout per penerima (null) — batch
+  // tetap jalan sampai habis.
+  const semuaTujuan = [
+    ...[...daftarTujuan].map((id) => ({ id, grup: false })),
+    ...[...daftarGrup].map((id) => ({ id, grup: true })),
+  ];
+  const UKURAN_BATCH_SIARAN = 20;
+  for (let i = 0; i < semuaTujuan.length; i += UKURAN_BATCH_SIARAN) {
+    const batch = semuaTujuan.slice(i, i + UKURAN_BATCH_SIARAN);
+    const hasil = await Promise.allSettled(batch.map((t) => telegramApi(env, "sendMessage", { chat_id: Number(t.id), text: teks.slice(0, 4000) })));
+    hasil.forEach((h, idx) => {
+      const j = h.status === "fulfilled" ? h.value : null;
+      if (j?.ok) {
+        if (batch[idx].grup) okGrup++; else ok++;
+        if (j?.result?.message_id) antreHapus.push({ c: Number(batch[idx].id), m: j.result.message_id, t: hapusPada });
+      }
+    });
   }
   await antreHapusOtomatis(env, antreHapus);
   await sendTelegram(env, env.ADMIN_CHAT_ID, "📣 Info buka/tutup terkirim ke " + ok + " pengguna" + (okGrup ? " dan " + okGrup + " grup" : "") + ".");
@@ -3300,6 +3315,10 @@ async function telegramApi(env, method, body) {
   try {
     const r = await fetch("https://api.telegram.org/bot" + env.BOT_TOKEN + "/" + method, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      // (28 Nov 2026) Timeout 15 detik: satu fetch yang macet tidak
+      // boleh menahan handler selamanya (penyebab siaran buka/tutup
+      // macet — webhook tidak selesai, Telegram me-retry perintah).
+      signal: AbortSignal.timeout(15000),
     });
     return await r.json().catch(() => null);
   } catch (e) { return null; }
