@@ -2439,12 +2439,17 @@ export function ujungDomain(nama) {
 // Subdomain dari catatan sertifikat publik (Certificate Transparency):
 // nama-nama yang pernah diterbitkan sertifikatnya untuk domain ini.
 // Primer CertSpotter, fallback crt.sh (keduanya dibatasi timeout 8
-// detik; gagal = [] — tidak pernah throw). Saring hanya nama domain
-// itu sendiri / subdomainnya; nama dari sertifikat bersama (mis.
-// film.qq.com) dan wildcard (*.contoh.com) dibuang; duplikat dibuang
-// (case-insensitive), hasil diurutkan. Apex domain sendiri tidak
-// dimasukkan (itu bukan subdomain).
+// detik; gagal = [] — tidak pernah throw). Query + saringan memakai
+// domain APEX (2 label terakhir, lihat ujungDomain): subdomain nempel
+// di apex, bukan di www/live (28 Nov 2026: /cek www.iflix.com dan
+// live.iflix.com sama-sama "tidak ditemukan" padahal subdomain
+// iflix.com ada — query pakai input utuh membuang saudara-saudaranya).
+// Aturan apex 2 label cukup untuk domain bug yang umum dipakai bot
+// ini. Nama dari sertifikat bersama (mis. film.qq.com) dan wildcard
+// (*.contoh.com) dibuang; duplikat dibuang (case-insensitive), hasil
+// diurutkan. Apex domain sendiri tidak dimasukkan (itu bukan subdomain).
 export async function subdomainDariCT(domain) {
+  const apex = ujungDomain(domain);
   const kumpulkan = (data) => {
     const mentah = [];
     const dorong = (v) => {
@@ -2458,19 +2463,19 @@ export async function subdomainDariCT(domain) {
         if (typeof e.name_value === "string") e.name_value.split("\n").forEach((n) => dorong(n));
       }
     }
-    const akhir = "." + domain;
+    const akhir = "." + apex;
     const unik = new Set();
     for (const n of mentah) {
       const nama = String(n || "").trim().toLowerCase().replace(/\.+$/, "");
       if (!nama || nama.includes("*")) continue;
-      if (nama === domain || nama.endsWith(akhir)) {
-        if (nama !== domain) unik.add(nama);
+      if (nama === apex || nama.endsWith(akhir)) {
+        if (nama !== apex) unik.add(nama);
       }
     }
     return [...unik].sort();
   };
   try {
-    const res = await fetch("https://api.certspotter.com/v1/issuances?domain=" + encodeURIComponent(domain) + "&include_subdomains=true&expand=dns_names", {
+    const res = await fetch("https://api.certspotter.com/v1/issuances?domain=" + encodeURIComponent(apex) + "&include_subdomains=true&expand=dns_names", {
       signal: AbortSignal.timeout(8000),
     });
     if (res && res.ok) {
@@ -2479,7 +2484,7 @@ export async function subdomainDariCT(domain) {
     }
   } catch { /* fallback crt.sh */ }
   try {
-    const res = await fetch("https://crt.sh/?q=%25." + encodeURIComponent(domain) + "&output=json", {
+    const res = await fetch("https://crt.sh/?q=%25." + encodeURIComponent(apex) + "&output=json", {
       signal: AbortSignal.timeout(8000),
     });
     if (res && res.ok) {
@@ -2508,8 +2513,11 @@ function sinyalHeader(h) {
 // ditempeli header cf-ray + server: cloudflare oleh edge Cloudflare
 // pada SEMUA respons subrequest — cf-ray BUKAN bukti Cloudflare.
 // Karena itu urutan deteksi: (1) hostname edge, (2) header khas
-// provider (CloudFront WAJIB sebelum Cloudflare), (3) cf-ray /
-// cf-cache-status → Cloudflare sebagai jalan terakhir saja.
+// provider (CloudFront WAJIB sebelum Cloudflare). TIDAK ADA jalan
+// terakhir cf-ray (28 Nov 2026): kalau tidak ada sinyal yang cocok,
+// CDN tidak dilaporkan (jangan menebak). cf-cache-status tetap sinyal
+// Cloudflare yang sah karena datang dari cache asal, bukan tempelan
+// edge Worker (terverifikasi di edu.ruangguru.com: DYNAMIC).
 export const DAFTAR_CDN = [
   { nama: "CloudFront", server: "CloudFront",
     host: ["cloudfront.net"],
@@ -2547,11 +2555,14 @@ export const DAFTAR_CDN = [
 // Return { cdn, server } — keduanya "" bila tidak ada sinyal yang cocok.
 // `headers` boleh null (deteksi subdomain — hanya hostname PTR yang
 // tersedia); bila begitu, hanya cek hostname yang jalan.
-// Urutan: (1) hostname edge; (2) header khas provider; (3) cf-ray /
-// cf-cache-status → Cloudflare (jalan terakhir; dari Worker cf-ray
-// selalu ada, jadi ini hanya benar bila tidak ada provider lain yang
-// cocok — situs origin langsung tanpa CDN bisa salah terlabel
-// Cloudflare, itu keterbatasan yang diterima).
+// Urutan: (1) hostname edge; (2) header khas provider. TIDAK ADA
+// jalan terakhir cf-ray (28 Nov 2026): dari Worker, cf-ray selalu ada
+// di semua respons subrequest, jadi cf-ray saja TIDAK PERNAH berarti
+// Cloudflare — live.iflix.com (aslinya Tencent) sempat salah label
+// Cloudflare gara-gara ini. Kalau tidak ada sinyal yang cocok,
+// kembalikan kosong (CDN tidak dilaporkan, jangan menebak).
+// cf-cache-status tetap dihitung sebagai sinyal Cloudflare lewat
+// entri Cloudflare di DAFTAR_CDN (datang dari cache asal).
 export function deteksiCDN(headers, edgeHostname) {
   const kosong = { cdn: "", server: "" };
   const host = String(edgeHostname || "").toLowerCase();
@@ -2567,7 +2578,9 @@ export function deteksiCDN(headers, edgeHostname) {
     try { kena = !!p.header(headers, s, host, p.host); } catch { kena = false; }
     if (kena) return { cdn: p.nama, server: p.server };
   }
-  if (headers.get("cf-ray") || headers.get("cf-cache-status")) return { cdn: "Cloudflare", server: "cloudflare" };
+  // cf-ray sengaja TIDAK dipakai: selalu ditempeli edge Worker di
+  // semua respons (lihat catatan di atas). cf-cache-status sudah
+  // dicek sebagai entri Cloudflare di loop DAFTAR_CDN di atas.
   return kosong;
 }
 
@@ -2620,7 +2633,7 @@ export async function cekDomain(domain) {
       if (ip0.length === 4) ptrP = dohQuery(ip0.reverse().join(".") + ".in-addr.arpa", "PTR");
     }
     // Subdomain dari catatan sertifikat — jalan bareng cek subdomain
-    // umum, tidak menambah round-trip berurutan. Hanya bila DNS apex
+    // umum, tidak menambah round-trip berurutan. Hanya bila DNS domain
     // menjawab; bila DNS gagal total, subdomains tetap null.
     const ctP = dnsOk ? subdomainDariCT(domain) : null;
     const cekSub = await Promise.all(SUBDOMAIN_CEK.map(async (sub) => {
