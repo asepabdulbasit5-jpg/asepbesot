@@ -126,7 +126,9 @@ const PAKET = [
   { kode: "30hari", nama: "VPN 30 hari", harga: 10000, durasiHari: 30, nadiaType: "month", nadiaDuration: 1 },
 ];
 
-// Server yang bisa dipilih pembeli — SEMUA 20 server Nadia
+// Server yang bisa dipilih pembeli — SEMUA 22 server Nadia
+// 28 Nov 2026 (/ceknadia): BIZNET & CLOUDFRONT BIZNET GIO KEMBALI
+// di Nadia (ID sama) — dimasukkan lagi ke bot.
 // 24 Nov 2026 sore (/ceknadia): SSH SELOW DNS & UDP MINI KEMBALI
 // di Nadia (ID sama) — dimasukkan lagi ke bot.
 // 24 Nov 2026 (/ceknadia): SSH SELOW DNS & UDP MINI dihapus
@@ -151,6 +153,7 @@ const SERVERS = [
   { kode: "neolite",   nama: "NEO-LITE — PENUH",              serverId: "019d4b9f-7fb5-7369-8f4b-8974abd0123c", protocols: ["ssh", "vmess", "vless", "trojan"], penuh: true, used: 100, limit: 100 },
   { kode: "cloudmtk",  nama: "CLOUD-MTK",                     serverId: "019d3fd8-5c1e-734d-806e-72feec9973c5", protocols: ["ssh", "vmess", "vless", "trojan"], used: 148, limit: 150 },
   { kode: "sepadan",   nama: "PT.Sepadan Abadi",              serverId: "019d9a8a-41e9-727d-b5e7-1ea594fc04d1", protocols: ["ssh", "vmess", "vless", "trojan"], used: 97, limit: 100 },
+  { kode: "biznet",    nama: "BIZNET",                        serverId: "019d3fda-3731-730b-89ad-8f171134fb93", protocols: ["ssh", "vmess", "vless", "trojan"], used: 98, limit: 100 },
   { kode: "nusaid",    nama: "NUSA ID",                       serverId: "019f173b-1a41-733e-b271-633d74e7edf3", protocols: ["ssh", "vmess", "vless", "trojan"], used: 99, limit: 100 },
   { kode: "bizid",     nama: "BIZ-ID — PENUH",                serverId: "01a19595-9428-708c-9a4f-b2a1819d714e", protocols: ["ssh", "vmess", "vless", "trojan"], penuh: true, used: 100, limit: 100 },
   { kode: "nsid",      nama: "NS-ID",                         serverId: "01a1a34d-c2f2-7387-882c-137904de7cff", protocols: ["ssh", "vmess", "vless", "trojan"], used: 59, limit: 60 },
@@ -161,6 +164,7 @@ const SERVERS = [
   { kode: "media",     nama: "CLOUDFRONT MEDIA",              serverId: "019e15b0-f043-7170-a5c7-63719b4b8d45", protocols: ["ssh", "vmess", "vless", "trojan"], used: 170, limit: 200 },
   { kode: "idroot",    nama: "CLOUDFRONT IDROOT",             serverId: "01a151ad-af61-7007-a06b-0aeb5deea798", protocols: ["ssh", "vmess", "vless", "trojan"], used: 176, limit: 200 },
   { kode: "mitra",     nama: "CLOUDFRONT [MITRA]",            serverId: "01a16cd0-e727-70b4-822c-c96c0a502535", protocols: ["ssh", "vmess", "vless", "trojan"], used: 215, limit: 250 },
+  { kode: "bizgio",    nama: "CLOUDFRONT BIZNET GIO",         serverId: "01a06443-8a9c-7254-b6f5-d59e4cfc3edd", protocols: ["ssh", "vmess", "vless", "trojan"], used: 199, limit: 200 },
   { kode: "binet",     nama: "CLOUDFRONT BINET NEO",          serverId: "01a11353-0afc-7193-8c02-08d3de1a50b8", protocols: ["ssh", "vmess", "vless", "trojan"], used: 85, limit: 200 },
   { kode: "ati",       nama: "CLOUDFRONT (CLOUDMATIKA)",     serverId: "01a133f2-e422-73e9-bc1d-3d3621d704c6", protocols: ["ssh", "vmess", "vless", "trojan"], used: 52, limit: 250 },
 ];
