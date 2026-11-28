@@ -1558,9 +1558,11 @@ async function tampilkanCekNadia(env, chatId, messageId) {
 // /cekfield (admin saja, DM saja — pola sama seperti /ceknadia):
 // probe struktur respons /servers — melihat apakah Nadia membawa
 // angka latensi/uptime/status node seperti di dashboard Nadia
-// (28 Nov 2026). Hanya menampilkan NAMA field + nilai field yang
-// namanya mirip latensi/uptime/status; tidak pernah menampilkan
-// token, saldo, atau data akun. Satu pesan, maks ~4000 karakter.
+// (28 Nov 2026). Menampilkan NAMA field + nilai field yang namanya
+// mirip latensi/uptime/status, plus ISI field pricing/trial/migrasi
+// (28 Nov 2026 — hasil live: field-field itu ADA, hanya namanya
+// yang tampil sebelumnya). Tidak pernah menampilkan token, saldo,
+// atau data akun. Satu pesan, maks ~4000 karakter.
 async function tampilkanCekField(env, chatId) {
   if (!adalahAdmin(env, chatId)) return;
   const { list, debug, raw } = await ambilDaftarServerLive(env);
@@ -1601,6 +1603,63 @@ async function tampilkanCekField(env, chatId) {
   } else {
     baris.push("Tidak ada field latensi/uptime/status di respons ini.");
   }
+  // Isi field pricing + trial/migrasi (28 Nov 2026): hasil live
+  // /cekfield 21:47 WIB menunjukkan field-field ini ADA — tapi hanya
+  // namanya yang tampil. Seksi ini menampilkan ISInya untuk satu
+  // server contoh (SELOW bila ada, kalau tidak server pertama),
+  // plus apakah isinya sama di semua server atau beda. /cekfield
+  // khusus admin, jadi harga modal boleh tampil; pola SENSITIF di
+  // atas tetap berlaku untuk nilai field yang namanya sensitif.
+  baris.push("");
+  const contohIsi = list.find((x) => String(x.name || "").includes("SELOW")) || contoh;
+  const namaIsi = contohIsi.name || contohIsi.server_id || contohIsi.id || "?";
+  baris.push("💰 PRICING / TRIAL / MIGRASI (contoh: " + namaIsi + "):");
+  const ringkas = (v, maks) => {
+    let s;
+    try { s = (typeof v === "string") ? v : JSON.stringify(v); } catch { s = String(v); }
+    if (s === undefined || s === null) s = "?";
+    return s.length > maks ? s.slice(0, maks) + "… (dipotong)" : s;
+  };
+  // Kumpulkan varian nilai satu field di semua server (kunci =
+  // JSON.stringify nilai; "∅" = field tidak ada di server itu).
+  const varianField = (ambil) => {
+    const varian = new Map();
+    for (const x of list) {
+      const v = ambil(x);
+      const k = v === undefined ? "∅" : JSON.stringify(v);
+      if (!varian.has(k)) varian.set(k, { nilai: v, nama: x.name || x.server_id || x.id || "?" });
+    }
+    return varian;
+  };
+  // Satu baris per field: nilai server contoh + sama/beda antar server.
+  const barisField = (label, ambil, maks) => {
+    const v = ambil(contohIsi);
+    const varian = varianField(ambil);
+    if (varian.size === 1 && varian.has("∅")) {
+      baris.push("• " + label + ": (tidak ada di server mana pun)");
+      return;
+    }
+    const teksNilai = v === undefined
+      ? "(tidak ada di server contoh)"
+      : (SENSITIF.test(label) ? "(nilai disembunyikan)" : ringkas(v, maks));
+    if (varian.size <= 1) {
+      baris.push("• " + label + ": " + teksNilai + " — sama di semua " + list.length + " server");
+      return;
+    }
+    // Cari satu varian lain (bukan nilai contoh) sebagai contoh beda.
+    const kunciContoh = v === undefined ? "∅" : JSON.stringify(v);
+    let lain = null;
+    for (const [k, info] of varian) if (k !== kunciContoh) { lain = info; break; }
+    const contohLain = lain ? " — contoh lain (" + lain.nama + "): " + ringkas(lain.nilai, maks) : "";
+    baris.push("• " + label + ": " + teksNilai + " — beda antar server (" + varian.size + " varian)" + contohLain);
+  };
+  barisField("pricing", (x) => x.pricing, 400);
+  barisField("trial_enabled", (x) => x.trial_enabled, 80);
+  barisField("trial_duration", (x) => x.trial_duration, 80);
+  barisField("migration_enabled", (x) => x.migration_enabled, 80);
+  barisField("migration_price", (x) => x.migration_price, 80);
+  baris.push("• domain_cloudfront: " + (contohIsi.domain_cloudfront === undefined ? "(tidak ada di server contoh)" : ringkas(contohIsi.domain_cloudfront, 80)));
+  baris.push("• is_active: " + (contohIsi.is_active === undefined ? "(tidak ada di server contoh)" : ringkas(contohIsi.is_active, 80)));
   let teks = baris.join("\n");
   if (teks.length > 3900) teks = teks.slice(0, 3900);
   await sendTelegram(env, chatId, teks);
