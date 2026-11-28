@@ -433,9 +433,7 @@ async function kvList(env, prefix) {
 //     (tidak pernah diubah), jadi Set tidak bisa basi.
 //     (v2.9.30: KBRM: dihapus bersama pesan hapus-keyboard.)
 //   - Aktivitas grup: throttle 5 menit dicek di memori dulu.
-//   - Roast: 1 LIST prefix "ROAST_" (dulu 2 LIST: BUKA + TUTUP).
-//   - Nudge sepi: maks. 1x/jam per akun (dulu tiap cron 10 menit),
-//     dijaga kunci KV CRON_SEPI_TS (GET murah + PUT hanya saat jalan).
+//   - Roast buka/tutup + nudge sepi: DIHAPUS 28 Nov 2026 (perintah Asep).
 //   - SENGAJA TIDAK di-cache: daftar template & BUGS (ditulis langsung
 //     ke KV di beberapa jalur; cache memori bisa basi & bikin tes rapuh).
 const penggunaDikenal = new Set();
@@ -1667,7 +1665,7 @@ const PESAN_GRUP =
   "Kirim akun SSH / VLESS / VMess / Trojan / Shadowsocks kamu, bot buatkan config Dark Tunnel-nya.\n\n" +
   "⚠️ Jangan kirim akun di grup — akun kamu bisa dilihat semua anggota. kirim lewat chat pribadi bot ini ya.\n\n" +
   "📝 <b>Di grup, ketik saja:</b>\n" +
-  "• <code>bug xl opok</code> — lihat daftar bug\n" +
+  "• <code>/bug</code> — lihat daftar bug\n" +
   "• <code>/cek domain.com</code> — cek domain\n" +
   "• <code>/update</code> — update terbaru";
 
@@ -2881,27 +2879,17 @@ async function tampilkanMenuUtama(env, chatId, messageId, diGrup) {
 }
 
 // ================= PEMICU KATA DI GRUP (v2.9.13, v2.9.14) =================
-// Member ketik kata tertentu di grup -> bot membalas skill-nya,
-// seperti bot grup profesional. HANYA di grup (DM sudah punya
-// perintah & alur sendiri). Cocok bila pesan SAMA DENGAN kata kunci
-// atau DIAWALI kata kunci + spasi ("bug xl", "cara buat config");
-// "bugnya mati" TIDAK cocok (kata menempel). Satu pemicu dibatasi
-// 1 balasan per 60 detik per grup supaya tidak spam.
-// (v2.9.14) "bug" ber-argumen: polos -> marah, +operator/kategori
-// -> tampilin bug-nya; "beli" -> candaan admin (buka toko);
-// tambah "minta", "gak bisa"/"gabisa", "males"/"mls".
+// Member ketik kata tertentu di grup -> bot membalas.
+// HANYA di grup (DM sudah punya perintah & alur sendiri).
+// Cocok bila pesan SAMA DENGAN kata kunci atau DIAWALI kata kunci
+// + spasi ("buat config"); "confignya" TIDAK cocok (kata menempel).
+// Satu pemicu dibatasi 1 balasan per 60 detik per grup supaya tidak spam.
+// (28 Nov 2026) Pemicu yang tersisa cuma "menu" dan "config" —
+// "bug", "harga", "cara", "apk", "beli", "minta", "gak bisa", "males"
+// DIHAPUS atas perintah Asep; /bug tetap jalan sebagai perintah.
 const PEMICU_GRUP = [
-  { kata: ["daftar bug", "list bug", "bug"], aksi: "bug" },
-  { kata: ["berapa", "berapaan", "gratis", "harga", "price"], aksi: "harga" },
-  { kata: ["cara pakai", "cara buat", "caranya", "cara", "tutorial", "gimana"], aksi: "cara" },
-  { kata: ["dark tunnel", "apk", "aplikasi", "download"], aksi: "apk" },
-  { kata: ["beli akun", "beli vpn", "beli"], aksi: "belicanda" },
-  { kata: ["order", "trial", "vpn"], aksi: "beli" },
   { kata: ["bantuan", "menu", "help"], aksi: "menu" },
   { kata: ["buat config", "buatin config", "buatin", "config"], aksi: "config" },
-  { kata: ["minta"], aksi: "minta" },
-  { kata: ["gak bisa", "gabisa"], aksi: "gakbisa" },
-  { kata: ["males", "mls"], aksi: "males" },
 ];
 
 const cooldownPemicu = new Map();
@@ -2922,18 +2910,8 @@ export function cocokPemicu(teks) {
   return null;
 }
 
-// Argumen setelah kata "bug" ("bug xl" -> "xl", "bug" -> "").
-export function argumenBug(teks) {
-  const normal = normalisasiPemicu(teks);
-  for (const k of ["daftar bug", "list bug", "bug"]) {
-    if (normal === k) return "";
-    if (normal.startsWith(k + " ")) return normal.slice(k.length + 1);
-  }
-  return "";
-}
-
 // Balasan tiap pemicu grup. Return true bila dibalas.
-// (v2.9.14) "bug" ber-argumen + candaan "beli" + "minta"/"gak bisa"/"males".
+// (28 Nov 2026) Yang tersisa cuma "menu" dan "config".
 async function balasPemicuGrup(env, chatId, aksi, teksAsli) {
   // (v2.9.16) Jeda dihitung per (grup, aksi, teks) — bukan per aksi saja.
   // Sebelumnya "bug telkomsel" lalu "bug opok xl" dalam 60 detik ikut
@@ -2942,83 +2920,6 @@ async function balasPemicuGrup(env, chatId, aksi, teksAsli) {
   const sekarang = Date.now();
   if (cooldownPemicu.has(kunci) && sekarang - cooldownPemicu.get(kunci) < 60000) return false;
   cooldownPemicu.set(kunci, sekarang);
-  if (aksi === "bug") {
-    const marah = "bug apa kntl? tulis yg bener!";
-    const arg = argumenBug(teksAsli);
-    if (!arg) { await sendTelegram(env, chatId, marah); return true; }
-    const kata = arg.split(" ").filter(Boolean);
-    const op1 = normalisasiOperator(kata[0]);
-    if (op1 && kata.length === 1) {
-      // (v2.9.17) Grup tanpa tombol: kategori sebagai teks "ketik ...".
-      const teksKat = await teksDaftarKategoriBug(env, op1);
-      await sendTelegram(env, chatId, teksKat || "😕 Operator itu tidak ada.");
-      return true;
-    }
-    if (op1 && kata.length >= 2) {
-      const kat = normalisasiKategori(kata[1]);
-      if (kat && BUG_DB[op1].kategori[kat]) { await kirimDaftarBug(env, chatId, op1, kat, true); return true; }
-      await sendTelegram(env, chatId, marah); return true;
-    }
-    const kat0 = normalisasiKategori(kata[0]);
-    if (kat0) {
-      // (v2.9.16) Urutan terbalik juga diterima: "bug opok xl" = "bug xl opok".
-      if (kata.length >= 2) {
-        const op2 = normalisasiOperator(kata[1]);
-        if (op2 && BUG_DB[op2].kategori[kat0]) { await kirimDaftarBug(env, chatId, op2, kat0, true); return true; }
-      }
-      const ops = Object.keys(BUG_DB).filter((o) => BUG_DB[o].kategori[kat0]);
-      if (ops.length === 1) { await kirimDaftarBug(env, chatId, ops[0], kat0, true); return true; }
-      if (ops.length > 1) {
-        // (v2.9.17) Grup tanpa tombol: operator sebagai teks "ketik ...".
-        const barisOp = ops.map((o) => "• <code>bug " + o + " " + kat0 + "</code> — " + escapeHtml(labelOperator(o)));
-        await sendTelegram(env, chatId, "🐛 Kategori <b>" + escapeHtml(labelKategori(ops[0], kat0)) + "</b> ada di beberapa operator, ketik salah satu:\n" + barisOp.join("\n"));
-        return true;
-      }
-    }
-    await sendTelegram(env, chatId, marah);
-    return true;
-  }
-  if (aksi === "harga") {
-    // (v2.9.17) Grup tanpa tombol — teks saja.
-    await sendTelegram(env, chatId,
-      "💰 <b>Bot ini GRATIS</b> — buat config Dark Tunnel nggak bayar. Kirim akunmu ke @autosetdark_bot di chat pribadi, langsung jadi file .dark.\n\n" +
-      "Kalau mau beli akun VPN-nya, di @sandekalavpn_bot: 30 hari Rp10.000.");
-    return true;
-  }
-  if (aksi === "cara") {
-    await sendTelegram(env, chatId,
-      "📖 <b>Cara pakai:</b>\n" +
-      "1️⃣ Buka @autosetdark_bot di chat pribadi\n" +
-      "2️⃣ Kirim akunmu apa adanya (SSH / VLESS / VMess / Trojan)\n" +
-      "3️⃣ Unduh file .dark-nya, impor ke Dark Tunnel, tekan Connect\n\n" +
-      "🔒 Akunmu tidak disimpan.");
-    return true;
-  }
-  if (aksi === "apk") {
-    await sendTelegram(env, chatId, "📥 <b>Download aplikasi Dark Tunnel:</b>\nhttps://sfile.co/H26JBeTBi1o");
-    return true;
-  }
-  if (aksi === "beli") {
-    await sendTelegram(env, chatId,
-      "🛒 Beli akun VPN di @sandekalavpn_bot — 30 hari Rp10.000.");
-    return true;
-  }
-  if (aksi === "belicanda") {
-    await sendTelegram(env, chatId, "admin ngntt! buka tokonya! bot jualan kok buka tutup, kaya warung aja!");
-    return true;
-  }
-  if (aksi === "minta") {
-    await sendTelegram(env, chatId, "minta-minta mulu ngntt! beli!");
-    return true;
-  }
-  if (aksi === "gakbisa") {
-    await sendTelegram(env, chatId, "belajar lah kntl! biar gak tlol!");
-    return true;
-  }
-  if (aksi === "males") {
-    await sendTelegram(env, chatId, "usaha dngo! biar gk mskin!");
-    return true;
-  }
   if (aksi === "menu") {
     await tampilkanMenuUtama(env, chatId, undefined, true);
     return true;
@@ -3031,24 +2932,14 @@ async function balasPemicuGrup(env, chatId, aksi, teksAsli) {
   return false;
 }
 
-// Daftar kata pemicu grup (/catatan, v2.9.14).
+// Daftar kata pemicu grup (/catatan, v2.9.14; disederhanakan 28 Nov 2026).
 const CATATAN_PEMICU =
   "📝 <b>Catatan — kata yang mancing bot di grup:</b>\n\n" +
   "Ketik di awal pesan, bot langsung balas:\n\n" +
-  "🐛 <code>bug</code> — bot marah, tulis yang bener!\n" +
-  "🐛 <code>bug &lt;operator&gt;</code> — tampilin bug operator itu (xl, telkomsel, axis, indosat, tri, byu, smartfren)\n" +
-  "🐛 <code>bug &lt;kategori&gt;</code> — tampilin bug kategori itu (edu, ilped, opok, wa, game, sosmed, musik, nonton, conference, appfun)\n" +
-  "💰 <code>harga</code> — bot ini GRATIS + harga akun VPN\n" +
-  "📖 <code>cara</code> — cara pakai\n" +
-  "📥 <code>apk</code> — link download Dark Tunnel\n" +
-  "🛒 <code>beli</code> — bot ngeledek admin soal toko buka-tutup\n" +
-  "🛒 <code>order</code> / <code>trial</code> / <code>vpn</code> — arahan beli akun ke @sandekalavpn_bot\n" +
   "💬 <code>menu</code> — menu grup\n" +
-  "⚡ <code>config</code> — arahan ke chat pribadi\n" +
-  "🙏 <code>minta</code> — bot ngomel\n" +
-  "😤 <code>gak bisa</code> / <code>gabisa</code> — bot nyuruh belajar\n" +
-  "😴 <code>males</code> / <code>mls</code> — bot nyuruh usaha\n\n" +
-  "🌐 <code>/cek</code> / <code>/cekdomain</code> / <code>/cekrespon</code> — cek domain\n\n" +
+  "⚡ <code>config</code> — arahan ke chat pribadi\n\n" +
+  "🌐 <code>/cek</code> / <code>/cekdomain</code> / <code>/cekrespon</code> — cek domain\n" +
+  "🐛 <code>/bug</code> — daftar bug host per operator\n\n" +
   "🚀 <code>/start@autosetdark_bot</code> / <code>/menu@autosetdark_bot</code> — menu bot ini (buat config)\n" +
   "🛡️ <code>/start@sandekalavpn_bot</code> — promo toko VPN\n" +
   "ℹ️ <code>/start</code> polos di grup — promo toko, bot ini diam\n\n" +
@@ -3090,11 +2981,10 @@ async function kirimDaftarBug(env, chatId, opKey, katKey, diGrup) {
   }
 }
 
-// ---- Nudge sepi grup (v2.9.14) ----
+// ---- Aktivitas grup (dulu: Nudge sepi, v2.9.14 — dihapus 28 Nov 2026) ----
 // Tiap pesan grup dicatat waktu terakhirnya (KV GRUP_AKTIF:<id>,
 // ditulis ulang bila sudah lewat 5 menit — hemat jatah tulis KV).
-// Cron per jam memanggil cekGrupSepi: grup yang sepi > 6 jam
-// dinudge sekali per masa sepi ("sepi amat ini grup! ngobrol kek!").
+// (Nudge grup sepi sudah dihapus; pencatatan tetap jalan.)
 async function catatAktivitasGrup(env, chatId) {
   if (!env.DATA) return;
   try {
@@ -3108,60 +2998,6 @@ async function catatAktivitasGrup(env, chatId) {
     await env.DATA.put(kunci, String(Date.now()));
     aktivitasGrupTerakhir.set(String(chatId), Date.now());
   } catch { /* abaikan */ }
-}
-
-// ---- Roast broadcast sandekala (v2.9.15) ----
-// Bot reseller menulis flag ke KV DATA tiap kali broadcast buka/tutup
-// sampai ke grup (ROAST_BUKA:<idGrup> / ROAST_TUTUP:<idGrup> = waktu).
-// Cron (tiap 10 menit) memanggil ini: flag segar (< 30 menit) dibalas
-// candaan, flag basi dibuang diam-diam. Bot tidak bisa melihat pesan
-// bot lain di Telegram, jadi flag KV ini jembatannya — candaan muncul
-// paling lambat 10 menit sesudah broadcast, bukan balasan ber-thread.
-export async function cekRoastSandekala(env) {
-  if (!env.DATA || !env.BOT_TOKEN) return;
-  const sekarang = Date.now();
-  // (v2.9.22) 1 LIST prefix "ROAST_" untuk BUKA + TUTUP sekaligus
-  // (dulu 2 LIST) — hemat jatah LIST KV harian (cuma 1000/hari).
-  let daftar;
-  try { daftar = await env.DATA.list({ prefix: "ROAST_" }); } catch { return; }
-  for (const key of daftar.keys || []) {
-    const prefix = key.name.startsWith("ROAST_BUKA:") ? "ROAST_BUKA:" : (key.name.startsWith("ROAST_TUTUP:") ? "ROAST_TUTUP:" : null);
-    if (!prefix) continue;
-    const chatId = key.name.slice(prefix.length);
-    let ts = 0;
-    try { ts = Number(await env.DATA.get(key.name)) || 0; } catch { /* abaikan */ }
-    try { await env.DATA.delete(key.name); } catch { /* abaikan */ }
-    if (!ts || sekarang - ts > 30 * 60 * 1000) continue; // basi, buang diam-diam
-    const teks = prefix === "ROAST_BUKA:" ? "kemana aja lu? niat jualan gak sih?" : "wkwkwk bot kok tutup njng!";
-    await sendTelegram(env, Number(chatId), teks);
-  }
-}
-
-export async function cekGrupSepi(env) {
-  if (!env.DATA || !env.BOT_TOKEN) return;
-  // (v2.9.22) Nudge sepi cukup 1x/jam — grup sepi > 6 jam tidak butuh
-  // dicek tiap cron 10 menit. Dijaga kunci KV CRON_SEPI_TS (GET murah;
-  // PUT hanya saat jalan) supaya tetap 1x/jam walau banyak isolate.
-  // Hemat: LIST GRUP_AKTIF: dari 144x/hari jadi 24x/hari.
-  try {
-    const jalanTerakhir = Number(await env.DATA.get("CRON_SEPI_TS").catch(() => null)) || 0;
-    if (jalanTerakhir && Date.now() - jalanTerakhir < 3600 * 1000) return;
-    await env.DATA.put("CRON_SEPI_TS", String(Date.now()));
-  } catch { /* abaikan, lanjut cek seperti biasa */ }
-  let daftar;
-  try { daftar = await env.DATA.list({ prefix: "GRUP_AKTIF:" }); } catch { return; }
-  const sekarang = Date.now();
-  for (const key of daftar.keys || []) {
-    const chatId = key.name.slice("GRUP_AKTIF:".length);
-    let terakhir = 0;
-    try { terakhir = Number(await env.DATA.get(key.name)) || 0; } catch { /* abaikan */ }
-    if (!terakhir || sekarang - terakhir < 6 * 3600 * 1000) continue;
-    let nudgeTerakhir = 0;
-    try { nudgeTerakhir = Number(await env.DATA.get("GRUP_NUDGE:" + chatId)) || 0; } catch { /* abaikan */ }
-    if (nudgeTerakhir && nudgeTerakhir >= terakhir) continue; // sudah dinudge sejak aktivitas terakhir
-    await sendTelegram(env, Number(chatId), "sepi amat ini grup! ngobrol kek!");
-    try { await env.DATA.put("GRUP_NUDGE:" + chatId, String(sekarang)); } catch { /* abaikan */ }
-  }
 }
 
 // ================= HANDLER TELEGRAM =================
@@ -5360,14 +5196,7 @@ export default {
     }
     return new Response("Bot generator config Dark Tunnel aktif");
   },
-  // Cron tiap 10 menit (v2.9.14, v2.9.15): nudge grup yang sepi
-  // > 6 jam + nyautin broadcast buka/tutup sandekala.
-  // (v2.9.22 hemat KV: nudge maks. 1x/jam via CRON_SEPI_TS, roast 1 LIST.)
-  // Jadwal dipasang di workflow deploy (wrangler.toml [triggers]).
-  async scheduled(event, env, ctx) {
-    ctx.waitUntil((async () => {
-      await cekGrupSepi(env);
-      await cekRoastSandekala(env);
-    })());
-  },
+  // Cron (dulu: nudge sepi + roast buka/tutup, v2.9.14/v2.9.15) —
+  // DIHAPUS 28 Nov 2026 atas perintah Asep; trigger cron di
+  // wrangler.toml kini tidak memanggil apa-apa.
 };
