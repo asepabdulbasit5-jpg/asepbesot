@@ -188,6 +188,18 @@ const NS_PER_DOMAIN = {
   "vip.sshvpn.web.id": "dns14.nadiastore.web.id", // domain LAMA SELOW — dipertahankan sebagai jaring pengaman (tes live /ceknadia 28 Nov 2026: SELOW kini vpn14.nadiastore.web.id)
   "vpn14.nadiastore.web.id": "dns14.nadiastore.web.id", // domain SELOW saat ini (tes live /ceknadia 28 Nov 2026 21:08 WIB; nilai dari website Nadia)
 };
+// Domain legacy yang DIKECUALIKAN dari peringatan yatim di
+// /ceknadia: vip.sshvpn.web.id adalah domain LAMA SELOW — sudah
+// tidak dipakai server live mana pun (tes live /ceknadia 28 Nov
+// 2026 21:08 WIB), tapi kuncinya SENGAJA dipertahankan di
+// NS_PER_DOMAIN sebagai jaring pengaman kalau Nadia masih
+// mengembalikan domain lama di akun tertentu. Tanpa pengecualian
+// ini, /ceknadia akan menampilkan peringatan yatim untuk vip
+// terus-menerus padahal kuncinya memang sengaja disimpan (Asep
+// 28 Nov 2026 21:15 WIB: "sembunyiin peringatannya"). Pengecualian
+// ini eksplisit per domain — logika yatim untuk domain lain tetap
+// jalan seperti semula.
+const NS_DOMAIN_LEGACY = new Set(["vip.sshvpn.web.id"]);
 // Alur beli sekarang: /beli (atau tombol 🛒 Beli VPN) -> pilih
 // SERVER -> pilih protokol -> pilih durasi -> ketik username sendiri
 // (atau "-" untuk acak) -> order dibuat. Username dibuatkan Nadia
@@ -1473,13 +1485,16 @@ function bandingkanServerLive(list) {
   // SEMUA server live membawa domain; kalau respons tidak membawa
   // domain (sebagian/tidak sama sekali), diam saja — bukan sinyal.
   // Domain yang sudah dilaporkan sebagai "lama" di gantiDomain
-  // tidak dilaporkan lagi di sini.
+  // tidak dilaporkan lagi di sini, begitu juga domain legacy di
+  // NS_DOMAIN_LEGACY (sengaja dipertahankan sebagai jaring
+  // pengaman, jadi tidak pernah diperingatkan sebagai yatim).
   const domainNsYatim = [];
   const semuaAdaDomain = liveById.size > 0 && [...liveById.values()].every((x) => domainLive(x));
   if (semuaAdaDomain) {
     const liveDomains = new Set([...liveById.values()].map((x) => domainLive(x)));
     const sudahDilaporkan = new Set(gantiDomain.map((g) => String(g.lama).toLowerCase()));
     for (const d of Object.keys(NS_PER_DOMAIN)) {
+      if (NS_DOMAIN_LEGACY.has(d.toLowerCase())) continue; // kunci legacy — sengaja dipertahankan
       if (!liveDomains.has(d.toLowerCase()) && !sudahDilaporkan.has(d.toLowerCase())) domainNsYatim.push(d);
     }
   }
