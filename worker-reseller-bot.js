@@ -1146,7 +1146,7 @@ async function tampilkanMenuUtama(env, chatId, from, messageId) {
     "TOTAL VPN: " + daftar.length + " AKUN"];
   if (saldo !== null) baris.push("SALDO VPN: Rp" + saldo.toLocaleString("id-ID"));
   baris.push(GARIS_PANEL, "SERVER TERSEDIA: " + tersedia + " / " + SERVERS.length + " SERVERS", "TOKO: " + (buka ? "🟢 BUKA" : "🔴 TUTUP"), GARIS_PANEL, "Admin: @Asepbesot", GARIS_PANEL);
-  if (isAdmin) baris.push("ADMIN: /semuaakun • /broadcast PESAN • /konfirmasi ORDER_ID • /buka • /tutup • /ceknadia", GARIS_PANEL);
+  if (isAdmin) baris.push("ADMIN: /semuaakun • /broadcast PESAN • /konfirmasi ORDER_ID • /buka • /tutup • /ceknadia • /cekfield", GARIS_PANEL);
   const html = baris.map((x) => (x === "MENU UTAMA" || x === "INFORMASI PELANGGAN") ? "<b>" + escapeHtml(x) + "</b>" : escapeHtml(x)).join("\n");
   const tombol = [
     [{ text: "🛒 Beli VPN", callback_data: "menu:beli", style: "success" }],
