@@ -2610,12 +2610,21 @@ function renderSSH(entri, o) {
   tambah("Domain & Koneksi", koneksi);
   const user = peta.get("Username"), pass = peta.get("Password");
   const portUtama = (v) => (v === null || v === undefined || v === "" ? null : String(v).split(",")[0].trim() || null);
-  const wsPort = portUtama(portPertama(o, ["ws_http", "none", "ws", "wsnontls"]));
-  const tlsPort = portUtama(portPertama(o, ["ws_tls", "tls"]));
-  if (domain && user && pass && (wsPort || tlsPort)) {
+  // Port dari nilai WS/TLS lama ("domain:port@user:pass") — dipakai
+  // kalau object port tidak membawa ws_tls/ws_http (28 Nov 2026,
+  // Perbaiki: Port tersimpan cuma teks datar, kunci port hilang).
+  const portDariNilai = (v) => { const m = String(v || "").match(/:(\d+)@/); return m ? m[1] : null; };
+  let wsPort = portUtama(portPertama(o, ["ws_http", "none", "ws", "wsnontls"]));
+  let tlsPort = portUtama(portPertama(o, ["ws_tls", "tls"]));
+  const wsLama = peta.get("WS"), tlsLama = peta.get("TLS");
+  if (!wsPort && wsLama) wsPort = portDariNilai(wsLama);
+  if (!tlsPort && tlsLama) tlsPort = portDariNilai(tlsLama);
+  if (domain && user && pass && (wsPort || tlsPort || wsLama || tlsLama)) {
     const fmt = [];
     if (wsPort) fmt.push("WS :\n" + kode(domain + ":" + wsPort + "@" + user + ":" + pass));
+    else if (wsLama) fmt.push("WS :\n" + kode(wsLama));
     if (tlsPort) fmt.push("TLS :\n" + kode(domain + ":" + tlsPort + "@" + user + ":" + pass));
+    else if (tlsLama) fmt.push("TLS :\n" + kode(tlsLama));
     tambah("Format Account", fmt);
   }
   return "<b>😈 SANDEKALAVPN 😈</b>\n\n" + seksi.join("\n\n");
@@ -3007,16 +3016,14 @@ function parsePortBlob(nilai) {
   return Object.keys(hasil).length ? hasil : null;
 }
 
-// Ubah config SSH lama (format datar, atau campuran seksi + baris
-// datar hasil gabungan versi lama) menjadi format seksi yang bersih
-// seperti renderSSH. Ini yang bikin Perbaiki tidak lagi menempelkan
-// baris-baris datar (blob Port, "HTTP Custom ...@user:pass") di bawah
-// seksi-seksi yang baru. VLESS / config tanpa Password dikembalikan
-// apa adanya.
-function normalisasiKeSeksi(teks) {
-  if (!teks || typeof teks !== "string") return teks;
+// Parse teks config jadi entri [{label, nilai}] + object port.
+// Dipakai normalisasiKeSeksi + gabungConfig (28 Nov 2026). WS/TLS
+// nilainya di baris berikut labelnya (seperti Port) — tanpa ini,
+// Format Account dari config tersimpan hilang saat dinormalisasi.
+function uraiEntri(teks) {
+  if (!teks || typeof teks !== "string") return { entri: [], portObj: null };
   const PETA_LABEL = { "Domain": "Host / Domain", "Ns-Domain": "Name Server", "Pubkey": "Public Key", "Expires": "Berlaku sampai", "IP Limit": "Limit Device" };
-  const LABEL = new Set(["Username", "Password", "UUID", "Server", "Host / Domain", "Domain", "Port", "Squid Proxy", "HTTP Custom", "OpenVPN", "Name Server", "Ns-Domain", "Public Key", "Pubkey", "DNS", "Limit Device", "Limit IP & Kuota", "Kuota", "IP Limit", "SNI", "Path", "Berlaku sampai", "Expires", "Sisa waktu"]);
+  const LABEL = new Set(["Username", "Password", "UUID", "Server", "Host / Domain", "Domain", "Port", "Squid Proxy", "HTTP Custom", "OpenVPN", "Name Server", "Ns-Domain", "Public Key", "Pubkey", "DNS", "Limit Device", "Limit IP & Kuota", "Kuota", "IP Limit", "SNI", "Path", "Berlaku sampai", "Expires", "Sisa waktu", "WS", "TLS"]);
   const bersih = (v) => String(v).replace(/<\/?code>/g, "");
   const garis = teks.split("\n");
   const entri = [];
@@ -3029,7 +3036,8 @@ function normalisasiKeSeksi(teks) {
     if (!m || !LABEL.has(m[1].trim())) { i++; continue; }
     let label = m[1].trim();
     let nilai = bersih(m[2]).trim();
-    if (label === "Port" && nilai === "") {
+    // Nilai di baris berikut (Port multi-baris, WS/TLS hasil renderSSH).
+    if ((label === "Port" || label === "WS" || label === "TLS") && nilai === "") {
       const lanjutan = [];
       let j = i + 1;
       while (j < garis.length && garis[j].trim() !== "" && !garis[j].startsWith("◆ ")) {
@@ -3057,23 +3065,87 @@ function normalisasiKeSeksi(teks) {
     if (label === "Limit Device") nilai = nilai.replace(/\s*(Device|IP)$/, "");
     entri.push({ label, nilai });
   }
+  return { entri, portObj };
+}
+
+// Ubah config SSH lama (format datar, atau campuran seksi + baris
+// datar hasil gabungan versi lama) menjadi format seksi yang bersih
+// seperti renderSSH. Ini yang bikin Perbaiki tidak lagi menempelkan
+// baris-baris datar (blob Port, "HTTP Custom ...@user:pass") di bawah
+// seksi-seksi yang baru. VLESS / config tanpa Password dikembalikan
+// apa adanya.
+function normalisasiKeSeksi(teks) {
+  if (!teks || typeof teks !== "string") return teks;
+  const { entri, portObj } = uraiEntri(teks);
   if (!entri.some((e) => e.label === "Password")) return teks;
   return renderSSH(entri, { port: portObj });
+}
+
+// Pisahkan baris "Berlaku sampai"/"Sisa waktu" dari teks config.
+// Dipakai gabungConfig (28 Nov 2026): exp bukan bagian seksi —
+// kalau ikut digabung per seksi, keduanya nyangkut di isi seksi
+// Format Account dan sisi lama (lebih panjang) bisa menang atas
+// exp baru. Yang baru menang, yang lama jadi fallback.
+function pisahBarisExp(teks) {
+  const exp = [], sisa = [];
+  const baris = String(teks ?? "").split("\n").filter((b) => {
+    const t = b.trim();
+    if (/^Berlaku sampai\s*:/.test(t)) { exp.push(t); return false; }
+    if (/^Sisa waktu\s*:/.test(t)) { sisa.push(t); return false; }
+    return true;
+  });
+  return { teks: baris.join("\n").trim(), exp: exp[0] || null, sisa: sisa[0] || null };
+}
+
+// Gabung config baru yang datar (details minim, tanpa Password) ke
+// config lama yang berseksi (28 Nov 2026): nilai baru menimpa nilai
+// lama per label, sisanya dipertahankan — supaya Perbaiki dengan
+// details minim tidak membuang config lengkap yang tersimpan.
+// Port datar ("22") tidak menimpa Port lengkap; exp diurus terpisah
+// oleh pisahBarisExp di gabungConfig.
+function gabungEntriKeSeksi(configBaru, configLama) {
+  const baru = uraiEntri(configBaru);
+  const lama = uraiEntri(configLama);
+  const peta = new Map(lama.entri.map((e) => [e.label, e]));
+  for (const e of baru.entri) {
+    if (e.label === "Port" && !baru.portObj) continue;
+    if (e.label === "Berlaku sampai" || e.label === "Sisa waktu") continue;
+    peta.set(e.label, e);
+  }
+  const portObj = baru.portObj || lama.portObj;
+  return renderSSH([...peta.values()], { port: portObj });
 }
 
 function gabungConfig(configBaru, configLama) {
   if (!configLama || typeof configLama !== "string") return configBaru;
   if (!configBaru || typeof configBaru !== "string") return configLama;
+  // (28 Nov 2026) Exp dipisah dulu kalau salah satu sisi berseksi
+  // SSH (ada baris Password) — config Xray/flat tidak disentuh,
+  // supaya penempatan exp-nya tidak berubah.
+  const baruSeksi = /^Password\s*:/m.test(configBaru);
+  const lamaSeksi = /^Password\s*:/m.test(configLama);
+  let expBaru = null, sisaBaru = null, expLama = null, sisaLama = null;
+  if (baruSeksi || lamaSeksi) {
+    const pBaru = pisahBarisExp(configBaru);
+    const pLama = pisahBarisExp(configLama);
+    configBaru = pBaru.teks;
+    configLama = pLama.teks;
+    expBaru = pBaru.exp; sisaBaru = pBaru.sisa;
+    expLama = pLama.exp; sisaLama = pLama.sisa;
+  }
   // Rapikan dulu kedua sisi ke format seksi yang sama — config lama
   // bisa masih format datar / campuran (hasil gabungan versi lama),
   // dan baris-baris datar itu tidak boleh lolos ke hasil akhir.
   configBaru = normalisasiKeSeksi(configBaru);
   configLama = normalisasiKeSeksi(configLama);
+  let hasil;
   // Config SSH baru berbentuk seksi ("◆ ...") — gabung per seksi supaya
   // baris kaya (grid Port, Pubkey, payload) tidak hilang dan tidak
   // nyasar ke seksi yang salah.
-  if (configBaru.includes("◆ ") && configLama.includes("◆ ")) return gabungConfigSeksi(configBaru, configLama);
-  let hasil = configBaru;
+  if (configBaru.includes("◆ ") && configLama.includes("◆ ")) hasil = gabungConfigSeksi(configBaru, configLama);
+  else if (!configBaru.includes("◆ ") && configLama.includes("◆ ")) hasil = gabungEntriKeSeksi(configBaru, configLama);
+  else {
+  hasil = configBaru;
   const LABEL_INFO = ["Port", "Public Key", "Name Server", "Limit Device", "Limit IP & Kuota", "Kuota", "Host / Domain", "Squid Proxy", "HTTP Custom", "OpenVPN", "SNI", "Path"];
   const adaLabel = (teks, label) => teks.includes(label + ":") || teks.includes(label + " :");
   const ambilBaris = (teks, label) => {
@@ -3107,6 +3179,18 @@ function gabungConfig(configBaru, configLama) {
     const iPay = configLama.indexOf("◆ Payload WebSocket");
     const awal = iPay >= 0 ? iPay : configLama.indexOf("Payload WebSocket");
     hasil += "\n\n" + configLama.slice(awal).trim();
+  }
+  }
+  // (28 Nov 2026) Tempel lagi exp yang dipisah di atas — yang baru
+  // menang, yang lama jadi fallback. Penempatan sama seperti config
+  // order: spasi kosong sebelum "Berlaku sampai".
+  if (baruSeksi || lamaSeksi) {
+    const expMenang = expBaru || expLama;
+    const sisaMenang = expBaru ? sisaBaru : sisaLama;
+    if (expMenang) {
+      hasil = hasil.trim() + "\n\n" + expMenang;
+      if (sisaMenang) hasil += "\n" + sisaMenang;
+    }
   }
   return hasil;
 }
