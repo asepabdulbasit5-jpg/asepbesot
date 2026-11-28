@@ -542,8 +542,14 @@ async function handleTelegram(env, update) {
     // Tombol di pesan navigasi yang sudah lama (>10 menit): jangan
     // edit pesan itu lagi — Telegram akan melompat ke pesan lama di
     // atas chat (membingungkan, 19 Nov 2026). Suruh buka menu baru.
+    // KECUALI menu:toko (28 Nov 2026): tombol Buka/Tutup Toko adalah
+    // AKSI, bukan navigasi — dan nempel di pesan menu yang biasanya
+    // sudah berjam-jam lamanya saat diketuk. Kalau ikut diblokir,
+    // ketukan tidak mengubah apa-apa dan siaran buka/tutup tidak
+    // pernah jalan (padahal status di menu kelihatan sudah berubah
+    // dari ketukan sebelumnya).
     const NAV_AWAL = ["menu:", "server:", "proto:", "paket:", "tserver:", "tproto:", "srvpage:", "trypage:"];
-    if (NAV_AWAL.some((aw) => data.startsWith(aw)) && cb.message?.date && Date.now() / 1000 - cb.message.date > 600) {
+    if (data !== "menu:toko" && NAV_AWAL.some((aw) => data.startsWith(aw)) && cb.message?.date && Date.now() / 1000 - cb.message.date > 600) {
       await jawabAlert(env, cb.id, "Pesan ini sudah lama, ketik /start untuk buka menu baru ya.");
       return;
     }
