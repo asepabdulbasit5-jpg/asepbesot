@@ -718,19 +718,77 @@ async function handleTelegram(env, update) {
         tombolChatPembeli(cb.from.id));
       return;
     }
-    // ---- Konfirmasi bayar (tombol admin, ganti ketik /konfirmasi) ----
+    // ---- Konfirmasi bayar 2 langkah (28 Nov 2026) ----
     // Dipakai di notif "Order baru", notif gagal buat akun, dan daftar
-    // /semuaakun. Admin cukup ketuk — order ID sudah nempel di tombol.
+    // /semuaakun. Ketuk pertama cuma menampilkan ringkasan order +
+    // tombol Ya/Batal — akun baru dibuat setelah admin mengetuk Ya,
+    // supaya ketukan nyasar tidak bikin akun gratis.
+    // konfirmasi: tampilkan prompt; konfirmasiYa: eksekusi;
+    // konfirmasiBatal: batalkan. /konfirmasi ORDER_ID (ketik) tetap
+    // 1 langkah — admin mengetiknya dengan sengaja.
+    // Prompt dari notif order diedit di tempat (pesan notifnya jadi
+    // prompt, jadi tombol konfirmasi lama hilang); prompt dari daftar
+    // /semuaakun dikirim sebagai pesan baru supaya daftarnya utuh.
     if (data.startsWith("konfirmasi:")) {
       if (!adalahAdmin(env, cb.from.id)) return;
       const orderId = data.slice("konfirmasi:".length);
       const order = await env.ORDERS.get(orderId, "json").catch(() => null);
       if (!order) { await jawabAlert(env, cb.id, "Order tidak ditemukan."); return; }
       if (order.status === "selesai") { await jawabAlert(env, cb.id, "Order ini sudah selesai."); return; }
+      const asal = cb.message?.text || "";
+      const dariNotif = asal.includes("Order baru " + orderId) || asal.includes("Order perpanjang baru " + orderId) || asal.includes("Order " + orderId + " SUDAH DIBAYAR");
+      const midAsal = cb.message?.message_id || 0;
+      const jenis = dariNotif ? "notif" : "list";
+      const ringkas = "Konfirmasi pembayaran order ini?\n\n" +
+        "Order: " + orderId + "\n" +
+        "Pembeli: " + (order.pembeli || ("ID " + (order.chatId || "?"))) + "\n" +
+        "Paket: " + (order.namaPaket || order.paket || "?") + " — " + (order.protocol || "?").toUpperCase() + " — " + (order.serverNama || order.server || "?") + "\n" +
+        "Bayar: Rp" + (order.nominalUnik || order.harga || 0).toLocaleString("id-ID") + "\n\n" +
+        "Pastikan uang sudah masuk Dana sebelum mengetuk Ya.";
+      const tombolYaBatal = [
+        [{ text: "✅ Ya, konfirmasi", callback_data: "konfirmasiYa:" + orderId + ":" + midAsal + ":" + jenis, style: "success" }],
+        [{ text: "❌ Batal", callback_data: "konfirmasiBatal:" + orderId + ":" + midAsal + ":" + jenis, style: "danger" }],
+      ];
+      if (dariNotif && midAsal) await editHtml(env, cb.from.id, midAsal, escapeHtml(ringkas), tombolYaBatal);
+      else await sendHtml(env, cb.from.id, escapeHtml(ringkas), tombolYaBatal);
+      return;
+    }
+    if (data.startsWith("konfirmasiYa:")) {
+      if (!adalahAdmin(env, cb.from.id)) return;
+      const bagian = data.split(":");
+      const orderId = bagian[1] || "";
+      const midAsal = parseInt(bagian[2] || "0", 10) || null;
+      const jenis = bagian[3] || "list";
+      const order = await env.ORDERS.get(orderId, "json").catch(() => null);
+      if (!order) { await jawabAlert(env, cb.id, "Order tidak ditemukan."); return; }
+      if (order.status === "selesai") { await jawabAlert(env, cb.id, "Order ini sudah selesai."); return; }
       await selesaikanOrder(env, orderId, order);
-      await jawabAlert(env, cb.id, order.status === "selesai"
-        ? "Order " + orderId + " dikonfirmasi, config dikirim ke pembeli."
-        : "Order " + orderId + " gagal dibuat, cek pesan berikutnya.");
+      if (order.status === "selesai") {
+        // Sukses: tombol konfirmasi di pesan asal hilang — ganti
+        // pesan prompt dengan catatan selesai (tanpa tombol).
+        if (cb.message?.message_id) await editHtml(env, cb.from.id, cb.message.message_id, escapeHtml("✅ Sudah dikonfirmasi — Order " + orderId + ", config dikirim ke pembeli."), []);
+        // Prompt dari daftar /semuaakun: render ulang daftarnya
+        // supaya tombol order ini hilang dari daftar.
+        if (jenis === "list" && midAsal) await tampilkanSemuaAkun(env, cb.from.id, midAsal);
+        await jawabAlert(env, cb.id, "Order " + orderId + " dikonfirmasi, config dikirim ke pembeli.");
+      } else {
+        await jawabAlert(env, cb.id, "Order " + orderId + " gagal dibuat, cek pesan berikutnya.");
+      }
+      return;
+    }
+    if (data.startsWith("konfirmasiBatal:")) {
+      if (!adalahAdmin(env, cb.from.id)) return;
+      const bagian = data.split(":");
+      const orderId = bagian[1] || "";
+      const jenis = bagian[3] || "list";
+      const order = await env.ORDERS.get(orderId, "json").catch(() => null);
+      if (cb.message?.message_id) {
+        const catatan = jenis === "notif" && order
+          ? "❌ Konfirmasi dibatalkan — Order " + orderId + " (" + (order.pembeli || ("ID " + (order.chatId || "?"))) + ", " + (order.namaPaket || order.paket || "?") + ", Rp" + (order.nominalUnik || order.harga || 0).toLocaleString("id-ID") + ") masih menunggu bayar. Cek di /semuaakun."
+          : "❌ Konfirmasi order " + orderId + " dibatalkan.";
+        await editHtml(env, cb.from.id, cb.message.message_id, escapeHtml(catatan), []);
+      }
+      await jawabAlert(env, cb.id, "Dibatalkan.");
       return;
     }
     // ---- Kelola akun: Perpanjang / Pindah / Ganti / Perbaiki / Hapus ----
@@ -1167,7 +1225,7 @@ function styleServer(s, live) {
   return "success";
 }
 
-// Langkah 1 beli: pilih server dulu (semua 20 server Nadia).
+// Langkah 1 beli: pilih server dulu (semua 22 server Nadia).
 // Server penuh tampil tapi TIDAK bisa diklik untuk lanjut —
 // tombolnya pakai callback "penuh:" yang cuma menampilkan
 // peringatan pop-up "server penuh, pilih server lain".
