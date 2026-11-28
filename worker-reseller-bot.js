@@ -304,7 +304,11 @@ export default {
 //   Isolate lain bisa telat maks. 60 detik melihat buka/tutup.
 // - Bersihkan order kedaluarsa: tadinya LIST + GET semua order tiap kali
 //   pembeli cek status. Sekarang maks. 1x per jam per isolate.
+// - Grup yang sudah dikenal: tadinya GET KV di SETIAP pesan grup.
+//   Setelah sekali dikenal, isolate ini tidak GET lagi (Set dibatasi
+//   5000 entri, lalu dikosongkan & dipelajari ulang).
 const cacheToko = { nilai: null, ts: 0 };
+const grupDikenal = new Set();
 let bersihOrderTerakhir = 0;
 
 // ---- Toko buka/tutup ala warung (19 Nov 2026) ----
@@ -352,6 +356,33 @@ const PESAN_TUTUP = "🔴 Toko lagi tutup. Lihat-lihat dulu aja, order dibuka la
 // Dipasang lewat /setdeskripsi (admin) — Bot API setMyDescription.
 // (22 Nov 2026) Harga disingkat jadi Rp10.000 / bulan.
 const DESKRIPSI_BOT = "SANDEKALA VPN — Beli akun VPN VLESS, VMess, Trojan & SSH. Harga: Rp10.000 / bulan. Bayar via QRIS DANA.";
+
+// ---- Grup: catat ID (28 Nov 2026, /broadcast manual) ----
+// ID grup dicatat (GRUP:<id>) supaya /broadcast manual sampai juga
+// ke grup SANDEKALA, bukan cuma ke pembeli. Siaran buka/tutup sudah
+// dicabut total — pencatatan ini HANYA untuk /broadcast manual.
+// Key GRUP: lama di KV (sebelum pencabutan) dibaca lagi di sini.
+async function catatGrup(env, chatId) {
+  if (!chatId) return;
+  if (grupDikenal.has(String(chatId))) return;
+  const kunci = "GRUP:" + chatId;
+  const ada = await env.ORDERS.get(kunci).catch(() => null);
+  if (ada) { if (grupDikenal.size > 5000) grupDikenal.clear(); grupDikenal.add(String(chatId)); return; }
+  await env.ORDERS.put(kunci, "1");
+  if (grupDikenal.size > 5000) grupDikenal.clear();
+  grupDikenal.add(String(chatId));
+}
+// Null kalau daftar gagal dibaca (KV error).
+async function daftarSemuaGrup(env) {
+  let list;
+  try { list = await env.ORDERS.list({ prefix: "GRUP:" }); } catch { return null; }
+  const hasil = new Set();
+  for (const key of list.keys) {
+    const id = key.name.slice("GRUP:".length);
+    if (id) hasil.add(id);
+  }
+  return hasil;
+}
 // ================= ALUR BELI =================
 
 async function handleTelegram(env, update) {
@@ -659,9 +690,11 @@ async function handleTelegram(env, update) {
   // pembeli tidak bocor ke semua anggota grup.
   const diGrup = msg.chat.type === "group" || msg.chat.type === "supergroup";
   if (diGrup) {
-    // (22 Nov 2026) Layani perintah etalase (/start, /menu, /harga).
-    // (28 Nov 2026: pencatatan grup dicabut bersama broadcast
-    // buka/tutup — bot tidak lagi menyimpan ID grup.)
+    // (22 Nov 2026) Catat grup, lalu layani perintah etalase
+    // (/start, /menu, /harga). Pencatatan grup dikembalikan
+    // 28 Nov 2026 HANYA untuk /broadcast manual (siaran buka/tutup
+    // tetap dicabut total).
+    await catatGrup(env, chatId);
     const tokenPerintah = text.split(" ")[0];
     const mention = tokenPerintah.match(/^\/\S+@([A-Za-z0-9_]+)/);
     // (22 Nov 2026) Perintah yang ditujukan ke bot lain
@@ -1529,14 +1562,22 @@ async function kirimBroadcast(env, chatId, teks) {
     const o = await env.ORDERS.get(key.name, "json").catch(() => null);
     if (o?.chatId && String(o.chatId) !== String(env.ADMIN_CHAT_ID)) tujuan.add(String(o.chatId));
   }
-  if (!tujuan.size) { await sendTelegram(env, chatId, "Belum ada pembeli yang tercatat di bot, broadcast batal."); return; }
-  await sendTelegram(env, chatId, "📣 Mengirim broadcast ke " + tujuan.size + " pembeli...");
-  let ok = 0, gagal = 0;
+  // (28 Nov 2026) /broadcast manual juga ke grup tercatat
+  // (GRUP:<id>) — pesan yang sama, tanpa auto-hapus.
+  const grup = await daftarSemuaGrup(env);
+  const daftarGrup = grup || new Set();
+  if (!tujuan.size && !daftarGrup.size) { await sendTelegram(env, chatId, "Belum ada pembeli yang tercatat di bot, broadcast batal."); return; }
+  await sendTelegram(env, chatId, "📣 Mengirim broadcast ke " + tujuan.size + " pembeli" + (daftarGrup.size ? " dan " + daftarGrup.size + " grup" : "") + "...");
+  let ok = 0, gagal = 0, okGrup = 0;
   for (const id of tujuan) {
     const j = await telegramApi(env, "sendMessage", { chat_id: Number(id), text: teks.slice(0, 4000) });
     if (j?.ok) ok++; else gagal++;
   }
-  await sendTelegram(env, chatId, "📣 Broadcast selesai: terkirim ke " + ok + " pembeli.");
+  for (const id of daftarGrup) {
+    const j = await telegramApi(env, "sendMessage", { chat_id: Number(id), text: teks.slice(0, 4000) });
+    if (j?.ok) okGrup++; else gagal++;
+  }
+  await sendTelegram(env, chatId, "📣 Broadcast selesai: terkirim ke " + ok + " pembeli" + (okGrup ? " dan " + okGrup + " grup" : "") + ".");
 }
 
 // ---- Status expired akun (20 Nov 2026) ----
