@@ -2629,10 +2629,13 @@ function keyboardStart(isAdmin, diGrup) {
   const kb = [
     [{ text: "⚡ Buat Config", callback_data: "buat:config", style: "success" }, { text: "✏️ Buat Manual", callback_data: "buat:manual", style: "success" }],
     [{ text: "🔍 Cari Bug", callback_data: "bug:menu", style: "primary" }, { text: "🌐 Cek Domain", callback_data: "cek:mulai", style: "primary" }],
-    [{ text: "📥 dark tunnel", url: "https://sfile.co/H26JBeTBi1o", style: "primary" }, { text: "🆕 Update Terbaru", callback_data: "update:lihat", style: "primary" }],
+    [{ text: "📥 dark tunnel", url: "https://sfile.co/H26JBeTBi1o", style: "primary" }],
     [{ text: "🛒 Beli Akun VPN", url: "https://t.me/sandekalavpn_bot", style: "primary" }, { text: "👥 Gabung Grup", url: "https://t.me/sand3kala", style: "primary" }],
   ];
-  if (isAdmin) kb.push([{ text: "⚙️ Admin", callback_data: "admin:panel", style: "primary" }]);
+  // (28 Nov 2026) Tombol "🆕 Update Terbaru" DIHAPUS dari menu atas
+  // perintah Asep — /update tetap jalan sebagai perintah, dan callback
+  // update:lihat tetap ditangani (tombol lama di riwayat chat).
+  if (isAdmin) kb.push([{ text: "⚙️ Admin", callback_data: "admin:panel", style: "primary" }, { text: "✨ Rapihin Config", callback_data: "buat:rapihin", style: "primary" }]);
   return kb;
 }
 
@@ -3923,6 +3926,250 @@ export async function selesaikanManual(env, chatId, st) {
   }
 }
 
+// ================= /RAPIHIN — RAPIHIN AKUN JUALAN MANUAL (28 Nov 2026) ====
+// Admin jual akun VPN manual (dari seller lain) — tempel akunnya, bot
+// rapihin jadi pesan template SANDEKALAVPN (sama seperti pesan config
+// bot reseller), tinggal di-forward ke pembeli. Alur: /rapihin (atau
+// tombol ✨ Rapihin Config) -> tempel akun -> bila NS/pubkey/exp belum
+// ketemu, bot minta sekali (atau Lewati) -> preview -> ✅ Buat Pesan.
+// Tempel di luar mode ini tetap generate .dark seperti biasa.
+
+// Tabel NS per domain (disalin dari bot reseller, 25 Nov 2026) —
+// fallback kalau tempelan akun tidak membawa Name Server.
+const NS_PER_DOMAIN_RAPIHIN = {
+  "vip.sshvpn.web.id": "nsbiz.vpnstore28.my.id", // SSH SELOW DNS & UDP MINI
+};
+
+// State /rapihin (per chat admin, sementara di memori saja).
+// {tahap: "akun"|"tambahan"|"konfirmasi", akun, links, info, hilang, pesan, msgId, ts}
+const pendingRapihin = new Map();
+const RAPIHIN_TTL_MS = 10 * 60 * 1000;
+
+// Ambil NS / pubkey / expiry / server / port dari teks akun (label
+// eksplisit). Expiry ditangkap apa adanya — ditampilkan persis seperti
+// tertulis, tanpa hitung tanggal.
+export function ekstrakInfoRapihin(teks) {
+  const t = String(teks || "");
+  const ambil = (re) => {
+    const m = t.match(re);
+    return m ? m[1].trim().replace(/[,\s;]+$/, "") : null;
+  };
+  const ns = ambil(/(?:^|\n)\s*(?:name\s*server|nameserver|ns)\s*[:=]\s*([^\n,;]+)/i);
+  const pubkey = ambil(/(?:^|\n)\s*(?:public\s*key|pubkey|publickey)\s*[:=]\s*([^\n,;]+)/i);
+  const exp = ambil(/(?:^|\n)\s*(?:berlaku\s*sampai|expired|expires?|exp|valid\s*until|masa\s*aktif\s*sampai)\s*:?\s*([^\n]+)/i);
+  const server = ambil(/(?:^|\n)\s*(?:server|ip(?:\s*address)?)\s*[:=]\s*([^\n,;]+)/i);
+  const portLine = ambil(/(?:^|\n)\s*port\s*[:=]\s*([0-9,\s-]+)/i);
+  const wsPort = ambil(/(?:^|\n)\s*WS\s*:?\s*(?:\n\s*)?[^\n@:]*:(\d+)\s*@/i);
+  const tlsPort = ambil(/(?:^|\n)\s*TLS\s*:?\s*(?:\n\s*)?[^\n@:]*:(\d+)\s*@/i);
+  return { ns, pubkey, exp, server, portLine, wsPort: wsPort ? Number(wsPort) : null, tlsPort: tlsPort ? Number(tlsPort) : null };
+}
+
+// Port WS/TLS untuk Format Account: (1) eksplisit dari tempelan;
+// (2) dari baris Port (80/8080 -> WS, 443/8443 -> TLS); (3) default
+// standar 80/443 (port WS/TLS akun SSH seller ini, sama seperti
+// template reseller).
+function portFormatRapihin(info) {
+  let ws = info.wsPort || null, tls = info.tlsPort || null;
+  if ((!ws || !tls) && info.portLine) {
+    const angka = info.portLine.split(/[^0-9]+/).map(Number).filter((n) => n > 0);
+    if (!ws) ws = angka.find((n) => n === 80 || n === 8080) || null;
+    if (!tls) tls = angka.find((n) => n === 443 || n === 8443) || null;
+  }
+  return { ws: ws || 80, tls: tls || 443 };
+}
+
+// Render config SSH format ringkas SANDEKALAVPN (salinan renderSSH bot
+// reseller, 22 Nov 2026): header, Informasi Akun, Domain & Koneksi,
+// Format Account. "Berlaku sampai" ditempel pemanggil.
+export function renderRapihinSSH(akun, info) {
+  const garis = "────────────────────";
+  const kode = (v) => "<code>" + escapeHtml(String(v)) + "</code>";
+  const baris = (label, v) => label + " : " + kode(v);
+  const seksi = [];
+  const tambah = (judul, daftar) => {
+    const isi = daftar.filter((b) => b !== null && b !== undefined && b !== "");
+    if (isi.length) seksi.push("◆ " + judul + "\n" + garis + "\n" + isi.join("\n"));
+  };
+  tambah("Informasi Akun", [
+    baris("Username", akun.username),
+    baris("Password", akun.password),
+  ]);
+  const domain = akun.host;
+  const koneksi = [];
+  if (domain) koneksi.push(baris("Domain", domain));
+  if (info.server && info.server !== domain) koneksi.push(baris("Server", info.server));
+  if (info.pubkey) koneksi.push(baris("Pubkey", info.pubkey));
+  const ns = info.ns || NS_PER_DOMAIN_RAPIHIN[domain];
+  if (ns) koneksi.push(baris("Name Server", ns));
+  if (domain) koneksi.push(baris("DNS", domain));
+  const portLine = info.portLine || String(akun.port || "");
+  if (portLine) koneksi.push((koneksi.length ? "\n" : "") + baris("Port", portLine));
+  tambah("Domain & Koneksi", koneksi);
+  const { ws, tls } = portFormatRapihin(info);
+  const fmt = [];
+  if (domain && akun.username && akun.password) {
+    if (ws) fmt.push("WS :\n" + kode(domain + ":" + ws + "@" + akun.username + ":" + akun.password));
+    if (tls) fmt.push("TLS :\n" + kode(domain + ":" + tls + "@" + akun.username + ":" + akun.password));
+  }
+  tambah("Format Account", fmt);
+  return "<b>😈 SANDEKALAVPN 😈</b>\n\n" + seksi.join("\n\n");
+}
+
+// Render config Xray format ringkas SANDEKALAVPN (salinan susunInfoAkun
+// + kirimConfig bot reseller): header, info akun, tiap link blok <pre>.
+export function renderRapihinXray(links, info) {
+  const kode = (v) => "<code>" + escapeHtml(String(v)) + "</code>";
+  let uuid = null, username = null, server = null, cfDomain = null;
+  const ports = [];
+  for (const l of links) {
+    try {
+      const u = new URL(l);
+      if (!uuid && u.username) uuid = decodeURIComponent(u.username);
+      if (!username && u.hash) username = decodeURIComponent(u.hash.slice(1));
+      if (u.hostname.includes("cloudfront.net")) { if (!cfDomain) cfDomain = u.hostname; }
+      else if (!server) server = u.hostname;
+      if (u.port && !ports.includes(u.port)) ports.push(u.port);
+    } catch { /* abaikan link yang tidak bisa diurai */ }
+  }
+  const baris = [];
+  const cetak = (label, v) => { if (v !== null && v !== undefined && v !== "") baris.push(label + ": " + kode(v)); };
+  cetak("Username", username);
+  cetak("UUID", uuid);
+  cetak("Server", server);
+  cetak("Domain CloudFront", cfDomain);
+  if (ports.length) baris.push("Port: " + kode(ports.join(", ")));
+  const isi = ["<b>😈 SANDEKALAVPN 😈</b>"];
+  if (baris.length) isi.push(baris.join("\n"));
+  for (const l of links) isi.push("<pre>" + escapeHtml(l) + "</pre>");
+  return isi.join("\n");
+}
+
+// Bangun ulang link Xray dari config hasil parse (bila tempelan cuma
+// link darktunnel:// — link aslinya tidak ada di teks). VLESS/Trojan
+// dari field v2rayConfig; VMess dari JSON + base64 standar; SS tidak
+// bisa (metode cipher dibuang parser) -> pakai link darktunnel-nya.
+function linkDariConfigXray(c) {
+  const sub = c.vlessTunnelConfig || c.vmessTunnelConfig || c.trojanTunnelConfig || c.shadowsocksTunnelConfig;
+  const v2 = sub?.v2rayConfig;
+  if (!v2 || !v2.host || !v2.port || !v2.uuid) return null;
+  const tipe = String(c.type || "").toUpperCase();
+  const net = v2.transportNetwork === "Websocket" ? "ws" : v2.transportNetwork === "gRPC" ? "grpc" : "tcp";
+  if (tipe === "VMESS") {
+    const j = { v: "2", ps: c.name || "", add: v2.host, port: String(v2.port), id: v2.uuid, aid: "0", scy: "auto", net, type: "none", host: v2.wsHeaderHost || "", path: v2.wsPath || "", tls: v2.tls ? "tls" : "" };
+    if (v2.serverNameIndication) j.sni = v2.serverNameIndication;
+    if (net === "grpc" && v2.grpcServiceName) j.path = v2.grpcServiceName;
+    return "vmess://" + btoa(unescape(encodeURIComponent(JSON.stringify(j))));
+  }
+  if (tipe === "VLESS" || tipe === "TROJAN") {
+    const q = new URLSearchParams();
+    q.set("security", v2.tls ? "tls" : "none");
+    if (v2.serverNameIndication) q.set("sni", v2.serverNameIndication);
+    q.set("type", net);
+    if (net === "ws" && v2.wsPath) q.set("path", v2.wsPath);
+    if (net === "ws" && v2.wsHeaderHost) q.set("host", v2.wsHeaderHost);
+    if (net === "grpc" && v2.grpcServiceName) q.set("serviceName", v2.grpcServiceName);
+    const skema = tipe === "VLESS" ? "vless" : "trojan";
+    return skema + "://" + encodeURIComponent(v2.uuid) + "@" + v2.host + ":" + v2.port + "?" + q.toString() + "#" + encodeURIComponent(c.name || "");
+  }
+  return toDarktunnelLink(c);
+}
+
+// Susun pesan final /rapihin dari state: pembuka + template + exp.
+export function susunPesanRapihin(st) {
+  const cfg = st.akun;
+  let isi;
+  if (cfg.type === "SSH") {
+    const ssh = cfg.sshTunnelConfig.sshConfig;
+    isi = renderRapihinSSH({ host: ssh.host, port: ssh.port, username: ssh.username, password: ssh.password }, st.info);
+  } else {
+    isi = renderRapihinXray(st.links, st.info);
+  }
+  let teks = "✅ Ini config VPN kamu:\n\n" + isi;
+  if (st.info.exp) teks += "\n\nBerlaku sampai: " + escapeHtml(st.info.exp);
+  return teks;
+}
+
+// Mulai alur /rapihin (admin, DM): tunggu akun ditempel.
+async function mulaiRapihin(env, chatId) {
+  pendingAdmin.delete(chatId);
+  pendingConfig.delete(chatId);
+  pendingTemplate.delete(chatId);
+  pendingManualAkun.delete(chatId);
+  pendingRapihin.set(chatId, { tahap: "akun", ts: Date.now() });
+  await sendTelegram(env, chatId,
+    "✨ <b>Rapihin Config</b>\n\nTempel akun VPN-nya (SSH/Xray, acak-acak boleh) — bot rapihin jadi pesan template SANDEKALAVPN, tinggal di-forward ke pembeli.",
+    [[{ text: "❌ Batal", callback_data: "rp:batal", style: "danger" }], ...TOMBOL_KEMBALI]);
+}
+
+// Tampilkan preview pesan final + tombol ✅ Buat Pesan / ❌ Batal.
+async function tampilkanPreviewRapihin(env, chatId, st) {
+  st.tahap = "konfirmasi"; st.ts = Date.now();
+  st.pesan = susunPesanRapihin(st);
+  const r = await sendTelegram(env, chatId,
+    "👀 <b>Preview pesan:</b>\n\n" + st.pesan,
+    [[{ text: "✅ Buat Pesan", callback_data: "rp:buat", style: "success" }], [{ text: "❌ Batal", callback_data: "rp:batal", style: "danger" }]]);
+  st.msgId = r?.result?.message_id || null;
+  return true;
+}
+
+// Pesan teks saat ada state /rapihin aktif. Return true bila pesan
+// ditangani di sini (router tidak lanjut ke handlePesanAkun).
+// State kedaluwarsa (>10 menit) diabaikan.
+async function handleRapihin(env, chatId, teks) {
+  const st = pendingRapihin.get(chatId);
+  if (!st) return false;
+  if (Date.now() - st.ts > RAPIHIN_TTL_MS) { pendingRapihin.delete(chatId); return false; }
+  if (st.tahap === "akun") {
+    let hasil;
+    try { hasil = await parsePesan(teks, { env }); } catch { hasil = { configs: [], kurangSsh: [], adaSsh: false }; }
+    if (!hasil.configs.length) {
+      let alasan = "tidak ditemukan akun di pesan itu";
+      if (hasil.adaSsh && hasil.kurangSsh.length) alasan = "akun SSH belum lengkap — tidak ketemu: " + hasil.kurangSsh.join(", ");
+      await sendTelegram(env, chatId, "😕 Rapihin: <b>" + escapeHtml(alasan) + "</b>. Kirim ulang akunnya (SSH atau link Xray).", [[{ text: "❌ Batal", callback_data: "rp:batal", style: "danger" }], ...TOMBOL_KEMBALI]);
+      return true; // tetap menunggu
+    }
+    const cfg = hasil.configs[0];
+    const mentah = (String(teks).match(RE_LINK) || []).map(bersihLink);
+    let links = mentah.filter((l) => /^(vless|vmess|trojan|ss):\/\//i.test(l));
+    if (!links.length) {
+      // Tempelan cuma link darktunnel:// — bangun ulang link Xray.
+      links = hasil.configs.map(linkDariConfigXray).filter(Boolean);
+    }
+    const info = ekstrakInfoRapihin(teks);
+    st.akun = cfg; st.links = links; st.info = info;
+    // Yang belum ketemu: NS/pubkey cuma untuk SSH; Exp untuk semua.
+    const hilang = [];
+    if (cfg.type === "SSH") {
+      if (!info.ns && !NS_PER_DOMAIN_RAPIHIN[cfg.sshTunnelConfig.sshConfig.host]) hilang.push("NS");
+      if (!info.pubkey) hilang.push("Pubkey");
+    }
+    if (!info.exp) hilang.push("Exp");
+    st.hilang = hilang;
+    if (hilang.length) {
+      st.tahap = "tambahan"; st.ts = Date.now();
+      const subX = cfg.vlessTunnelConfig || cfg.vmessTunnelConfig || cfg.trojanTunnelConfig || cfg.shadowsocksTunnelConfig;
+      const namaAkun = cfg.type === "SSH" ? cfg.sshTunnelConfig.sshConfig.host : (subX?.v2rayConfig?.host || cfg.type);
+      const banyak = hasil.configs.length > 1 ? " (ditemukan " + hasil.configs.length + " akun, dipakai yang pertama)" : "";
+      const r = await sendTelegram(env, chatId,
+        "🔎 Akun " + cfg.type + " ketemu (" + escapeHtml(namaAkun) + ")" + banyak + ". Yang belum ketemu: <b>" + hilang.join(", ") + "</b>.\n\nKirim yang ada dalam satu pesan (pisah baris, contoh: <code>NS: xxx</code> / <code>Pubkey: yyy</code> / <code>Exp: 28 Nov 2026</code>), atau ketuk Lewati.",
+        [[{ text: "⏭️ Lewati", callback_data: "rp:lewati", style: "primary" }], [{ text: "❌ Batal", callback_data: "rp:batal", style: "danger" }]]);
+      st.msgId = r?.result?.message_id || null;
+      return true;
+    }
+    return await tampilkanPreviewRapihin(env, chatId, st);
+  }
+  if (st.tahap === "tambahan") {
+    // Pesan tambahan: ambil NS/pubkey/exp yang ada; yang tidak ada
+    // tetap kosong — langsung ke preview, tidak ditanya lagi.
+    const tambah = ekstrakInfoRapihin(teks);
+    if (tambah.ns) st.info.ns = tambah.ns;
+    if (tambah.pubkey) st.info.pubkey = tambah.pubkey;
+    if (tambah.exp) st.info.exp = tambah.exp;
+    return await tampilkanPreviewRapihin(env, chatId, st);
+  }
+  return false;
+}
+
 // Pesan teks admin saat ada state tertunda dari tombol panel admin.
 // Return true bila pesan ditangani di sini (router tidak lanjut ke
 // handlePesanAkun). State kedaluwarsa (>15 menit) diabaikan.
@@ -4150,12 +4397,12 @@ async function handleTelegram(env, update) {
     // update jalan di grup (lanjut ke handler biasa di bawah).
     if (diGrupCb) {
       const namaBot = env.BOT_USERNAME ? "@" + env.BOT_USERNAME : "bot ini";
-      if (data === "buat:config" || data === "buat:manual" || data === "buat:template" ||
+      if (data === "buat:config" || data === "buat:manual" || data === "buat:template" || data === "buat:rapihin" ||
         data.startsWith("tpl:pakai:") || data.startsWith("cfg:")) {
         await jawabAlert(env, cb.id, "Lewat chat pribadi ya — buka " + namaBot + ", biar akun kamu nggak kelihatan orang lain.");
         return;
       }
-      if (data.startsWith("admin:") || data.startsWith("tw:") || data.startsWith("ab:") ||
+      if (data.startsWith("admin:") || data.startsWith("tw:") || data.startsWith("ab:") || data.startsWith("rp:") ||
         data.startsWith("bug:hapus:") || data.startsWith("tpl:edit:") || data.startsWith("tpl:del:")) {
         await jawabAlert(env, cb.id, "⛔ Khusus admin — lewat chat pribadi bot.");
         return;
@@ -4188,6 +4435,7 @@ async function handleTelegram(env, update) {
       pendingAdmin.delete(chatIdCb);
       pendingConfig.delete(chatIdCb);
       pendingManualAkun.delete(chatIdCb);
+      pendingRapihin.delete(chatIdCb);
       await tampilkanMenuUtama(env, chatIdCb, cb.message.message_id);
       return;
     }
@@ -4198,6 +4446,7 @@ async function handleTelegram(env, update) {
     if (data === "buat:config") {
       await jawabCallback(env, cb.id);
       pendingManualAkun.delete(chatIdCb);
+      pendingRapihin.delete(chatIdCb);
       await sendTelegram(env, chatIdCb, "⚡ <b>Buat Config</b>\n\nKirim akun kamu — bot deteksi jenisnya otomatis.",
         [[{ text: "🧩 Template Config", callback_data: "buat:template", style: "primary" }, { text: "✏️ Buat Manual", callback_data: "buat:manual", style: "success" }], ...TOMBOL_KEMBALI]);
       return;
@@ -4211,8 +4460,17 @@ async function handleTelegram(env, update) {
       pendingAdmin.delete(chatIdCb);
       pendingTemplate.delete(chatIdCb);
       pendingManualAkun.set(chatIdCb, { ts: Date.now() });
+      pendingRapihin.delete(chatIdCb);
       await sendTelegram(env, chatIdCb, "✏️ <b>Buat Config Manual</b>\n\nKirim akun kamu dulu — SSH (<code>host:port@user:pass</code>) atau link Xray (VLESS / VMess / Trojan / Shadowsocks).\n\nSetelah itu kamu pilih sendiri metodenya, isi bug / SNI / payload / proxy-nya, lalu kasih nama bebas. File jadinya <code>&lt;nama&gt; by @autosetdark_bot.dark</code> — config tidak disimpan sebagai template.",
         [[{ text: "❌ Batal", callback_data: "mn:batal", style: "danger" }], ...TOMBOL_KEMBALI]);
+      return;
+    }
+    // Tombol "✨ Rapihin Config" di menu utama (admin, 28 Nov 2026) —
+    // rapihin akun jualan manual jadi pesan template SANDEKALAVPN.
+    if (data === "buat:rapihin") {
+      if (cekAdmin(env, chatIdCb) !== "ya") { await jawabAlert(env, cb.id, "⛔ Perintah ini khusus admin."); return; }
+      await jawabCallback(env, cb.id);
+      await mulaiRapihin(env, chatIdCb);
       return;
     }
     // Tombol "🧩 Template Config" di alur Buat Config — buka daftar
@@ -4321,9 +4579,42 @@ async function handleTelegram(env, update) {
       if (cekAdmin(env, chatIdCb) !== "ya") { await jawabAlert(env, cb.id, "⛔ Perintah ini khusus admin."); return; }
       pendingAdmin.delete(chatIdCb);
       pendingConfig.delete(chatIdCb);
+      pendingRapihin.delete(chatIdCb);
       await jawabCallback(env, cb.id);
       // (v2.9.2: pesan wizard/prompt DIHAPUS — tanpa pesan "dibatalkan".)
       await hapusTelegram(env, chatIdCb, cb.message.message_id);
+      return;
+    }
+    // ---- Tombol alur /rapihin (prefix "rp:", 28 Nov 2026) ----
+    // rp:lewati = lewati pengisian NS/pubkey/exp -> preview;
+    // rp:buat = kirim pesan final; rp:batal = batalkan alur.
+    if (data === "rp:lewati" || data === "rp:buat" || data === "rp:batal") {
+      if (cekAdmin(env, chatIdCb) !== "ya") { await jawabAlert(env, cb.id, "⛔ Perintah ini khusus admin."); return; }
+      const st = pendingRapihin.get(chatIdCb);
+      if (data === "rp:batal") {
+        pendingRapihin.delete(chatIdCb);
+        await jawabCallback(env, cb.id);
+        await hapusTelegram(env, chatIdCb, cb.message.message_id);
+        return;
+      }
+      if (!st || Date.now() - st.ts > RAPIHIN_TTL_MS) {
+        pendingRapihin.delete(chatIdCb);
+        await jawabAlert(env, cb.id, "Sudah kedaluwarsa — mulai lagi dengan /rapihin ya.");
+        return;
+      }
+      if (data === "rp:lewati") {
+        if (st.tahap !== "tambahan") { await jawabAlert(env, cb.id, "Sudah tidak berlaku — pakai tombol di preview ya."); return; }
+        await jawabCallback(env, cb.id);
+        if (st.msgId) await hapusTelegram(env, chatIdCb, st.msgId);
+        await tampilkanPreviewRapihin(env, chatIdCb, st);
+        return;
+      }
+      // rp:buat
+      if (st.tahap !== "konfirmasi" || !st.pesan) { await jawabAlert(env, cb.id, "Belum ada preview — mulai lagi dengan /rapihin ya."); return; }
+      pendingRapihin.delete(chatIdCb);
+      await jawabCallback(env, cb.id);
+      if (st.msgId) await hapusTelegram(env, chatIdCb, st.msgId);
+      await sendTelegram(env, chatIdCb, st.pesan);
       return;
     }
     // Batal Buat Manual (mn:batal, v2.9.9) — pengguna biasa: hapus
@@ -4930,6 +5221,9 @@ async function handleTelegram(env, update) {
     } else if (perintah === "/config") {
       // Template Config tetap di DM (tanpa tombol, v2.9.17).
       await sendTelegram(env, chatId, "🧩 Template config cuma bisa di chat pribadi ya — buka @" + (env.BOT_USERNAME || "autosetdark_bot") + ".");
+    } else if (perintah === "/rapihin") {
+      // (28 Nov 2026) Rapihin config cuma bisa di chat pribadi (admin).
+      await sendTelegram(env, chatId, "✨ Rapihin config cuma bisa di chat pribadi ya — buka @" + (env.BOT_USERNAME || "autosetdark_bot") + ".");
     } else if (!teks.startsWith("/")) {
       // Cek domain yang tertunda: domain dicek, bukan domain diabaikan
       // diam-diam (biar obrolan grup tidak memicu balasan "bukan domain").
@@ -4959,12 +5253,23 @@ async function handleTelegram(env, update) {
     return;
   }
 
+  // /batal: batalkan alur /rapihin yang sedang berjalan (28 Nov 2026).
+  // Dicek SEBELUM blok pembatal state di bawah, supaya balasannya tahu
+  // ada state atau tidak.
+  if (teks === "/batal" || teks.startsWith("/batal ") || teks.startsWith("/batal@")) {
+    if (pendingRapihin.delete(chatId)) {
+      await sendTelegram(env, chatId, "✨ Rapihin dibatalkan.", TOMBOL_KEMBALI);
+    }
+    return;
+  }
+
   // Perintah apa pun (atau ketuk "▶️ Start" dari keyboard lama yang masih
   // nempel) membatalkan state admin yang tertunda — pengguna pindah alur.
   if (teks.startsWith("/") || teks === "▶️ Start") {
     pendingAdmin.delete(chatId);
     pendingTemplate.delete(chatId);
     pendingManualAkun.delete(chatId);
+    pendingRapihin.delete(chatId);
   }
 
   // (22 Nov 2026) Handoff dari @sandekalavpn_bot: /start dark_<id> —
@@ -5103,6 +5408,18 @@ async function handleTelegram(env, update) {
     await sendTelegram(env, chatId, "📋 Config <b>" + escapeHtml(nama) + "</b> (" + labelOperator(op) + " — " + labelKategori(op, kat) + ").\n\nKirim akunnya (SSH/Xray, bebas format) — bot akan simpan sebagai config contoh.");
     return;
   }
+  // /rapihin (admin, 28 Nov 2026): rapihin akun jualan manual jadi
+  // pesan template SANDEKALAVPN. DM saja — di grup diarahkan ke DM
+  // (cabang grup di atas).
+  if (teks === "/rapihin" || teks.startsWith("/rapihin ") || teks.startsWith("/rapihin@")) {
+    pendingCek.delete(chatId);
+    pendingConfig.delete(chatId);
+    const st = cekAdmin(env, chatId);
+    if (st === "belum") { await sendTelegram(env, chatId, "⚠️ Fitur admin belum dikonfigurasi."); return; }
+    if (st === "bukan") { await sendTelegram(env, chatId, "⛔ Perintah ini khusus admin."); return; }
+    await mulaiRapihin(env, chatId);
+    return;
+  }
   // /seedtemplate (admin, v2.9.8): masukkan template bawaan
   // (TEMPLATE_BAWAAN: 9 dikte Asep + 3 starter) ke KV. Upsert menurut
   // nama — aman diulang; template tampil di /config.
@@ -5125,6 +5442,12 @@ async function handleTelegram(env, update) {
     return;
   }
   if (teks.startsWith("/")) { pendingCek.delete(chatId); pendingConfig.delete(chatId); return; } // perintah tak dikenal diabaikan diam-diam
+
+  // Akun yang ditunggu untuk /rapihin (admin): dicek PALING dulu —
+  // tempelan akun berikutnya milik alur ini, bukan .dark biasa.
+  if (pendingRapihin.has(chatId)) {
+    if (await handleRapihin(env, chatId, teks)) return;
+  }
 
   // State admin tertunda (tombol panel admin): dicek sebelum
   // handlePesanAkun, hanya untuk admin — KECUALI state manual
