@@ -1761,9 +1761,15 @@ function tombolChatPembeli(chatIdPembeli) {
 // Kabari admin kalau ada order baru / penjualan berhasil.
 // Dipakai supaya admin tetap tahu walau MacroDroid gagal baca notif
 // Dana — admin bisa cek Dana lalu /konfirmasi manual.
-async function kabariAdmin(env, chatIdPembeli, teks, tombol) {
+// isHtml: teks mengandung tag HTML (<b> dst) — kirim lewat sendHtml
+// (parse_mode HTML) supaya tag-nya dirender tebal, bukan tampil mentah.
+// sendTelegram TIDAK memakai parse_mode, jadi <b> lewat jalur itu
+// cuma jadi teks biasa. Dipakai notif "Order baru" + "Terjual"
+// (28 Nov 2026); notif lain tetap teks polos.
+async function kabariAdmin(env, chatIdPembeli, teks, tombol, isHtml) {
   if (!env.ADMIN_CHAT_ID || String(env.ADMIN_CHAT_ID) === String(chatIdPembeli)) return;
-  await sendTelegram(env, env.ADMIN_CHAT_ID, teks, tombol);
+  if (isHtml) await sendHtml(env, env.ADMIN_CHAT_ID, teks, tombol);
+  else await sendTelegram(env, env.ADMIN_CHAT_ID, teks, tombol);
 }
 
 // Terjemahkan error mentah dari API penyedia jadi bahasa yang dimengerti
@@ -2026,13 +2032,13 @@ async function buatOrder(env, chatId, kodePaket, protocol, customUsername, serve
     "Setelah bayar, admin akan cek pembayaranmu lalu config dikirim ke sini.\n" +
     "Order ini berlaku 30 menit.");
   await kabariAdmin(env, chatId,
-    "🛒 Order baru " + orderId + " (menunggu bayar)\n" +
-    "Pembeli: " + (order.pembeli || ("ID " + chatId)) + "\n" +
+    "🛒 Order baru <b>" + orderId + "</b> (menunggu bayar)\n" +
+    "Pembeli: <b>" + escapeHtml(order.pembeli || ("ID " + chatId)) + "</b>\n" +
     "Paket: " + paket.nama + " — " + proto.toUpperCase() + " — " + server.nama + "\n" +
-    "Username: " + username + " — bayar Rp" + nominalUnik.toLocaleString("id-ID") + "\n" +
+    "Username: <b>" + escapeHtml(username) + "</b> — bayar <b>Rp" + nominalUnik.toLocaleString("id-ID") + "</b>\n" +
     "Berlaku 30 menit. Kalau uang sudah masuk Dana, ketuk tombol Konfirmasi di bawah.",
     [[{ text: "✅ Konfirmasi Pembayaran", callback_data: "konfirmasi:" + orderId, style: "success" }],
-     tombolChatPembeli(chatId)]);
+     tombolChatPembeli(chatId)], true);
   // Gambar QRIS: kirim fotonya kalau QRIS_IMAGE_URL sudah diisi di
   // Secrets Worker. Kalau belum diisi, jujur ke pembeli supaya dia
   // tidak menunggu gambar yang tidak akan datang.
@@ -2145,12 +2151,12 @@ async function selesaikanOrder(env, orderId, order) {
   await env.ORDERS.put(orderId, JSON.stringify(order));
   await tambahkanAkunUser(env, order.chatId, orderId);
   await kabariAdmin(env, order.chatId,
-    "✅ Terjual: " + orderId + "\n" +
-    "Pembeli: " + (order.pembeli || ("ID " + order.chatId)) + "\n" +
-    "Akun: " + (order.username || "") + " — " + order.namaPaket + " — " + (order.protocol || "?").toUpperCase() +
+    "✅ Terjual: <b>" + orderId + "</b>\n" +
+    "Pembeli: <b>" + escapeHtml(order.pembeli || ("ID " + order.chatId)) + "</b>\n" +
+    "Akun: <b>" + escapeHtml(order.username || "") + "</b> — " + order.namaPaket + " — " + (order.protocol || "?").toUpperCase() +
     " — " + (order.serverNama || order.server || "?") + "\n" +
-    "Rp" + order.nominalUnik.toLocaleString("id-ID") + " sudah masuk, config sudah dikirim ke pembeli.",
-    [tombolChatPembeli(order.chatId)]);
+    "<b>Rp" + order.nominalUnik.toLocaleString("id-ID") + "</b> sudah masuk, config sudah dikirim ke pembeli.",
+    [tombolChatPembeli(order.chatId)], true);
   await kirimConfig(env, order.chatId,
     "✅ Pembayaran diterima! Ini config " + order.namaPaket + " kamu:", hasil.config,
     "Masa aktif mulai hari ini. Selamat memakai!");
