@@ -174,10 +174,11 @@ const SERVERS = [
 // memakai tabel ini sebagai fallback kalau respons API tidak membawa
 // Name Server. Tambah entri baru ke sini kalau ada NS server lain.
 // CATATAN: nsbiz.vpnstore28.my.id dicek DNS 25 Nov 2026 (Cloudflare +
-// Google DoH) = NXDOMAIN, tidak resolve publik — nilai resmi Nadia,
-// tapi SlowDNS server ini baru jalan kalau Nadia memperbaiki DNS-nya.
+// Google DoH) = NXDOMAIN, tidak resolve publik — nilai resmi Nadia
+// waktu itu, tapi Asep 28 Nov 2026 ganti NS vip.sshvpn.web.id ke
+// dns14.nadiastore.web.id (sama dengan vpn14, dari website Nadia).
 const NS_PER_DOMAIN = {
-  "vip.sshvpn.web.id": "nsbiz.vpnstore28.my.id", // SSH SELOW DNS & UDP MINI (ISP Biznet Gio, Bogor)
+  "vip.sshvpn.web.id": "dns14.nadiastore.web.id", // SSH SELOW DNS & UDP MINI (ISP Biznet Gio, Bogor) — diganti Asep 28 Nov 2026
   "vpn14.nadiastore.web.id": "dns14.nadiastore.web.id", // SSH vpn14 (28 Nov 2026, dari website Nadia)
 };
 // Alur beli sekarang: /beli (atau tombol 🛒 Beli VPN) -> pilih
