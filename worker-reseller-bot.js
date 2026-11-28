@@ -2616,10 +2616,13 @@ function renderSSH(entri, o) {
   if (domain) koneksi.push(baris("Domain", domain));
   if (serverVal) koneksi.push(baris("Server", serverVal));
   if (peta.has("Public Key")) koneksi.push(baris("Pubkey", peta.get("Public Key")));
-  // Name Server: dari respons API kalau ada; kalau tidak, fallback ke
-  // tabel NS_PER_DOMAIN (API Nadia tidak mengirim NS).
-  if (peta.has("Name Server")) koneksi.push(baris("Name Server", peta.get("Name Server")));
-  else if (domain && NS_PER_DOMAIN[domain]) koneksi.push(baris("Name Server", NS_PER_DOMAIN[domain]));
+  // Name Server: tabel NS_PER_DOMAIN menang kalau domain dikenal
+  // (28 Nov 2026: NS lama yang sudah tersimpan di config — mis.
+  // nsbiz — harus kalah dari tabel terbaru Asep, kalau tidak
+  // Perbaiki tidak pernah memperbarui NS). Kalau domain tidak ada
+  // di tabel, pakai NS dari config/API kalau ada.
+  if (domain && NS_PER_DOMAIN[domain]) koneksi.push(baris("Name Server", NS_PER_DOMAIN[domain]));
+  else if (peta.has("Name Server")) koneksi.push(baris("Name Server", peta.get("Name Server")));
   if (domain) koneksi.push(baris("DNS", domain));
   const portLine = portSingkat(peta.get("Port"));
   if (portLine) koneksi.push((koneksi.length ? "\n" : "") + baris("Port", portLine));
@@ -2635,6 +2638,15 @@ function renderSSH(entri, o) {
   const wsLama = peta.get("WS"), tlsLama = peta.get("TLS");
   if (!wsPort && wsLama) wsPort = portDariNilai(wsLama);
   if (!tlsPort && tlsLama) tlsPort = portDariNilai(tlsLama);
+  // Fallback (28 Nov 2026, Perbaiki): config tersimpan yang sudah
+  // terlanjur kehilangan WS/TLS (Perbaiki sebelum perbaikan 3590cbb)
+  // tetap dapat Format Account — format order selalu WS :80 /
+  // TLS :443 (port pertama saja); ambil dari daftar Port datar.
+  if ((!wsPort && !wsLama) || (!tlsPort && !tlsLama)) {
+    const daftarPort = String(peta.get("Port") || "").split(",").map((s) => s.trim());
+    if (!wsPort && !wsLama && daftarPort.includes("80")) wsPort = "80";
+    if (!tlsPort && !tlsLama && daftarPort.includes("443")) tlsPort = "443";
+  }
   if (domain && user && pass && (wsPort || tlsPort || wsLama || tlsLama)) {
     const fmt = [];
     if (wsPort) fmt.push("WS :\n" + kode(domain + ":" + wsPort + "@" + user + ":" + pass));
