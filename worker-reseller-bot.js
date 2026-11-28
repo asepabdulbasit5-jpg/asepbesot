@@ -2876,12 +2876,16 @@ function susunInfoAkun(d, links) {
   }
   const exp = cariExpired(d);
   if (exp) {
+    // Spasi kosong sebelum blok exp (28 Nov 2026): pisahkan info
+    // akun (Port/Limit) dari "Berlaku sampai"/"Sisa waktu".
+    if (baris.length) baris.push("");
     cetak("Berlaku sampai", formatExpired(exp));
     cetak("Sisa waktu", sisaWaktu(exp));
   }
   // Format ringkas SANDEKALAVPN (22 Nov 2026): header di semua config
-  // Xray, sama seperti config SSH.
-  if (baris.length) baris.unshift("SANDEKALAVPN");
+  // Xray, sama seperti config SSH. Spasi kosong setelah header
+  // (28 Nov 2026): Username langsung di bawah baris kosong.
+  if (baris.length) baris.unshift("SANDEKALAVPN", "");
   return baris.join("\n");
 }
 
@@ -2915,7 +2919,13 @@ function perbaruiExpDiConfig(configLama, configBaru) {
   const limitLama = ambilBaris(configLama, "Limit IP & Kuota");
   if (limitLama && !hasil.includes("Limit IP & Kuota")) {
     const iExp = hasil.indexOf("Berlaku sampai:");
-    if (iExp >= 0) hasil = hasil.slice(0, iExp) + limitLama + "\n" + hasil.slice(iExp);
+    if (iExp >= 0) {
+      // Sisipkan sebelum baris kosong pemisah blok exp (kalau ada),
+      // supaya spasi tetap tepat sebelum "Berlaku sampai".
+      let iSisip = iExp;
+      if (hasil.slice(0, iExp).endsWith("\n\n")) iSisip = iExp - 1;
+      hasil = hasil.slice(0, iSisip) + limitLama + "\n" + hasil.slice(iSisip);
+    }
     else hasil += "\n\n" + limitLama;
   }
   return hasil;
