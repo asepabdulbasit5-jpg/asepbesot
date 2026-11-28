@@ -341,6 +341,27 @@ async function setToko(env, buka) {
   cacheToko.nilai = buka; cacheToko.ts = Date.now();
   await env.ORDERS.put("TOKO_BUKA", buka ? "buka" : "tutup");
 }
+// ---- Debounce toggle buka/tutup (28 Nov 2026) ----
+// Tombol menu:toko adalah toggle — tiap ketuk membalik status dan
+// menyiarkan ke semua pengguna + grup. Ketukan ganda (lag / jari
+// nyasar) pernah mengirim 6 siaran selang-seling dalam 2 menit.
+// Aturan: perubahan status yang sukses dicatat di KV ORDERS kunci
+// "TOKO_TOGGLE_TERAKHIR" (ms epoch); ketuk berikutnya dalam 30
+// detik diabaikan. Perintah /buka dan /tutup juga memperbarui cap
+// waktu ini saat benar-benar mengubah status, supaya perintah dan
+// tombol tidak bergabung jadi siaran ganda.
+const KUNCI_TOGGLE_TERAKHIR = "TOKO_TOGGLE_TERAKHIR";
+const TOGGLE_JEDA_MS = 30000;
+async function toggleTerlaluCepat(env) {
+  try {
+    const v = await env.ORDERS.get(KUNCI_TOGGLE_TERAKHIR).catch(() => null);
+    const ts = Number(v || 0);
+    return ts > 0 && Date.now() - ts < TOGGLE_JEDA_MS;
+  } catch { return false; }
+}
+async function catatToggleToko(env) {
+  try { await env.ORDERS.put(KUNCI_TOGGLE_TERAKHIR, String(Date.now())); } catch { /* abaikan */ }
+}
 function adalahAdmin(env, chatId) { return String(chatId) === String(env.ADMIN_CHAT_ID); }
 const PESAN_TUTUP = "🔴 Toko lagi tutup. Lihat-lihat dulu aja, order dibuka lagi nanti ya.";
 // Deskripsi bot (tampil di profil: "Apa yang dapat bot ini lakukan?").
@@ -614,8 +635,10 @@ async function handleTelegram(env, update) {
     if (data === "menu:ceknadia") { await tampilkanCekNadia(env, cb.from.id, cb.message?.message_id); return; }
     if (data === "menu:toko") {
       if (!adalahAdmin(env, cb.from.id)) return;
+      if (await toggleTerlaluCepat(env)) { await jawabAlert(env, cb.id, "Baru saja diubah, tunggu sebentar ya."); return; }
       const buka = await tokoBuka(env);
       await setToko(env, !buka);
+      await catatToggleToko(env);
       await tampilkanMenuUtama(env, cb.from.id, cb.from, cb.message?.message_id);
       await siarkanStatusToko(env, !buka);
       return;
@@ -1090,13 +1113,21 @@ async function handleTelegram(env, update) {
   }
 
   // Perintah admin: /buka dan /tutup (toko buka/tutup ala warung).
+  // Kalau toko sudah dalam status yang diminta, jangan siarkan
+  // ulang — cukup beri tahu admin (28 Nov 2026).
   if (text === "/buka" || text === "/tutup") {
     if (!adalahAdmin(env, chatId)) return;
-    await setToko(env, text === "/buka");
-    await sendTelegram(env, chatId, text === "/buka"
+    const mauBuka = text === "/buka";
+    if ((await tokoBuka(env)) === mauBuka) {
+      await sendTelegram(env, chatId, mauBuka ? "Toko sudah buka." : "Toko sudah tutup.");
+      return;
+    }
+    await setToko(env, mauBuka);
+    await catatToggleToko(env);
+    await sendTelegram(env, chatId, mauBuka
       ? "🟢 Toko DIBUKA. Pembeli sudah bisa order dan perpanjang lagi."
       : "🔴 Toko DITUTUP. Pembeli hanya bisa lihat-lihat (menu, daftar server, status, akun).");
-    await siarkanStatusToko(env, text === "/buka");
+    await siarkanStatusToko(env, mauBuka);
     return;
   }
 
