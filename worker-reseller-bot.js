@@ -391,8 +391,12 @@ async function catatPengguna(env, chatId, nama) {
   penggunaDikenal.add(String(chatId));
 }
 
+// Null kalau daftar gagal dibaca (KV error) — bedakan dari daftar
+// yang memang kosong, supaya siaran tidak salah lapor "Belum ada
+// pengguna" saat sebenarnya daftarnya tidak kebaca (28 Nov 2026).
 async function daftarSemuaPengguna(env) {
-  const list = await env.ORDERS.list({ prefix: "USER:" });
+  let list;
+  try { list = await env.ORDERS.list({ prefix: "USER:" }); } catch { return null; }
   const hasil = new Set();
   for (const key of list.keys) {
     const id = key.name.slice("USER:".length);
@@ -417,8 +421,10 @@ async function catatGrup(env, chatId) {
   if (grupDikenal.size > 5000) grupDikenal.clear();
   grupDikenal.add(String(chatId));
 }
+// Null kalau daftar gagal dibaca (KV error) — lihat daftarSemuaPengguna.
 async function daftarSemuaGrup(env) {
-  const list = await env.ORDERS.list({ prefix: "GRUP:" });
+  let list;
+  try { list = await env.ORDERS.list({ prefix: "GRUP:" }); } catch { return null; }
   const hasil = new Set();
   for (const key of list.keys) {
     const id = key.name.slice("GRUP:".length);
@@ -444,20 +450,25 @@ async function catatAktivitasGrup(env, chatId) {
 async function siarkanKeSemuaPengguna(env, teks, buka) {
   const tujuan = await daftarSemuaPengguna(env);
   const grup = await daftarSemuaGrup(env);
-  if (!tujuan.size && !grup.size) { await sendTelegram(env, env.ADMIN_CHAT_ID, "Belum ada pengguna yang tercatat di bot."); return; }
+  // Kedua daftar gagal dibaca: jangan lapor "Belum ada pengguna"
+  // (menyesatkan) — beri tahu admin siarannya gagal (28 Nov 2026).
+  if (tujuan === null && grup === null) { await sendTelegram(env, env.ADMIN_CHAT_ID, "⚠️ Siaran buka/tutup gagal: daftar penerima tidak bisa dibaca."); return; }
+  const daftarTujuan = tujuan || new Set();
+  const daftarGrup = grup || new Set();
+  if (!daftarTujuan.size && !daftarGrup.size) { await sendTelegram(env, env.ADMIN_CHAT_ID, "Belum ada pengguna yang tercatat di bot."); return; }
   let ok = 0, okGrup = 0;
   // (27 Nov 2026) Auto-hapus: catat message_id tiap pesan terkirim,
   // dihapus otomatis 1 menit kemudian (lihat sapuHapusOtomatis).
   const antreHapus = [];
   const hapusPada = Date.now() + HAPUS_OTOMATIS_JEDA_MS;
-  for (const id of tujuan) {
+  for (const id of daftarTujuan) {
     const j = await telegramApi(env, "sendMessage", { chat_id: Number(id), text: teks.slice(0, 4000) });
     if (j?.ok) {
       ok++;
       if (j?.result?.message_id) antreHapus.push({ c: Number(id), m: j.result.message_id, t: hapusPada });
     }
   }
-  for (const id of grup) {
+  for (const id of daftarGrup) {
     const j = await telegramApi(env, "sendMessage", { chat_id: Number(id), text: teks.slice(0, 4000) });
     if (j?.ok) {
       okGrup++;
@@ -559,8 +570,12 @@ async function handleTelegram(env, update) {
       const buka = await tokoBuka(env);
       await setToko(env, !buka);
       await catatToggleToko(env);
-      await tampilkanMenuUtama(env, cb.from.id, cb.from, cb.message?.message_id);
-      await siarkanStatusToko(env, !buka);
+      // Refresh menu tidak boleh menggagalkan siaran: kalau gagal,
+      // siaran tetap jalan (28 Nov 2026).
+      try { await tampilkanMenuUtama(env, cb.from.id, cb.from, cb.message?.message_id); } catch { /* abaikan */ }
+      // Siaran tidak boleh gagal diam-diam (28 Nov 2026): kalau
+      // gagal, admin diberitahu.
+      try { await siarkanStatusToko(env, !buka); } catch (e) { await sendTelegram(env, env.ADMIN_CHAT_ID, "⚠️ Siaran buka/tutup gagal: " + String(e?.message || e || "tidak diketahui").slice(0, 120)); }
       return;
     }
     if (data.startsWith("srvpage:")) { await tampilkanDaftarServer(env, cb.from.id, "beli", parseInt(data.slice(8), 10) || 0, cb.message?.message_id); return; }
@@ -1042,7 +1057,9 @@ async function handleTelegram(env, update) {
     await sendTelegram(env, chatId, mauBuka
       ? "🟢 Toko DIBUKA. Pembeli sudah bisa order dan perpanjang lagi."
       : "🔴 Toko DITUTUP. Pembeli hanya bisa lihat-lihat (menu, daftar server, status, akun).");
-    await siarkanStatusToko(env, mauBuka);
+    // Siaran tidak boleh gagal diam-diam (28 Nov 2026): kalau
+    // gagal, admin diberitahu.
+    try { await siarkanStatusToko(env, mauBuka); } catch (e) { await sendTelegram(env, env.ADMIN_CHAT_ID, "⚠️ Siaran buka/tutup gagal: " + String(e?.message || e || "tidak diketahui").slice(0, 120)); }
     return;
   }
 
