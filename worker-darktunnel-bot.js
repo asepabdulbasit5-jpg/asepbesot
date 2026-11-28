@@ -4020,11 +4020,55 @@ export function renderRapihinSSH(akun, info) {
   return "<b>😈 SANDEKALAVPN 😈</b>\n\n" + seksi.join("\n\n");
 }
 
+// Label varian link Xray (seperti label di web Nadia / bot reseller):
+// "— LABEL —" di atas tiap link. VMess di-decode JSON-nya (net + tls)
+// supaya transportnya kebedakan — labelLink bot reseller mengembalikan
+// "VMESS" polos untuk semua link vmess karena tidak men-decode JSON.
+// VLESS/Trojan/SS pakai logika labelLink reseller. Link rusak ->
+// label fallback, tidak crash.
+export function labelLinkRapihin(link) {
+  const m = String(link || "").match(/^(vless|vmess|trojan|ss):\/\//i);
+  const scheme = m ? m[1].toLowerCase() : "";
+  if (scheme === "vmess") {
+    try {
+      const j = JSON.parse(b64DecodeToleran(String(link).replace(/^vmess:\/\//i, "").split(/[#?]/)[0]));
+      if (j && typeof j === "object") {
+        const net = String(j.net || "ws").toLowerCase();
+        const tls = String(j.tls || "").toLowerCase();
+        if (net === "ws") return tls === "tls" ? "VMESS TLS" : "VMESS HTTP";
+        if (net === "grpc") return "VMESS GRPC";
+        if (net === "httpupgrade") return "VMESS HTTPUPGRADE";
+        if (net === "xhttp") return "VMESS XHTTP";
+        return "VMESS " + net.toUpperCase();
+      }
+    } catch { /* jatuh ke fallback */ }
+    return "VMESS";
+  }
+  if (scheme === "ss") return "SS";
+  try {
+    const u = new URL(link);
+    const p = u.searchParams;
+    const type = (p.get("type") || "ws").toLowerCase();
+    const sec = (p.get("security") || "").toLowerCase();
+    const cf = u.hostname.includes("cloudfront.net");
+    let l;
+    if (scheme === "trojan") l = sec === "tls" ? "TROJAN TLS" : "TROJAN";
+    else if (type === "grpc") l = "GRPC";
+    else if (type === "httpupgrade") l = sec === "tls" ? "UPTLS" : "UPNTLS";
+    else if (sec === "tls") l = "TLS";
+    else if (sec === "none") l = "NONE";
+    else l = type.toUpperCase();
+    return cf ? "CF " + l : l;
+  } catch {
+    return scheme.toUpperCase() || "CONFIG";
+  }
+}
+
 // Render config Xray format ringkas SANDEKALAVPN (salinan susunInfoAkun
 // + kirimConfig bot reseller): header, seksi ◆ Informasi Akun /
-// ◆ Domain & Koneksi, tiap link blok <pre>. Link vmess:// membawa
-// JSON base64 sebagai "hostname" — jangan diurai pakai new URL()
-// (Server-nya jadi blob base64); decode JSON-nya langsung.
+// ◆ Domain & Koneksi, tiap link berlabel "— LABEL —" lalu blok <pre>.
+// Link vmess:// membawa JSON base64 sebagai "hostname" — jangan diurai
+// pakai new URL() (Server-nya jadi blob base64); decode JSON-nya langsung.
 export function renderRapihinXray(links, info = {}) {
   const kode = (v) => "<code>" + escapeHtml(String(v)) + "</code>";
   const garis = "────────────────────";
@@ -4072,7 +4116,7 @@ export function renderRapihinXray(links, info = {}) {
   ]);
   const isi = ["<b>😈 SANDEKALAVPN 😈</b>"];
   if (seksi.length) isi.push(seksi.join("\n\n"));
-  for (const l of links) isi.push("<pre>" + escapeHtml(l) + "</pre>");
+  for (const l of links) isi.push("— " + labelLinkRapihin(l) + " —\n<pre>" + escapeHtml(l) + "</pre>");
   return isi.join("\n");
 }
 
