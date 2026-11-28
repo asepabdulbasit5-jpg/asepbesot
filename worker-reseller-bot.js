@@ -144,13 +144,15 @@ const PAKET = [
 // Server CLOUDFRONT NUSA tidak dukung VLESS.
 // Alur beli: /beli -> pilih SERVER -> pilih protokol ->
 // pilih durasi -> ketik username (atau "-") -> order dibuat.
-// Domain per server hanya diketahui untuk SELOW (vip.sshvpn.web.id,
-// dari respons trial Nadia) — server lain belum diketahui, jadi
-// /ceknadia hanya membandingkan domain yang bot tahu (28 Nov 2026).
-// NS_PER_DOMAIN di bawah tahu 2 domain (SELOW + vpn14); server
-// pemilik vpn14 tidak diketahui, jadi tidak ditulis di sini.
+// Domain per server hanya diketahui untuk SELOW — kini
+// vpn14.nadiastore.web.id (tes live /ceknadia 28 Nov 2026 21:08 WIB;
+// sebelumnya vip.sshvpn.web.id, dari respons trial Nadia). Domain
+// lama vip.sshvpn.web.id dipertahankan di NS_PER_DOMAIN sebagai
+// jaring pengaman kalau Nadia masih mengembalikannya di akun
+// tertentu. Server lain belum diketahui domainnya, jadi /ceknadia
+// hanya membandingkan domain yang bot tahu.
 const SERVERS = [
-  { kode: "slowmini",  nama: "SSH SELOW DNS & UDP MINI",      serverId: "01a1a126-b5c7-710c-953a-68e8d0ea6e98", protocols: ["ssh"], used: 162, limit: 250, domain: "vip.sshvpn.web.id" },
+  { kode: "slowmini",  nama: "SSH SELOW DNS & UDP MINI",      serverId: "01a1a126-b5c7-710c-953a-68e8d0ea6e98", protocols: ["ssh"], used: 162, limit: 250, domain: "vpn14.nadiastore.web.id" },
   { kode: "cloudmat",  nama: "CLOUDMATIKA",                   serverId: "019ecafe-9826-7339-8939-8c6c03daaac5", protocols: ["ssh", "vmess", "vless", "trojan"], used: 149, limit: 155 },
   { kode: "sgcloud",   nama: "SGCLOUDHOST",              serverId: "019d416c-91ab-70cf-ae93-98251456366e", protocols: ["ssh", "vmess", "vless", "trojan"], used: 124, limit: 127 },
   { kode: "rajasa",    nama: "PT.RAJASA — PENUH",             serverId: "01a03c0a-b07a-736c-a192-a3be583503ae", protocols: ["ssh", "vmess", "vless", "trojan"], penuh: true, used: 100, limit: 100 },
@@ -183,8 +185,8 @@ const SERVERS = [
 // waktu itu, tapi Asep 28 Nov 2026 ganti NS vip.sshvpn.web.id ke
 // dns14.nadiastore.web.id (sama dengan vpn14, dari website Nadia).
 const NS_PER_DOMAIN = {
-  "vip.sshvpn.web.id": "dns14.nadiastore.web.id", // SSH SELOW DNS & UDP MINI (ISP Biznet Gio, Bogor) — diganti Asep 28 Nov 2026
-  "vpn14.nadiastore.web.id": "dns14.nadiastore.web.id", // SSH vpn14 (28 Nov 2026, dari website Nadia)
+  "vip.sshvpn.web.id": "dns14.nadiastore.web.id", // domain LAMA SELOW — dipertahankan sebagai jaring pengaman (tes live /ceknadia 28 Nov 2026: SELOW kini vpn14.nadiastore.web.id)
+  "vpn14.nadiastore.web.id": "dns14.nadiastore.web.id", // domain SELOW saat ini (tes live /ceknadia 28 Nov 2026 21:08 WIB; nilai dari website Nadia)
 };
 // Alur beli sekarang: /beli (atau tombol 🛒 Beli VPN) -> pilih
 // SERVER -> pilih protokol -> pilih durasi -> ketik username sendiri
