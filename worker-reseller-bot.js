@@ -126,6 +126,15 @@ const PAKET = [
   { kode: "30hari", nama: "VPN 30 hari", harga: 10000, durasiHari: 30, nadiaType: "month", nadiaDuration: 1 },
 ];
 
+// ---- HARGA MODAL (baseline pembanding /ceknadia, 28 Nov 2026) ----
+// Hasil live /cekfield 28 Nov 2026 21:52 WIB: respons /servers Nadia
+// membawa field pricing = harga modal, SAMA di semua 22 server:
+// {"per_day":267,"per_week":1869,"per_month":6000}.
+// Konstanta ini HANYA pembanding laporan — bot TIDAK mengubah
+// harga jual otomatis (harga jual tetap Rp800/Rp3.300/Rp10.000
+// di PAKET di atas; kalau modal berubah, Asep yang memutuskan).
+const HARGA_MODAL = { per_day: 267, per_week: 1869, per_month: 6000 };
+
 // Server yang bisa dipilih pembeli — SEMUA 22 server Nadia
 // 28 Nov 2026 (/ceknadia): BIZNET & CLOUDFRONT BIZNET GIO KEMBALI
 // di Nadia (ID sama) — dimasukkan lagi ke bot.
@@ -1510,9 +1519,9 @@ function bandingkanServerLive(list) {
 // /ceknadia (admin saja): bandingkan daftar server live dari
 // penyedia dengan daftar di bot. Lapor server baru, server hilang,
 // nama berubah, protokol berubah, domain berubah (28 Nov 2026 —
-// domain penting karena tabel NS_PER_DOMAIN dikunci per domain).
-// Harga modal TIDAK bisa dicek lewat API — harus manual di
-// dashboard penyedia.
+// domain penting karena tabel NS_PER_DOMAIN dikunci per domain),
+// dan harga modal berubah (28 Nov 2026 — hasil live /cekfield:
+// field pricing di /servers = harga modal).
 async function tampilkanCekNadia(env, chatId, messageId) {
   if (!adalahAdmin(env, chatId)) return;
   const kirim = async (teks) => {
@@ -1522,8 +1531,55 @@ async function tampilkanCekNadia(env, chatId, messageId) {
   const { list, debug } = await ambilDaftarServerLive(env);
   if (!list) { await kirim("❌ Gagal ambil daftar server dari penyedia: " + debug); return; }
   const { liveById, baru, hilang, gantiNama, gantiProto, gantiDomain, domainNsYatim, namaLive, protoLive, domainLive } = bandingkanServerLive(list);
+  // Harga modal: bandingkan field pricing tiap server live dengan
+  // baseline HARGA_MODAL. Getter toleran: kunci yang dikenali
+  // per_day/per_week/per_month (bentuk live) atau "1"/"7"/"30"
+  // (bentuk lain yang mungkin). Bentuk yang tidak dikenali atau
+  // angka yang bukan bilangan -> dilaporkan mentah, tanpa crash.
+  const fmtRp = (n) => Number(n).toLocaleString("id-ID");
+  const ringkasHarga = (v) => {
+    let s;
+    try { s = typeof v === "string" ? v : JSON.stringify(v); } catch { s = String(v); }
+    if (s === undefined || s === null) s = "?";
+    return s.length > 80 ? s.slice(0, 80) + "…" : s;
+  };
+  const keAngka = (v) => {
+    if (typeof v === "number") return v;
+    if (typeof v === "string" && v.trim() !== "" && !Number.isNaN(Number(v))) return Number(v);
+    return NaN;
+  };
+  const ambilPricing = (x) => {
+    const p = x && x.pricing;
+    if (p === undefined || p === null) return null; // tidak ada info harga
+    if (typeof p !== "object" || Array.isArray(p)) return { aneh: p };
+    const ambil = (...kunci) => {
+      for (const k of kunci) if (p[k] !== undefined && p[k] !== null) return p[k];
+      return undefined;
+    };
+    const d = ambil("per_day", "per_1day", "1", "day", "daily");
+    const w = ambil("per_week", "per_1week", "7", "week", "weekly");
+    const m = ambil("per_month", "per_1month", "30", "month", "monthly");
+    if (d === undefined && w === undefined && m === undefined) return { aneh: p };
+    return { per_day: d, per_week: w, per_month: m };
+  };
+  const namaServerLive = (x) => String(x.name || x.nama || x.server_id || x.id || "?").replace(/\s+/g, " ").trim();
+  const bedaHarga = [], tanpaHarga = [], anehHarga = [];
+  for (const x of list) {
+    const pr = ambilPricing(x);
+    const nama = namaServerLive(x);
+    if (pr === null) { tanpaHarga.push(nama); continue; }
+    if (pr.aneh !== undefined) { anehHarga.push({ nama, mentah: pr.aneh }); continue; }
+    if (pr.per_day === undefined || pr.per_week === undefined || pr.per_month === undefined) { anehHarga.push({ nama, mentah: x.pricing }); continue; }
+    const nDay = keAngka(pr.per_day), nWeek = keAngka(pr.per_week), nMonth = keAngka(pr.per_month);
+    if (!Number.isFinite(nDay) || !Number.isFinite(nWeek) || !Number.isFinite(nMonth)) { anehHarga.push({ nama, mentah: x.pricing }); continue; }
+    const berubah = [];
+    if (nDay !== HARGA_MODAL.per_day) berubah.push("per_day " + fmtRp(HARGA_MODAL.per_day) + " → " + fmtRp(nDay));
+    if (nWeek !== HARGA_MODAL.per_week) berubah.push("per_week " + fmtRp(HARGA_MODAL.per_week) + " → " + fmtRp(nWeek));
+    if (nMonth !== HARGA_MODAL.per_month) berubah.push("per_month " + fmtRp(HARGA_MODAL.per_month) + " → " + fmtRp(nMonth));
+    if (berubah.length) bedaHarga.push({ nama, berubah });
+  }
   const baris = ["🔍 Cek Nadia — daftar server live vs bot", "Live: " + liveById.size + " server • Bot: " + SERVERS.length + " server", ""];
-  if (!baru.length && !hilang.length && !gantiNama.length && !gantiProto.length && !gantiDomain.length && !domainNsYatim.length) {
+  if (!baru.length && !hilang.length && !gantiNama.length && !gantiProto.length && !gantiDomain.length && !domainNsYatim.length && !bedaHarga.length && !anehHarga.length) {
     baris.push("✅ Semua sama — tidak ada perubahan.");
   } else {
     if (baru.length) {
@@ -1551,8 +1607,20 @@ async function tampilkanCekNadia(env, chatId, messageId) {
       for (const d of domainNsYatim) baris.push("• " + d + " (cek tabel NS_PER_DOMAIN)");
     }
   }
-  baris.push("", "Catatan: harga modal tidak bisa dicek lewat API — cek manual di dashboard Nadia.");
-  await kirim(baris.join("\n"));
+  // Seksi harga modal — selalu tampil, sesudah seksi domain.
+  baris.push("", "💰 HARGA MODAL:");
+  if (!bedaHarga.length && !anehHarga.length && !tanpaHarga.length) {
+    baris.push("✅ Sama semua (" + fmtRp(HARGA_MODAL.per_day) + "/" + fmtRp(HARGA_MODAL.per_week) + "/" + fmtRp(HARGA_MODAL.per_month) + ")");
+  } else {
+    for (const b of bedaHarga) baris.push("• " + b.nama + ": " + b.berubah.join(", "));
+    for (const a of anehHarga) baris.push("• " + a.nama + ": pricing aneh: " + ringkasHarga(a.mentah));
+    if (tanpaHarga.length === list.length) baris.push("• Tidak ada info harga di semua " + list.length + " server (API tidak mengirim pricing)");
+    else for (const n of tanpaHarga) baris.push("• " + n + ": tidak ada info harga");
+  }
+  baris.push("", "Catatan: harga modal diambil dari field pricing di /servers Nadia; harga jual tidak berubah otomatis.");
+  let teks = baris.join("\n");
+  if (teks.length > 3900) teks = teks.slice(0, 3900);
+  await kirim(teks);
 }
 
 // /cekfield (admin saja, DM saja — pola sama seperti /ceknadia):
