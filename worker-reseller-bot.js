@@ -290,17 +290,10 @@ export default {
   },
 
   // ---- Cron Trigger (v2.9.14 reseller) ----
-  // Jadwal di wrangler.toml (live, deploy-worker.yml): ["5 * * * *", "* * * * *"]
-  // ("0 0 * * *" dihapus 27 Nov 2026 — auto-cek Nadia dimatikan atas
-  // permintaan Asep; cek Nadia kini manual lewat /ceknadia. Hapus cron
-  // harian itu dari workflow deploy-worker.yml lewat web UI.)
-  // - Setiap invocasi: sapuHapusOtomatis (hapus broadcast buka/tutup yang
-  //   sudah berumur >1 menit; saat antrean kosong cuma 1 GET KV).
-  async scheduled(event, env, ctx) {
-    ctx.waitUntil((async () => {
-      await sapuHapusOtomatis(env);
-    })());
-  },
+  // Dihapus 28 Nov 2026 (perintah Asep: hapus semua broadcast
+  // buka/tutup sampai ke akar) — satu-satunya tugas cron sudah
+  // ikut dicabut. Jadwal cron di wrangler.toml dibiarkan (tidak
+  // memanggil apa-apa), seperti autodark.
 };
 
 // ---- Hemat KV (live sejak 24 Nov 2026) ----
@@ -309,18 +302,9 @@ export default {
 // - TOKO_BUKA: dibaca ulang tiap langkah order (sampai ~10x per order).
 //   Cache 60 detik; setToko() langsung mengosongkan cache di isolate ini.
 //   Isolate lain bisa telat maks. 60 detik melihat buka/tutup.
-// - Pengguna/grup yang sudah dikenal: tadinya GET KV di SETIAP pesan.
-//   Setelah sekali dikenal, isolate ini tidak GET lagi (Set dibatasi
-//   5000 entri, lalu dikosongkan & dipelajari ulang).
-// - Aktivitas grup: tadinya GET tiap pesan + PUT tiap 5 menit. Sekarang
-//   throttle dicek di memori dulu; KV cuma disentuh kalau sudah >5 menit
-//   sejak PUT terakhir di isolate ini.
 // - Bersihkan order kedaluarsa: tadinya LIST + GET semua order tiap kali
 //   pembeli cek status. Sekarang maks. 1x per jam per isolate.
 const cacheToko = { nilai: null, ts: 0 };
-const penggunaDikenal = new Set();
-const grupDikenal = new Set();
-const aktivitasGrupTerakhir = new Map();
 let bersihOrderTerakhir = 0;
 
 // ---- Toko buka/tutup ala warung (19 Nov 2026) ----
@@ -343,14 +327,13 @@ async function setToko(env, buka) {
   await env.ORDERS.put("TOKO_BUKA", buka ? "buka" : "tutup");
 }
 // ---- Debounce toggle buka/tutup (28 Nov 2026) ----
-// Tombol menu:toko adalah toggle — tiap ketuk membalik status dan
-// menyiarkan ke semua pengguna + grup. Ketukan ganda (lag / jari
-// nyasar) pernah mengirim 6 siaran selang-seling dalam 2 menit.
+// Tombol menu:toko adalah toggle — tiap ketuk membalik status.
+// Ketukan ganda (lag / jari nyasar) pernah membalik status 6x
+// selang-seling dalam 2 menit.
 // Aturan: perubahan status yang sukses dicatat di KV ORDERS kunci
 // "TOKO_TOGGLE_TERAKHIR" (ms epoch); ketuk berikutnya dalam 30
 // detik diabaikan. Perintah /buka dan /tutup juga memperbarui cap
-// waktu ini saat benar-benar mengubah status, supaya perintah dan
-// tombol tidak bergabung jadi siaran ganda.
+// waktu ini saat benar-benar mengubah status.
 const KUNCI_TOGGLE_TERAKHIR = "TOKO_TOGGLE_TERAKHIR";
 const TOGGLE_JEDA_MS = 30000;
 async function toggleTerlaluCepat(env) {
@@ -369,178 +352,11 @@ const PESAN_TUTUP = "🔴 Toko lagi tutup. Lihat-lihat dulu aja, order dibuka la
 // Dipasang lewat /setdeskripsi (admin) — Bot API setMyDescription.
 // (22 Nov 2026) Harga disingkat jadi Rp10.000 / bulan.
 const DESKRIPSI_BOT = "SANDEKALA VPN — Beli akun VPN VLESS, VMess, Trojan & SSH. Harga: Rp10.000 / bulan. Bayar via QRIS DANA.";
-// Siarkan status buka/tutup ke semua pengguna bot + semua grup
-// tempat bot berada (22 Nov 2026). Dipanggil setiap admin buka/tutup
-// toko — lewat tombol menu maupun perintah /buka dan /tutup.
-async function siarkanStatusToko(env, buka) {
-  await siarkanKeSemuaPengguna(env, buka
-    ? "🟢 SANDEKALA VPN sudah BUKA!\n\nSilakan order VPN lewat bot ini. Ketik /start untuk mulai.\n\nHarga: Rp10.000 / bulan"
-    : "🔴 SANDEKALA VPN lagi TUTUP dulu ya.\n\nOrder dibuka lagi nanti — pantau terus bot ini. Ketik /start untuk lihat menu.", buka);
-}
-
 // ================= ALUR BELI =================
-
-// ---- Daftar pengguna bot (untuk broadcast buka/tutup, 20 Nov 2026) ----
-// Semua pengguna yang pernah membuka bot (DM) dicatat sekali saat
-// pertama kali berinteraksi — bukan cuma pembeli. Dipakai supaya
-// pesan buka/tutup toko sampai ke semua orang yang pernah buka bot,
-// selama mereka tidak memblokir bot. /broadcast manual tetap ke
-// pembeli saja. Disimpan di KV ORDERS kunci "USER:<chatId>".
-async function catatPengguna(env, chatId, nama) {
-  if (!chatId) return;
-  if (penggunaDikenal.has(String(chatId))) return;
-  const kunci = "USER:" + chatId;
-  const ada = await env.ORDERS.get(kunci).catch(() => null);
-  if (ada) { if (penggunaDikenal.size > 5000) penggunaDikenal.clear(); penggunaDikenal.add(String(chatId)); return; }
-  await env.ORDERS.put(kunci, JSON.stringify({ nama: nama || null, pertama: Date.now() }));
-  if (penggunaDikenal.size > 5000) penggunaDikenal.clear();
-  penggunaDikenal.add(String(chatId));
-}
-
-// Null kalau daftar gagal dibaca (KV error) — bedakan dari daftar
-// yang memang kosong, supaya siaran tidak salah lapor "Belum ada
-// pengguna" saat sebenarnya daftarnya tidak kebaca (28 Nov 2026).
-async function daftarSemuaPengguna(env) {
-  let list;
-  try { list = await env.ORDERS.list({ prefix: "USER:" }); } catch { return null; }
-  const hasil = new Set();
-  for (const key of list.keys) {
-    const id = key.name.slice("USER:".length);
-    if (id && id !== String(env.ADMIN_CHAT_ID)) hasil.add(id);
-  }
-  return hasil;
-}
-
-// ---- Grup: catat ID + aktivitas ----
-// (22 Nov 2026) Grup SANDEKALA biar rame:
-// - ID grup dicatat (GRUP:<id>) supaya broadcast buka/tutup toko
-//   sampai juga ke grup, bukan cuma ke pengguna DM.
-// - Aktivitas grup dicatat (GRUP_AKTIF:<id>, throttle 5 menit);
-//   pencatatan tetap jalan walau roast sepi sudah dihapus (28 Nov 2026).
-async function catatGrup(env, chatId) {
-  if (!chatId) return;
-  if (grupDikenal.has(String(chatId))) return;
-  const kunci = "GRUP:" + chatId;
-  const ada = await env.ORDERS.get(kunci).catch(() => null);
-  if (ada) { if (grupDikenal.size > 5000) grupDikenal.clear(); grupDikenal.add(String(chatId)); return; }
-  await env.ORDERS.put(kunci, "1");
-  if (grupDikenal.size > 5000) grupDikenal.clear();
-  grupDikenal.add(String(chatId));
-}
-// Null kalau daftar gagal dibaca (KV error) — lihat daftarSemuaPengguna.
-async function daftarSemuaGrup(env) {
-  let list;
-  try { list = await env.ORDERS.list({ prefix: "GRUP:" }); } catch { return null; }
-  const hasil = new Set();
-  for (const key of list.keys) {
-    const id = key.name.slice("GRUP:".length);
-    if (id) hasil.add(id);
-  }
-  return hasil;
-}
-async function catatAktivitasGrup(env, chatId) {
-  if (!chatId) return;
-  try {
-    const terakhirMemori = aktivitasGrupTerakhir.get(String(chatId)) || 0;
-    if (terakhirMemori && Date.now() - terakhirMemori < 5 * 60 * 1000) return;
-    const kunci = "GRUP_AKTIF:" + chatId;
-    const lama = Number(await env.ORDERS.get(kunci).catch(() => null)) || 0;
-    if (lama && Date.now() - lama < 5 * 60 * 1000) { aktivitasGrupTerakhir.set(String(chatId), lama); return; }
-    await env.ORDERS.put(kunci, String(Date.now()));
-    aktivitasGrupTerakhir.set(String(chatId), Date.now());
-  } catch { /* abaikan */ }
-}
-// Broadcast buka/tutup toko ke SEMUA pengguna yang pernah membuka bot
-// + semua grup tempat bot berada (22 Nov 2026). Yang memblokir bot
-// otomatis gagal dikirimi — tidak dilaporkan, laporan cuma jumlah sukses.
-async function siarkanKeSemuaPengguna(env, teks, buka) {
-  const tujuan = await daftarSemuaPengguna(env);
-  const grup = await daftarSemuaGrup(env);
-  // Kedua daftar gagal dibaca: jangan lapor "Belum ada pengguna"
-  // (menyesatkan) — beri tahu admin siarannya gagal (28 Nov 2026).
-  if (tujuan === null && grup === null) { await sendTelegram(env, env.ADMIN_CHAT_ID, "⚠️ Siaran buka/tutup gagal: daftar penerima tidak bisa dibaca."); return; }
-  const daftarTujuan = tujuan || new Set();
-  const daftarGrup = grup || new Set();
-  if (!daftarTujuan.size && !daftarGrup.size) { await sendTelegram(env, env.ADMIN_CHAT_ID, "Belum ada pengguna yang tercatat di bot."); return; }
-  let ok = 0, okGrup = 0;
-  // (28 Nov 2026) Laporan "dimulai" DULU: siaran ke ratusan penerima
-  // bisa lama — kalau loop-nya macet, admin tetap langsung tahu siaran
-  // sudah jalan dan ke berapa penerima. Lewat telegramApi (ada timeout)
-  // supaya laporan ini sendiri tidak bisa macet.
-  await telegramApi(env, "sendMessage", { chat_id: Number(env.ADMIN_CHAT_ID), text: "📣 Siaran buka/tutup dimulai — mengirim ke " + daftarTujuan.size + " pengguna dan " + daftarGrup.size + " grup...", link_preview_options: { is_disabled: true } });
-  // (27 Nov 2026) Auto-hapus: catat message_id tiap pesan terkirim,
-  // dihapus otomatis 1 menit kemudian (lihat sapuHapusOtomatis).
-  const antreHapus = [];
-  const hapusPada = Date.now() + HAPUS_OTOMATIS_JEDA_MS;
-  // (28 Nov 2026) Kirim paralel per batch (20 sekaligus): satu
-  // penerima yang lambat/macet tidak lagi menahan semua yang lain.
-  // telegramApi menelan gagal/timeout per penerima (null) — batch
-  // tetap jalan sampai habis.
-  const semuaTujuan = [
-    ...[...daftarTujuan].map((id) => ({ id, grup: false })),
-    ...[...daftarGrup].map((id) => ({ id, grup: true })),
-  ];
-  const UKURAN_BATCH_SIARAN = 20;
-  for (let i = 0; i < semuaTujuan.length; i += UKURAN_BATCH_SIARAN) {
-    const batch = semuaTujuan.slice(i, i + UKURAN_BATCH_SIARAN);
-    const hasil = await Promise.allSettled(batch.map((t) => telegramApi(env, "sendMessage", { chat_id: Number(t.id), text: teks.slice(0, 4000) })));
-    hasil.forEach((h, idx) => {
-      const j = h.status === "fulfilled" ? h.value : null;
-      if (j?.ok) {
-        if (batch[idx].grup) okGrup++; else ok++;
-        if (j?.result?.message_id) antreHapus.push({ c: Number(batch[idx].id), m: j.result.message_id, t: hapusPada });
-      }
-    });
-  }
-  await antreHapusOtomatis(env, antreHapus);
-  await sendTelegram(env, env.ADMIN_CHAT_ID, "📣 Info buka/tutup terkirim ke " + ok + " pengguna" + (okGrup ? " dan " + okGrup + " grup" : "") + ".");
-}
-
-// ---- Auto-hapus broadcast buka/tutup (27 Nov 2026) ----
-// Pesan buka/tutup dihapus otomatis dari chat pengguna 1 menit sesudah
-// terkirim — biar chat pembeli tidak penuh pengumuman. Antrean disimpan
-// di KV DATA satu key (tanpa LIST): [{c: chatId, m: messageId, t: ms}].
-// Sweep jalan di setiap invocasi cron; saat antrean kosong cuma 1 GET.
-const KUNCI_HAPUS_OTOMATIS = "HAPUS_OTOMATIS";
-const HAPUS_OTOMATIS_JEDA_MS = 60000;
-const HAPUS_OTOMATIS_MAKS = 500;
-async function antreHapusOtomatis(env, entriBaru) {
-  if (!env.DATA || !entriBaru?.length) return;
-  try {
-    const lama = await env.DATA.get(KUNCI_HAPUS_OTOMATIS, "json").catch(() => null);
-    const gabung = [...(Array.isArray(lama) ? lama : []), ...entriBaru].slice(-HAPUS_OTOMATIS_MAKS);
-    await env.DATA.put(KUNCI_HAPUS_OTOMATIS, JSON.stringify(gabung));
-  } catch { /* abaikan */ }
-}
-async function sapuHapusOtomatis(env) {
-  if (!env.DATA) return;
-  let antrean;
-  try { antrean = await env.DATA.get(KUNCI_HAPUS_OTOMATIS, "json"); } catch { return; }
-  if (!Array.isArray(antrean) || !antrean.length) return; // kosong: tanpa PUT
-  const sekarang = Date.now();
-  const jatuhTempo = antrean.filter((e) => e && Number(e.t) <= sekarang);
-  const sisa = antrean.filter((e) => e && Number(e.t) > sekarang);
-  for (const e of jatuhTempo) {
-    // Gagal diabaikan: pesan mungkin sudah dihapus user / bot diblokir.
-    // Entri tetap dibuang dari antrean (tidak di-retry).
-    try { await telegramApi(env, "deleteMessage", { chat_id: e.c, message_id: e.m }); } catch { /* abaikan */ }
-  }
-  try {
-    if (sisa.length) await env.DATA.put(KUNCI_HAPUS_OTOMATIS, JSON.stringify(sisa));
-    else await env.DATA.delete(KUNCI_HAPUS_OTOMATIS);
-  } catch { /* abaikan */ }
-}
 
 async function handleTelegram(env, update) {
   const msg = update.message;
   const cb = update.callback_query;
-  // Catat pengguna yang membuka bot (DM saja) — dipakai untuk
-  // broadcast buka/tutup toko ke semua pengguna, bukan cuma pembeli.
-  const pengirim = cb?.from || msg?.from;
-  const tipeChat = cb?.message?.chat?.type || msg?.chat?.type;
-  if (pengirim && tipeChat === "private") {
-    await catatPengguna(env, pengirim.id, [pengirim.first_name, pengirim.last_name].filter(Boolean).join(" ") || (pengirim.username ? "@" + pengirim.username : null));
-  }
   if (cb) { // tombol yang diklik pembeli
     const data = String(cb.data || "");
     // Tombol yang diklik di grup: arahkan ke DM, jangan proses apa pun.
@@ -561,9 +377,8 @@ async function handleTelegram(env, update) {
     // KECUALI menu:toko (28 Nov 2026): tombol Buka/Tutup Toko adalah
     // AKSI, bukan navigasi — dan nempel di pesan menu yang biasanya
     // sudah berjam-jam lamanya saat diketuk. Kalau ikut diblokir,
-    // ketukan tidak mengubah apa-apa dan siaran buka/tutup tidak
-    // pernah jalan (padahal status di menu kelihatan sudah berubah
-    // dari ketukan sebelumnya).
+    // ketukan tidak mengubah apa-apa (padahal status di menu
+    // kelihatan sudah berubah dari ketukan sebelumnya).
     const NAV_AWAL = ["menu:", "server:", "proto:", "paket:", "tserver:", "tproto:", "srvpage:", "trypage:"];
     if (data !== "menu:toko" && NAV_AWAL.some((aw) => data.startsWith(aw)) && cb.message?.date && Date.now() / 1000 - cb.message.date > 600) {
       await jawabAlert(env, cb.id, "Pesan ini sudah lama, ketik /start untuk buka menu baru ya.");
@@ -593,12 +408,9 @@ async function handleTelegram(env, update) {
       const buka = await tokoBuka(env);
       await setToko(env, !buka);
       await catatToggleToko(env);
-      // Refresh menu tidak boleh menggagalkan siaran: kalau gagal,
-      // siaran tetap jalan (28 Nov 2026).
+      // Refresh menu gagal tidak boleh menggagalkan apa-apa —
+      // status toko sudah kebalik.
       try { await tampilkanMenuUtama(env, cb.from.id, cb.from, cb.message?.message_id); } catch { /* abaikan */ }
-      // Siaran tidak boleh gagal diam-diam (28 Nov 2026): kalau
-      // gagal, admin diberitahu.
-      try { await siarkanStatusToko(env, !buka); } catch (e) { await sendTelegram(env, env.ADMIN_CHAT_ID, "⚠️ Siaran buka/tutup gagal: " + String(e?.message || e || "tidak diketahui").slice(0, 120)); }
       return;
     }
     if (data.startsWith("srvpage:")) { await tampilkanDaftarServer(env, cb.from.id, "beli", parseInt(data.slice(8), 10) || 0, cb.message?.message_id); return; }
@@ -847,10 +659,9 @@ async function handleTelegram(env, update) {
   // pembeli tidak bocor ke semua anggota grup.
   const diGrup = msg.chat.type === "group" || msg.chat.type === "supergroup";
   if (diGrup) {
-    // (22 Nov 2026) Catat grup + aktivitas, lalu layani perintah
-    // etalase (/start, /menu, /harga).
-    await catatGrup(env, chatId);
-    await catatAktivitasGrup(env, chatId);
+    // (22 Nov 2026) Layani perintah etalase (/start, /menu, /harga).
+    // (28 Nov 2026: pencatatan grup dicabut bersama broadcast
+    // buka/tutup — bot tidak lagi menyimpan ID grup.)
     const tokenPerintah = text.split(" ")[0];
     const mention = tokenPerintah.match(/^\/\S+@([A-Za-z0-9_]+)/);
     // (22 Nov 2026) Perintah yang ditujukan ke bot lain
@@ -1066,8 +877,8 @@ async function handleTelegram(env, update) {
   }
 
   // Perintah admin: /buka dan /tutup (toko buka/tutup ala warung).
-  // Kalau toko sudah dalam status yang diminta, jangan siarkan
-  // ulang — cukup beri tahu admin (28 Nov 2026).
+  // Kalau toko sudah dalam status yang diminta, cukup beri tahu
+  // admin (28 Nov 2026).
   if (text === "/buka" || text === "/tutup") {
     if (!adalahAdmin(env, chatId)) return;
     const mauBuka = text === "/buka";
@@ -1080,9 +891,6 @@ async function handleTelegram(env, update) {
     await sendTelegram(env, chatId, mauBuka
       ? "🟢 Toko DIBUKA. Pembeli sudah bisa order dan perpanjang lagi."
       : "🔴 Toko DITUTUP. Pembeli hanya bisa lihat-lihat (menu, daftar server, status, akun).");
-    // Siaran tidak boleh gagal diam-diam (28 Nov 2026): kalau
-    // gagal, admin diberitahu.
-    try { await siarkanStatusToko(env, mauBuka); } catch (e) { await sendTelegram(env, env.ADMIN_CHAT_ID, "⚠️ Siaran buka/tutup gagal: " + String(e?.message || e || "tidak diketahui").slice(0, 120)); }
     return;
   }
 
@@ -3329,8 +3137,8 @@ async function telegramApi(env, method, body) {
     const r = await fetch("https://api.telegram.org/bot" + env.BOT_TOKEN + "/" + method, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       // (28 Nov 2026) Timeout 15 detik: satu fetch yang macet tidak
-      // boleh menahan handler selamanya (penyebab siaran buka/tutup
-      // macet — webhook tidak selesai, Telegram me-retry perintah).
+      // boleh menahan handler selamanya (webhook tidak selesai,
+      // Telegram me-retry perintah).
       signal: AbortSignal.timeout(15000),
     });
     return await r.json().catch(() => null);
