@@ -2392,7 +2392,9 @@ export function bersihkanDomain(input) {
   return s;
 }
 
-// Subdomain umum yang dicek saat /cek (bukan crt.sh — pernah timeout).
+// Subdomain umum yang dicek saat /cek via DoH; dilengkapi daftar
+// subdomain dari catatan sertifikat (subdomainDariCT: CertSpotter,
+// fallback crt.sh — keduanya dibatasi timeout, gagal = dilewati).
 const SUBDOMAIN_CEK = ["www", "mail", "api", "blog", "app", "cdn", "static", "m", "ftp", "smtp", "dev", "staging"];
 
 // Query DNS-over-HTTPS Cloudflare. Return objek JSON atau null bila gagal.
@@ -2417,6 +2419,75 @@ function ipsDariDoh(j) {
 function hostnameDariPtr(j) {
   const nama = j && Array.isArray(j.Answer) && j.Answer.find((a) => a && a.type === 12 && typeof a.data === "string");
   return nama ? String(nama.data).replace(/\.+$/, "") : "";
+}
+
+// Ambil target CNAME (type 5) pertama dari jawaban DoH (atau "" bila
+// tidak ada). Dipakai /cek: petunjuk hosting langsung dari DNS.
+function cnameDariDoh(j) {
+  if (!j || !Array.isArray(j.Answer)) return "";
+  const c = j.Answer.find((a) => a && a.type === 5 && typeof a.data === "string");
+  return c ? String(c.data).replace(/\.+$/, "") : "";
+}
+
+// Ujung sebuah nama domain (2 label terakhir): "d3a19gpwf542ap.cloudfront.net"
+// -> "cloudfront.net". Dipakai untuk menampilkan CNAME secara ringkas.
+export function ujungDomain(nama) {
+  const bagian = String(nama || "").replace(/\.+$/, "").split(".").filter(Boolean);
+  return bagian.length <= 2 ? bagian.join(".") : bagian.slice(-2).join(".");
+}
+
+// Subdomain dari catatan sertifikat publik (Certificate Transparency):
+// nama-nama yang pernah diterbitkan sertifikatnya untuk domain ini.
+// Primer CertSpotter, fallback crt.sh (keduanya dibatasi timeout 8
+// detik; gagal = [] — tidak pernah throw). Saring hanya nama domain
+// itu sendiri / subdomainnya; nama dari sertifikat bersama (mis.
+// film.qq.com) dan wildcard (*.contoh.com) dibuang; duplikat dibuang
+// (case-insensitive), hasil diurutkan. Apex domain sendiri tidak
+// dimasukkan (itu bukan subdomain).
+export async function subdomainDariCT(domain) {
+  const kumpulkan = (data) => {
+    const mentah = [];
+    const dorong = (v) => {
+      if (typeof v === "string") mentah.push(v);
+      else if (Array.isArray(v)) v.forEach(dorong);
+    };
+    if (Array.isArray(data)) {
+      for (const e of data) {
+        if (!e || typeof e !== "object") continue;
+        if (Array.isArray(e.dns_names)) dorong(e.dns_names);
+        if (typeof e.name_value === "string") e.name_value.split("\n").forEach((n) => dorong(n));
+      }
+    }
+    const akhir = "." + domain;
+    const unik = new Set();
+    for (const n of mentah) {
+      const nama = String(n || "").trim().toLowerCase().replace(/\.+$/, "");
+      if (!nama || nama.includes("*")) continue;
+      if (nama === domain || nama.endsWith(akhir)) {
+        if (nama !== domain) unik.add(nama);
+      }
+    }
+    return [...unik].sort();
+  };
+  try {
+    const res = await fetch("https://api.certspotter.com/v1/issuances?domain=" + encodeURIComponent(domain) + "&include_subdomains=true&expand=dns_names", {
+      signal: AbortSignal.timeout(8000),
+    });
+    if (res && res.ok) {
+      const data = await res.json().catch(() => null);
+      if (Array.isArray(data)) return kumpulkan(data);
+    }
+  } catch { /* fallback crt.sh */ }
+  try {
+    const res = await fetch("https://crt.sh/?q=%25." + encodeURIComponent(domain) + "&output=json", {
+      signal: AbortSignal.timeout(8000),
+    });
+    if (res && res.ok) {
+      const data = await res.json().catch(() => null);
+      if (Array.isArray(data)) return kumpulkan(data);
+    }
+  } catch { /* abaikan */ }
+  return [];
 }
 
 // Ringkasan header untuk deteksi CDN: nama header (lowercase), via, server.
@@ -2501,11 +2572,13 @@ export function deteksiCDN(headers, edgeHostname) {
 }
 
 // Cek satu domain: HEAD dulu, fallback GET, timeout 8 detik per upaya.
-// Ditambah: resolve IP (A), reverse DNS (PTR) untuk input IP maupun IP
-// pertama hasil resolve domain, dan cek subdomain umum. Return
-// {domain, ok, status, ms, cdn, server, ips, hostname, subdomains} —
-// subdomains = null bila DNS gagal total; tiap subdomain
-// {nama, ip, server} (server = provider CDN atau "" bila tak terdeteksi).
+// Ditambah: resolve IP (A) + CNAME, reverse DNS (PTR) untuk input IP
+// maupun IP pertama hasil resolve domain, cek subdomain umum via DoH,
+// dan subdomain dari catatan sertifikat (CertSpotter, fallback crt.sh).
+// Return {domain, ok, status, ms, cdn, server, ips, hostname, cname,
+// subdomains} — subdomains = null bila DNS gagal total; tiap subdomain
+// {nama, ip, server} (server = provider CDN atau "" bila tak terdeteksi;
+// ip "" = nama hanya dari catatan sertifikat, belum dicek IP-nya).
 export async function cekDomain(domain) {
   const t0 = Date.now();
   const ambil = (url, method) =>
@@ -2522,7 +2595,7 @@ export async function cekDomain(domain) {
     catch { try { res = await ambil("http://" + domain, "GET"); } catch { res = null; } }
   }
   const ms = Date.now() - t0;
-  const hasil = { domain, ok: !!res, status: res ? res.status : 0, ms, cdn: "", server: "", ips: [], hostname: "", subdomains: null };
+  const hasil = { domain, ok: !!res, status: res ? res.status : 0, ms, cdn: "", server: "", ips: [], hostname: "", cname: "", subdomains: null };
   const headers = res ? res.headers : null;
   // DNS: resolve IP / reverse / subdomain — gagal dengan anggun
   // (bagian yang gagal dihilangkan saja, bukan error mentah).
@@ -2538,7 +2611,7 @@ export async function cekDomain(domain) {
     }
   } else {
     const a = await dohQuery(domain, "A");
-    if (a) { dnsOk = true; hasil.ips = ipsDariDoh(a).slice(0, 3); }
+    if (a) { dnsOk = true; hasil.ips = ipsDariDoh(a).slice(0, 3); hasil.cname = cnameDariDoh(a); }
     // PTR IP pertama (jalan bareng cek subdomain) → hostname edge,
     // bukti provider CDN-nya (mis. *.r.cloudfront.net).
     let ptrP = null;
@@ -2546,6 +2619,10 @@ export async function cekDomain(domain) {
       const ip0 = hasil.ips[0].split(".");
       if (ip0.length === 4) ptrP = dohQuery(ip0.reverse().join(".") + ".in-addr.arpa", "PTR");
     }
+    // Subdomain dari catatan sertifikat — jalan bareng cek subdomain
+    // umum, tidak menambah round-trip berurutan. Hanya bila DNS apex
+    // menjawab; bila DNS gagal total, subdomains tetap null.
+    const ctP = dnsOk ? subdomainDariCT(domain) : null;
     const cekSub = await Promise.all(SUBDOMAIN_CEK.map(async (sub) => {
       const j = await dohQuery(sub + "." + domain, "A");
       if (j) dnsOk = true;
@@ -2565,7 +2642,14 @@ export async function cekDomain(domain) {
       return { nama: sub + "." + domain, ip: ips[0], server };
     }));
     if (ptrP) hasil.hostname = hostnameDariPtr(await ptrP);
-    if (dnsOk) hasil.subdomains = cekSub.filter(Boolean);
+    if (dnsOk) {
+      // Gabung: hasil probe DoH dulu (ada IP-nya), lalu nama dari
+      // catatan sertifikat yang belum ketemu (tanpa IP).
+      const dariProbe = cekSub.filter(Boolean);
+      const ada = new Set(dariProbe.map((s) => s.nama.toLowerCase()));
+      const dariCT = (ctP ? await ctP : []).filter((n) => !ada.has(n.toLowerCase())).map((n) => ({ nama: n, ip: "", server: "" }));
+      hasil.subdomains = dariProbe.concat(dariCT);
+    }
   }
   // CDN + Server — ditentukan SETELAH hostname diketahui, karena
   // hostname edge adalah sinyal paling bisa dipercaya. Header cf-ray
@@ -2584,6 +2668,13 @@ export async function cekDomain(domain) {
       hasil.server = sv.toLowerCase() === "cloudflare" ? "" : sv;
     }
   }
+  // CNAME sebagai sinyal CDN cadangan: bila deteksi dari hostname
+  // edge + header tidak kena, cocokkan CNAME-nya (mis.
+  // d3a19gpwf542ap.cloudfront.net → CloudFront).
+  if (!hasil.cdn && hasil.cname) {
+    const det2 = deteksiCDN(null, hasil.cname);
+    if (det2.cdn) { hasil.cdn = det2.cdn; hasil.server = det2.server; }
+  }
   return hasil;
 }
 
@@ -2593,29 +2684,34 @@ export function formatHasilCek(r) {
   const barisHost = r.hostname
     ? "🔁 Hostname: <code>" + escapeHtml(r.hostname) + "</code>" : "";
   // Subdomain: satu per baris, format nama/ip (Provider) — provider
-  // dalam kurung bila terdeteksi, tanpa kurung bila tidak.
+  // dalam kurung bila terdeteksi, tanpa kurung bila tidak. Nama yang
+  // hanya dari catatan sertifikat (tanpa IP) tampil nama saja.
+  // Maks 20 nama; sisanya diringkas "(+N subdomain lain)".
   const barisSub = r.subdomains
     ? (r.subdomains.length
-      ? "🔎 Subdomain yang ditemukan:\n" + r.subdomains.map((s) => "• " + escapeHtml(s.nama) + "/" + escapeHtml(s.ip) + (s.server ? " (" + escapeHtml(s.server) + ")" : "")).join("\n")
+      ? "🔎 Subdomain yang ditemukan:\n" + r.subdomains.slice(0, 20).map((s) => "• " + escapeHtml(s.nama) + (s.ip ? "/" + escapeHtml(s.ip) : "") + (s.server ? " (" + escapeHtml(s.server) + ")" : "")).join("\n") +
+        (r.subdomains.length > 20 ? "\n• ... (+" + (r.subdomains.length - 20) + " subdomain lain)" : "")
       : "🔎 Subdomain: tidak ditemukan")
     : "";
   if (!r.ok) {
     return "🌐 <b>" + escapeHtml(r.domain) + "</b>\n\n" +
       "❌ Domain tidak merespons — tidak ditemukan atau tidak bisa dijangkau.\n" +
       "Coba cek lagi ejaannya, atau coba lagi nanti ya." +
-      (barisIp ? "\n" + barisIp : "") + (barisHost ? "\n" + barisHost : "") + (barisSub ? "\n" + barisSub : "");
+      (barisIp ? "\n" + barisIp : "") + (barisHost ? "\n" + barisHost : "") + (barisSub ? "\n" + barisSub : "") +
+      "\n\nTes penentu (operator ngelolosin apa nggak) tetap di HP.";
   }
   // Cabang sukses — urutan v2.7.9 (contoh Asep, ovo.id):
   // judul → status → IP/Hostname/CDN/Server → subdomain (paling akhir),
   // tiap blok dipisah satu baris kosong. Tanpa baris peringatan status.
   const info = [barisIp, barisHost,
+    (r.cname && !r.cdn) ? "📡 Lewat: " + escapeHtml(ujungDomain(r.cname)) : "",
     r.cdn ? "📡 CDN: " + r.cdn : "",
     r.server ? "🖥️ Server: " + escapeHtml(r.server) : ""].filter(Boolean).join("\n");
   const blok = ["🌐 <b>" + escapeHtml(r.domain) + "</b>",
     "✅ Merespons — HTTP " + r.status + " (" + r.ms + " ms)"];
   if (info) blok.push(info);
   if (barisSub) blok.push(barisSub);
-  return blok.join("\n\n");
+  return blok.join("\n\n") + "\n\nTes penentu (operator ngelolosin apa nggak) tetap di HP.";
 }
 
 function keyboardStart(isAdmin, diGrup) {
@@ -2953,7 +3049,7 @@ const CATATAN_PEMICU =
 async function kirimHasilCek(env, chatId, domain, diGrup) {
   let hasilCek;
   try { hasilCek = await cekDomain(domain); }
-  catch { hasilCek = { domain, ok: false, status: 0, ms: 0, cdn: "", server: "", ips: [], hostname: "", subdomains: null }; }
+  catch { hasilCek = { domain, ok: false, status: 0, ms: 0, cdn: "", server: "", ips: [], hostname: "", cname: "", subdomains: null }; }
   // (v2.9.17) Di grup: hasil saja, tanpa tombol.
   await sendTelegram(env, chatId, formatHasilCek(hasilCek), diGrup ? undefined : [
     [{ text: "🔄 Cek Lagi", callback_data: "cek:mulai", style: "primary" }],
